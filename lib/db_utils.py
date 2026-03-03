@@ -10,15 +10,20 @@ from mysql.connector import Error
 def get_connection(cfg: dict, autocommit: bool = True):
     """Return a mysql-connector connection from a config dict block."""
     ssl_args = {"ssl_disabled": False} if cfg.get("ssl") else {"ssl_disabled": True}
-    conn = mysql.connector.connect(
+    conn_kwargs = dict(
         host=cfg["host"],
         port=cfg.get("port", 4000),
         user=cfg["user"],
         password=cfg["password"],
-        database=cfg.get("database", "pov_test"),
         connection_timeout=30,
         **ssl_args,
     )
+    # Allow server-level connections (no default schema) for bootstrap actions
+    # such as CREATE DATABASE IF NOT EXISTS.
+    if cfg.get("database"):
+        conn_kwargs["database"] = cfg["database"]
+
+    conn = mysql.connector.connect(**conn_kwargs)
     conn.autocommit = autocommit
     return conn
 
