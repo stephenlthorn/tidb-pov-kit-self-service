@@ -278,7 +278,9 @@ prompt_tidb_connection_update() {
 
   while true; do
     new_ssl="$(prompt_with_default "  SSL true/false" "${cur_ssl}")"
-    case "${new_ssl,,}" in
+    local new_ssl_lc
+    new_ssl_lc="$(printf '%s' "${new_ssl}" | tr '[:upper:]' '[:lower:]')"
+    case "${new_ssl_lc}" in
       true|t|yes|y|1) new_ssl="true"; break ;;
       false|f|no|n|0) new_ssl="false"; break ;;
       *) warn "Enter true or false." ;;
