@@ -208,33 +208,177 @@ else
   fi
 fi
 
+# Helpers for interactive connectivity recovery
+cfg_get_tidb_field() {
+  local field="$1"
+  "${PYTHON}" - <<PY
+import yaml
+with open("${CONFIG_EFFECTIVE}") as f:
+    cfg = yaml.safe_load(f) or {}
+v = (cfg.get("tidb") or {}).get("${field}", "")
+if isinstance(v, bool):
+    print("true" if v else "false")
+else:
+    print("" if v is None else v)
+PY
+}
+
+prompt_with_default() {
+  local label="$1"
+  local default_val="${2:-}"
+  local input_val=""
+  if [[ -n "${default_val}" ]]; then
+    read -r -p "${label} [${default_val}]: " input_val
+  else
+    read -r -p "${label}: " input_val
+  fi
+  echo "${input_val:-${default_val}}"
+}
+
+prompt_tidb_connection_update() {
+  local cur_host cur_port cur_user cur_password cur_database cur_ssl
+  cur_host="$(cfg_get_tidb_field "host")"
+  cur_port="$(cfg_get_tidb_field "port")"
+  cur_user="$(cfg_get_tidb_field "user")"
+  cur_password="$(cfg_get_tidb_field "password")"
+  cur_database="$(cfg_get_tidb_field "database")"
+  cur_ssl="$(cfg_get_tidb_field "ssl")"
+  [[ -z "${cur_ssl}" ]] && cur_ssl="true"
+
+  echo ""
+  banner "Update TiDB Connection Settings"
+  echo "  Enter values from TiDB Cloud -> Connect dialog (MySQL connector format)."
+  echo "  Tip: TiDB Cloud username usually includes a prefix, for example: <prefix>.root"
+  echo ""
+
+  local new_host new_port new_user new_database new_ssl new_password pwd_input
+  new_host="$(prompt_with_default "  Host" "${cur_host}")"
+  new_user="$(prompt_with_default "  User" "${cur_user}")"
+  new_database="$(prompt_with_default "  Database" "${cur_database}")"
+
+  while true; do
+    new_port="$(prompt_with_default "  Port" "${cur_port}")"
+    if [[ "${new_port}" =~ ^[0-9]+$ ]]; then
+      break
+    fi
+    warn "Port must be numeric (example: 4000)."
+  done
+
+  if [[ -n "${cur_password}" ]]; then
+    read -r -s -p "  Password [hidden, press Enter to keep current]: " pwd_input
+  else
+    read -r -s -p "  Password [hidden]: " pwd_input
+  fi
+  echo ""
+  if [[ -n "${pwd_input}" ]]; then
+    new_password="${pwd_input}"
+  else
+    new_password="${cur_password}"
+  fi
+
+  while true; do
+    new_ssl="$(prompt_with_default "  SSL true/false" "${cur_ssl}")"
+    case "${new_ssl,,}" in
+      true|t|yes|y|1) new_ssl="true"; break ;;
+      false|f|no|n|0) new_ssl="false"; break ;;
+      *) warn "Enter true or false." ;;
+    esac
+  done
+
+  CFG_PATH="${CONFIG_EFFECTIVE}" \
+  NEW_HOST="${new_host}" \
+  NEW_PORT="${new_port}" \
+  NEW_USER="${new_user}" \
+  NEW_PASSWORD="${new_password}" \
+  NEW_DATABASE="${new_database}" \
+  NEW_SSL="${new_ssl}" \
+  "${PYTHON}" - <<'PY'
+import os
+import yaml
+
+path = os.environ["CFG_PATH"]
+with open(path) as f:
+    cfg = yaml.safe_load(f) or {}
+
+cfg.setdefault("tidb", {})
+cfg["tidb"]["host"] = os.environ["NEW_HOST"]
+cfg["tidb"]["port"] = int(os.environ["NEW_PORT"])
+cfg["tidb"]["user"] = os.environ["NEW_USER"]
+cfg["tidb"]["password"] = os.environ["NEW_PASSWORD"]
+cfg["tidb"]["database"] = os.environ["NEW_DATABASE"]
+cfg["tidb"]["ssl"] = os.environ["NEW_SSL"].lower() == "true"
+
+with open(path, "w") as f:
+    yaml.safe_dump(cfg, f, sort_keys=False)
+PY
+
+  ok "Updated TiDB connection settings in ${CONFIG_EFFECTIVE}"
+}
+
+check_tidb_connection() {
+  "${PYTHON}" - <<PY
+import yaml, sys
+sys.path.insert(0, '.')
+with open('${CONFIG_EFFECTIVE}') as f:
+    cfg = yaml.safe_load(f) or {}
+from lib.db_utils import ping
+ok, msg = ping(cfg.get('tidb', {}))
+print(msg if ok else 'FAIL: ' + msg)
+sys.exit(0 if ok else 1)
+PY
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. DB connectivity check
 # ─────────────────────────────────────────────────────────────────────────────
 step "2/10" "TiDB connectivity check"
 
-set +e
-CONN_CHECK=$(
-  "${PYTHON}" - <<PY
-import yaml, sys
-sys.path.insert(0, '.')
-with open('${CONFIG_EFFECTIVE}') as f:
-    cfg = yaml.safe_load(f)
-from lib.db_utils import ping
-ok, msg = ping(cfg['tidb'])
-print(msg if ok else 'FAIL: ' + msg)
-sys.exit(0 if ok else 1)
-PY
-)
-CONN_RC=$?
-set -e
+while true; do
+  set +e
+  CONN_CHECK="$(check_tidb_connection)"
+  CONN_RC=$?
+  set -e
 
-if [[ ${CONN_RC} -ne 0 ]] || echo "${CONN_CHECK}" | grep -q "FAIL"; then
+  if [[ ${CONN_RC} -eq 0 ]] && ! echo "${CONN_CHECK}" | grep -q "FAIL"; then
+    ok "TiDB connection: ${CONN_CHECK}"
+    break
+  fi
+
   err "Cannot connect to TiDB: ${CONN_CHECK}"
   echo "  Check host/port/credentials and network access in ${CONFIG_EFFECTIVE}."
-  exit 1
-fi
-ok "TiDB connection: ${CONN_CHECK}"
+
+  if echo "${CONN_CHECK}" | grep -qi "Missing user name prefix"; then
+    warn "Username format is likely wrong."
+    echo "  Use the exact TiDB Cloud username, for example: <prefix>.root"
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "  Non-interactive mode: cannot prompt for connection details."
+    exit 1
+  fi
+
+  echo ""
+  echo "  Choose next action:"
+  echo "    1) Update connection settings and retry"
+  echo "    2) Retry without changes"
+  echo "    3) Abort"
+  read -r -p "  Selection [1/2/3] (default: 1): " conn_action
+
+  case "${conn_action:-1}" in
+    1)
+      prompt_tidb_connection_update
+      ;;
+    2)
+      ;;
+    3)
+      err "Aborted by user."
+      exit 1
+      ;;
+    *)
+      warn "Unknown selection; retrying connection check."
+      ;;
+  esac
+done
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Install dependencies

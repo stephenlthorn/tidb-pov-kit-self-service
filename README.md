@@ -191,6 +191,7 @@ each module — with descriptions of what to screenshot for customer slides.
 **Connection refused / authentication error**
 → Double-check `host`, `port`, `user`, `password` in `config.yaml`.
 → Ensure your IP is whitelisted under Security → Network Access.
+→ `run_all.sh` will now prompt to update connection values and retry when this check fails in an interactive terminal.
 
 **Checklist returns HOLD before tests start**
 → Open `results/pre_poc_checklist.md` and resolve blocking items.
