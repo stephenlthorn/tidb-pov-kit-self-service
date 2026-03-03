@@ -14,7 +14,7 @@ ${PIP} install --quiet -r requirements.txt
 
 echo "[deps] Verifying key imports..."
 ${PYTHON} -c "
-import mysql.connector, faker, yaml, matplotlib, fpdf, pandas
+import mysql.connector, faker, yaml, matplotlib, fpdf, pandas, flask
 print('  All packages OK')
 "
 echo "[deps] Done."

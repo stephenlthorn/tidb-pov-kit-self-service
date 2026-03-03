@@ -76,7 +76,13 @@ Direct-run shortcuts:
 ```bash
 ./run_all.sh --no-menu --no-wizard
 ./run_all.sh --menu
+./run_all.sh --web-ui
 ```
+
+Dark web UI:
+1. Open with `./run_all.sh --web-ui` (or `python setup/poc_web_ui.py`)
+2. Configure cluster details, tier, modules, test profile, report and TCO in one place
+3. Run security screener, run defaults, build report-only, and clear/reset data
 
 That's it. The kit will:
 1. Install Python dependencies
@@ -255,7 +261,6 @@ each module — with descriptions of what to screenshot for customer slides.
 tidb-pov-kit/
 ├── config.yaml             ← Edit this first
 ├── run_all.sh              ← Run this to execute everything
-├── main_menu.sh            ← Interactive launcher (full run/report-only)
 ├── requirements.txt
 ├── setup/
 │   ├── 00_provision.md     ← Cluster setup guide
@@ -263,8 +268,11 @@ tidb-pov-kit/
 │   ├── 02_observability_guide.md
 │   ├── 03_pre_poc_checklist.md
 │   ├── poc_control_panel.py← Parent interactive control panel
+│   ├── poc_web_ui.py       ← Dark web UI for full configuration/workflow
 │   ├── pre_poc_intake.py   ← Tier decision + security checklist wizard
-│   └── generate_data.py    ← Synthetic data generator
+│   ├── generate_data.py    ← Synthetic data generator
+│   └── templates/
+│       └── poc_web_ui.html ← Web UI template
 ├── lib/
 │   ├── db_utils.py         ← MySQL connection helpers
 │   └── result_store.py     ← SQLite results writer

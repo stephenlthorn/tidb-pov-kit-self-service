@@ -4,7 +4,8 @@
 #  run_all.sh
 #
 #  Usage:
-#    ./run_all.sh [config.yaml] [--regen] [--report-only|--report-json-only]
+#    ./run_all.sh [config.yaml] [--menu|--web-ui|--no-menu]
+#                 [--regen] [--report-only|--report-json-only]
 #                 [--wizard|--no-wizard] [--tier TIER]
 #
 #  What it does:
@@ -27,6 +28,7 @@ Usage:
 
 Options:
   --menu             Open interactive PoC control panel
+  --web-ui           Launch dark-themed web UI
   --no-menu          Skip control panel and run directly
   --report-only       Build PDF from existing results/* artifacts only
   --report-json-only  Build results/metrics_summary.json only (no PDF, no tests)
@@ -47,6 +49,7 @@ RUN_INTAKE="auto"          # auto | yes | no
 FORCE_TIER=""
 ALLOW_BLOCKED=false
 SHOW_MENU="auto"           # auto | yes | no
+SHOW_WEB_UI="no"
 HAS_EXEC_FLAGS=false
 POSITIONAL=()
 
@@ -69,6 +72,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --menu)
       SHOW_MENU="yes"
+      shift
+      ;;
+    --web-ui)
+      SHOW_WEB_UI="yes"
       shift
       ;;
     --no-menu)
@@ -146,6 +153,16 @@ SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SO
 if ! command -v "${PYTHON}" &>/dev/null; then
   echo "Python 3 not found. Install Python 3.9+ and retry."
   exit 1
+fi
+
+if [[ "${SHOW_WEB_UI}" == "yes" ]]; then
+  if [[ ! -f "${CONFIG}" ]]; then
+    echo "Config file not found: ${CONFIG}"
+    echo "Copy config.yaml.example to config.yaml and fill in your TiDB credentials."
+    exit 1
+  fi
+  "${PYTHON}" setup/poc_web_ui.py --config "${CONFIG}"
+  exit $?
 fi
 
 if [[ "${SHOW_MENU}" == "yes" || ( "${SHOW_MENU}" == "auto" && -t 0 && "${HAS_EXEC_FLAGS}" == "false" ) ]]; then

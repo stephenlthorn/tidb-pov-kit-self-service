@@ -4,3 +4,4 @@ pandas>=2.0.0
 matplotlib>=3.7.0
 fpdf2>=2.7.0
 pyyaml>=6.0
+flask>=3.0.0

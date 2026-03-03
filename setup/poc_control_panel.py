@@ -538,6 +538,7 @@ def main() -> int:
                 ("run", "Run PoC with Defaults", "Execute PoC immediately using current config and defaults."),
                 ("tier", "Choose Cloud Tier", "Guided or manual tier selection (includes Dedicated option)."),
                 ("security", "Security Screener", "Run shared-responsibility security checklist."),
+                ("webui", "Launch Web UI", "Open the dark-themed browser UI for full configuration and workflow control."),
                 (
                     "report",
                     "Print/Open PDF Report",
@@ -562,6 +563,16 @@ def main() -> int:
 
         if choice == "security":
             run_security_screener(ui, config_path)
+            continue
+
+        if choice == "webui":
+            ui.render(
+                title="Launching Web UI",
+                subtitle="Starting local web server. Press Ctrl+C in that process to return.",
+                bullets=["Default URL: http://127.0.0.1:8787"],
+            )
+            ui.pause("Press Enter to launch.")
+            subprocess.call([sys.executable, str(ROOT / "setup" / "poc_web_ui.py"), "--config", str(config_path)], cwd=str(ROOT))
             continue
 
         if choice == "report":

@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TiDB PoC Web UI</title>
+  <style>
+    :root {
+      --bg: #0c1118;
+      --panel: #121a24;
+      --panel-2: #172231;
+      --line: #253142;
+      --text: #e8edf5;
+      --muted: #9aacc3;
+      --accent: #2ec5ff;
+      --accent-2: #5cf7ce;
+      --danger: #ff6f91;
+      --warn: #ffc266;
+      --ok: #61e2a4;
+      --radius: 12px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: radial-gradient(1200px 800px at 20% -10%, #1a2a40 0%, var(--bg) 45%), var(--bg);
+      color: var(--text);
+      font-family: "Avenir Next", "Segoe UI", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      line-height: 1.45;
+    }
+    .wrap {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 28px 18px 64px;
+    }
+    .title {
+      font-size: 1.8rem;
+      font-weight: 700;
+      letter-spacing: 0.2px;
+      margin-bottom: 6px;
+    }
+    .subtitle {
+      color: var(--muted);
+      margin-bottom: 22px;
+    }
+    .grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 14px;
+    }
+    .card {
+      background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent 55%), var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 14px;
+    }
+    .k {
+      color: var(--muted);
+      font-size: 0.85rem;
+      margin-bottom: 6px;
+    }
+    .v {
+      font-size: 1rem;
+      font-weight: 600;
+      word-break: break-word;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      padding: 18px;
+      margin-top: 14px;
+    }
+    .panel h2 {
+      margin: 0 0 4px;
+      font-size: 1.2rem;
+    }
+    .panel p.help {
+      color: var(--muted);
+      margin: 0 0 14px;
+      font-size: 0.95rem;
+    }
+    .line {
+      border-top: 1px solid var(--line);
+      margin: 16px 0;
+    }
+    .row {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      margin-bottom: 10px;
+    }
+    .row3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    label {
+      font-size: 0.85rem;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+    input[type=text],
+    input[type=password],
+    input[type=number],
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid #2a3a50;
+      background: var(--panel-2);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 12px;
+      outline: none;
+      font-size: 0.95rem;
+    }
+    textarea { min-height: 120px; resize: vertical; }
+    input:focus, select:focus, textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(46, 197, 255, 0.14);
+    }
+    .check-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px 14px;
+    }
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--text);
+      font-size: 0.92rem;
+      background: #0f1722;
+      border: 1px solid #273449;
+      padding: 8px 10px;
+      border-radius: 9px;
+    }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .btn {
+      border: 1px solid #324965;
+      background: linear-gradient(180deg, #213149, #1a283c);
+      color: var(--text);
+      border-radius: 10px;
+      padding: 10px 13px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+    }
+    .btn:hover { border-color: var(--accent); }
+    .btn.primary {
+      background: linear-gradient(180deg, #1d4f6c, #12374d);
+      border-color: #2f86b5;
+    }
+    .btn.ok {
+      background: linear-gradient(180deg, #22503f, #16382d);
+      border-color: #2f7f63;
+    }
+    .btn.warn {
+      background: linear-gradient(180deg, #5d4521, #3a2b16);
+      border-color: #8d6a34;
+    }
+    .btn.danger {
+      background: linear-gradient(180deg, #5b2430, #3b1820);
+      border-color: #8d3648;
+    }
+    .msg {
+      border: 1px solid #2c3f57;
+      background: #112033;
+      color: #d9edff;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin-bottom: 12px;
+      font-size: 0.94rem;
+    }
+    .msg.error { border-color: #7e3143; background: #2f1620; color: #ffd9e2; }
+    .msg.warning { border-color: #7e6431; background: #2f2616; color: #ffeccb; }
+    .msg.success { border-color: #2e6a4e; background: #13281f; color: #d8ffe9; }
+    .security-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 120px;
+      align-items: center;
+    }
+    .security-item {
+      font-size: 0.92rem;
+      color: var(--text);
+      padding: 10px;
+      border: 1px solid #28374b;
+      border-radius: 10px;
+      background: #101926;
+    }
+    pre.log {
+      margin: 0;
+      max-height: 280px;
+      overflow: auto;
+      border: 1px solid #2c3d53;
+      border-radius: 10px;
+      padding: 10px;
+      background: #0b131e;
+      color: #d4e0f1;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.82rem;
+    }
+    .tiny { font-size: 0.82rem; color: var(--muted); }
+    @media (max-width: 1050px) {
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .row, .row2, .row3 { grid-template-columns: 1fr; }
+      .security-grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title">TiDB Cloud PoC Web UI</div>
+  <div class="subtitle">Full configuration + tier + security + run/report/reset workflow in one dark-mode control surface.</div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}
+        <div class="msg {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <div class="grid">
+    <div class="card"><div class="k">Config Path</div><div class="v">{{ config_path }}</div></div>
+    <div class="card"><div class="k">Tier</div><div class="v">{{ cfg.tier.selected }} ({{ tier_labels.get(cfg.tier.selected, cfg.tier.selected) }})</div></div>
+    <div class="card"><div class="k">Scenario</div><div class="v">{{ scenarios.get(cfg.pre_poc.scenario_template, cfg.pre_poc.scenario_template) }}</div></div>
+    <div class="card"><div class="k">Report PDF</div><div class="v">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Workflow Actions</h2>
+    <p class="help">Run defaults, build report, open report, and clear/reset data.</p>
+    <div class="actions">
+      <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run PoC with Defaults</button></form>
+      <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
+      {% if report_ready %}
+        <a class="btn ok" href="/report" target="_blank">Open/Download Report PDF</a>
+      {% else %}
+        <button class="btn" type="button" disabled title="Run PoC first">Open/Download Report PDF</button>
+      {% endif %}
+    </div>
+    <div class="line"></div>
+    <form method="post" action="/clear-data">
+      <div class="row2">
+        <div>
+          <label>Type CLEAR to delete local PoC artifacts</label>
+          <input type="text" name="clear_token" placeholder="CLEAR" />
+        </div>
+        <div>
+          <label>Type DROP only if dropping DB too (optional)</label>
+          <input type="text" name="drop_token" placeholder="DROP" />
+        </div>
+      </div>
+      <div class="check-wrap">
+        <label class="check"><input type="checkbox" name="drop_db" /> Also drop configured database</label>
+      </div>
+      <div class="actions"><button class="btn danger" type="submit">Clear PoC Data</button></div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Cloud Tier</h2>
+    <p class="help">Apply tier profile directly (includes Dedicated cluster option) with module and test profile defaults.</p>
+    <form method="post" action="/apply-tier">
+      <div class="row3">
+        <div>
+          <label>Tier</label>
+          <select name="apply_tier">
+            {% for t in tiers %}
+              <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ t }} - {{ tier_labels.get(t, t) }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Simulated HA for non-Dedicated tiers</label>
+          <label class="check"><input type="checkbox" name="apply_run_ha_sim" /> Enable simulated M3</label>
+        </div>
+        <div>
+          <label>Optional advanced modules</label>
+          <label class="check"><input type="checkbox" name="apply_enable_optional_advanced" /> Enable optional advanced</label>
+        </div>
+      </div>
+      <div class="check-wrap">
+        <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
+      </div>
+      <div class="actions"><button class="btn" type="submit">Apply Tier Profile</button></div>
+    </form>
+    <div class="line"></div>
+    <div class="tiny">
+      <strong>Tier Help:</strong> Serverless for fast pilots, Essential for PITR/regional baseline, Premium for stronger controls,
+      Dedicated for peering/90-day retention/full HA tests, BYOC for own-account sovereignty and IAM/KMS control.
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Security Screener</h2>
+    <p class="help">Set PASS/FAIL/N/A for each control. Recommendation updates in config under pre_poc.security.</p>
+    <form method="post" action="/security">
+      <div class="security-grid">
+        {% for item in security_items %}
+          {% set current = 'not_assessed' %}
+          {% for row in security_result.items %}
+            {% if row.id == item.id %}
+              {% set current = row.status %}
+            {% endif %}
+          {% endfor %}
+          <div class="security-item">
+            <div><strong>{{ item.id }}</strong> {% if item.blocking %}<span class="tiny">(blocking)</span>{% else %}<span class="tiny">(non-blocking)</span>{% endif %}</div>
+            <div class="tiny">Owner: {{ item.owner }}</div>
+            <div>{{ item.prompt }}</div>
+          </div>
+          <div>
+            <select name="sec_{{ item.id }}">
+              <option value="pass" {% if current == 'pass' %}selected{% endif %}>PASS</option>
+              <option value="fail" {% if current == 'fail' %}selected{% endif %}>FAIL</option>
+              <option value="na" {% if current == 'na' %}selected{% endif %}>N/A</option>
+              <option value="not_assessed" {% if current == 'not_assessed' %}selected{% endif %}>NOT ASSESSED</option>
+            </select>
+          </div>
+        {% endfor %}
+      </div>
+      <div class="actions"><button class="btn warn" type="submit">Run Security Screener</button></div>
+    </form>
+    <div class="line"></div>
+    <div class="tiny">
+      Recommendation: <strong>{{ security_result.recommendation }}</strong>
+      | Blocking failures: {{ security_result.blocking_failures|length }}
+      | Proceed: {{ security_result.proceed }}
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Configuration</h2>
+    <p class="help">Edit all runtime config, including cluster credentials and module/test parameters.</p>
+    <form method="post" action="/save-config">
+      <h3>TiDB Cluster Connection</h3>
+      <div class="row">
+        <div><label>Host</label><input type="text" name="tidb_host" value="{{ cfg.tidb.host }}" /></div>
+        <div><label>Port</label><input type="number" name="tidb_port" value="{{ cfg.tidb.port }}" /></div>
+        <div><label>User</label><input type="text" name="tidb_user" value="{{ cfg.tidb.user }}" /></div>
+        <div><label>Password</label><input type="password" name="tidb_password" value="{{ cfg.tidb.password }}" /></div>
+      </div>
+      <div class="row2">
+        <div><label>Database</label><input type="text" name="tidb_database" value="{{ cfg.tidb.database }}" /></div>
+        <div><label>SSL</label>
+          <select name="tidb_ssl">
+            <option value="true" {% if cfg.tidb.ssl %}selected{% endif %}>true</option>
+            <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="line"></div>
+      <h3>Comparison DB (Optional)</h3>
+      <div class="check-wrap"><label class="check"><input type="checkbox" name="comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison DB</label></div>
+      <div class="row">
+        <div><label>Host</label><input type="text" name="comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
+        <div><label>Port</label><input type="number" name="comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
+        <div><label>User</label><input type="text" name="comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
+        <div><label>Password</label><input type="password" name="comparison_password" value="{{ cfg.comparison_db.password }}" /></div>
+      </div>
+      <div class="row3">
+        <div><label>Database</label><input type="text" name="comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
+        <div><label>Label</label><input type="text" name="comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
+        <div><label>SSL</label>
+          <select name="comparison_ssl">
+            <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
+            <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="line"></div>
+      <h3>Test and Scenario</h3>
+      <div class="row">
+        <div>
+          <label>Scenario Template</label>
+          <select name="scenario_template">
+            {% for key, label in scenarios.items() %}
+              <option value="{{ key }}" {% if cfg.pre_poc.scenario_template == key %}selected{% endif %}>{{ key }} - {{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Tier Selected</label>
+          <select name="tier_selected">
+            {% for t in tiers %}
+              <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ t }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Data Scale</label>
+          <select name="test_data_scale">
+            <option value="small" {% if cfg.test.data_scale == 'small' %}selected{% endif %}>small</option>
+            <option value="medium" {% if cfg.test.data_scale == 'medium' %}selected{% endif %}>medium</option>
+            <option value="large" {% if cfg.test.data_scale == 'large' %}selected{% endif %}>large</option>
+          </select>
+        </div>
+        <div>
+          <label>Workload Mix</label>
+          <select name="test_workload_mix">
+            <option value="mixed" {% if cfg.test.workload_mix == 'mixed' %}selected{% endif %}>mixed</option>
+            <option value="read_heavy" {% if cfg.test.workload_mix == 'read_heavy' %}selected{% endif %}>read_heavy</option>
+            <option value="write_heavy" {% if cfg.test.workload_mix == 'write_heavy' %}selected{% endif %}>write_heavy</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label>Duration Seconds</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
+        <div><label>Concurrency Levels (comma-separated)</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
+        <div><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
+        <div><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
+      </div>
+
+      <div class="line"></div>
+      <h3>Customer Queries and Modules</h3>
+      <div class="row2">
+        <div>
+          <label>Customer Queries (one SQL per line)</label>
+          <textarea name="customer_queries">{{ cfg.customer_queries | join('\n') }}</textarea>
+        </div>
+        <div>
+          <label>Customer Query Ratio</label>
+          <input type="number" step="0.01" name="customer_query_ratio" value="{{ cfg.customer_query_ratio }}" />
+          <div class="line"></div>
+          <label>Modules</label>
+          <div class="check-wrap">
+            {% for key in module_order %}
+              <label class="check"><input type="checkbox" name="mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+
+      <div class="line"></div>
+      <h3>Report and TCO</h3>
+      <div class="row">
+        <div><label>Company Name</label><input type="text" name="report_company_name" value="{{ cfg.report.company_name }}" /></div>
+        <div><label>Output Dir</label><input type="text" name="report_output_dir" value="{{ cfg.report.output_dir }}" /></div>
+        <div><label>Current DB Monthly Cost USD</label><input type="number" step="0.01" name="report_current_db_monthly_cost_usd" value="{{ cfg.report.current_db_monthly_cost_usd }}" /></div>
+        <div><label>Include TCO</label><label class="check"><input type="checkbox" name="report_include_tco_model" {% if cfg.report.include_tco_model %}checked{% endif %} /> enabled</label></div>
+      </div>
+      <div class="row3">
+        <div><label>TCO Data Size GB</label><input type="number" name="tco_data_size_gb" value="{{ cfg.tco.data_size_gb }}" /></div>
+        <div><label>TCO Annual Growth %</label><input type="number" name="tco_annual_growth_pct" value="{{ cfg.tco.annual_growth_pct }}" /></div>
+        <div><label>Aurora Shards Year0</label><input type="number" name="tco_aurora_shards_year0" value="{{ cfg.tco.aurora_shards_year0 }}" /></div>
+      </div>
+      <div class="row3">
+        <div><label>Engineers Managing Shards</label><input type="number" name="tco_engineers_managing_shards" value="{{ cfg.tco.engineers_managing_shards }}" /></div>
+        <div><label>Engineer Annual Cost</label><input type="number" name="tco_engineer_annual_cost" value="{{ cfg.tco.engineer_annual_cost }}" /></div>
+        <div><label>Sharding Eng Fraction</label><input type="number" step="0.01" name="tco_sharding_eng_fraction" value="{{ cfg.tco.sharding_eng_fraction }}" /></div>
+      </div>
+
+      <div class="actions"><button class="btn primary" type="submit">Save Configuration</button></div>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Live Run Log</h2>
+    <p class="help">Current background run status and tail of `results/web_ui_run.log`.</p>
+    <div class="tiny">Running: <strong>{{ run_status.running }}</strong>{% if run_status.pid %} | PID: {{ run_status.pid }}{% endif %}{% if run_status.last_log %} | Last update: {{ run_status.last_log }}{% endif %}</div>
+    <div class="line"></div>
+    <pre class="log">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
+  </div>
+</div>
+</body>
+</html>
