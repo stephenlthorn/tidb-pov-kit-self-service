@@ -16,7 +16,9 @@ import argparse
 import copy
 import json
 import os
+import shutil
 import sys
+import textwrap
 from datetime import datetime, timezone
 from typing import Dict, List, Tuple
 
@@ -142,6 +144,221 @@ SECURITY_ITEMS = [
     },
 ]
 
+DECISION_ORDER = [
+    "need_customer_vpc",
+    "need_vpc_peering",
+    "need_pitr",
+    "need_backup_90d",
+    "need_regional_ha",
+    "need_cdc",
+    "allow_essential_cdc_whitelist",
+    "need_enterprise_controls",
+]
+
+DECISION_META = {
+    "need_customer_vpc": {
+        "title": "Step 1 - Data Sovereignty / Deployment Control",
+        "question": "Do you need TiDB deployed inside your cloud account/VPC for sovereignty, compliance, or your own IAM/KMS/spend?",
+        "yes_desc": "Select BYOC immediately.",
+        "no_desc": "Continue to network requirements.",
+    },
+    "need_vpc_peering": {
+        "title": "Step 2 - Network Connectivity",
+        "question": "Do you require VPC peering (not just Private Endpoint/PrivateLink)?",
+        "yes_desc": "Select Dedicated.",
+        "no_desc": "Continue to DR/backup requirements.",
+    },
+    "need_pitr": {
+        "title": "Step 3 - DR and Backup",
+        "question": "Do you need point-in-time restore (PITR)?",
+        "yes_desc": "Minimum tier becomes Essential.",
+        "no_desc": "Continue to HA requirement.",
+    },
+    "need_backup_90d": {
+        "title": "Step 3a - Backup Retention",
+        "question": "Do you need longer backup retention (up to 90 days)?",
+        "yes_desc": "Select Dedicated.",
+        "no_desc": "Continue to next requirement.",
+    },
+    "need_regional_ha": {
+        "title": "Step 4 - HA Requirement",
+        "question": "Is this production and requires cross-AZ (regional) failover?",
+        "yes_desc": "Minimum tier becomes Essential.",
+        "no_desc": "Serverless remains valid if no other hard gates.",
+    },
+    "need_cdc": {
+        "title": "Step 5 - Data Movement / CDC",
+        "question": "Do you need Changefeed / CDC (Kafka, MySQL, etc.)?",
+        "yes_desc": "Premium+ is usually preferred.",
+        "no_desc": "Continue to enterprise controls.",
+    },
+    "allow_essential_cdc_whitelist": {
+        "title": "Step 5a - Essential CDC Constraint",
+        "question": "If needed, can you proceed with Essential CDC whitelist dependency?",
+        "yes_desc": "Essential may remain acceptable.",
+        "no_desc": "Prefer Premium+.",
+    },
+    "need_enterprise_controls": {
+        "title": "Step 6 - Enterprise Controls",
+        "question": "Do you need enterprise controls (maintenance window/CMEK/audit governance)?",
+        "yes_desc": "Select Premium or higher.",
+        "no_desc": "Keep the currently derived tier.",
+    },
+}
+
+
+class WizardUI:
+    RESET = "\033[0m"
+    BOLD = "\033[1m"
+    DIM = "\033[2m"
+    CYAN = "\033[36m"
+    GREEN = "\033[32m"
+    YELLOW = "\033[33m"
+    RED = "\033[31m"
+    MAGENTA = "\033[35m"
+
+    def __init__(self, interactive: bool):
+        self.interactive = interactive
+        self.use_color = interactive and self._supports_color()
+        width = shutil.get_terminal_size((100, 30)).columns
+        self.width = max(72, min(width, 110))
+
+    def _supports_color(self) -> bool:
+        if os.environ.get("NO_COLOR"):
+            return False
+        if not sys.stdout.isatty():
+            return False
+        term = os.environ.get("TERM", "")
+        if term.lower() == "dumb":
+            return False
+        return True
+
+    def style(self, text: str, *codes: str) -> str:
+        if not self.use_color or not codes:
+            return text
+        return "".join(codes) + text + self.RESET
+
+    def clear(self) -> None:
+        if not self.interactive:
+            return
+        if os.name == "nt":
+            os.system("cls")
+        else:
+            print("\033[2J\033[H", end="")
+
+    def _wrap(self, text: str, indent: int = 0) -> List[str]:
+        width = self.width - 4 - indent
+        return textwrap.wrap(text, width=max(24, width)) or [""]
+
+    def render(
+        self,
+        title: str,
+        subtitle: str = "",
+        step: str = "",
+        bullets: List[str] | None = None,
+    ) -> None:
+        self.clear()
+        bar = "=" * self.width
+        print(self.style(bar, self.CYAN))
+        print(self.style(" TiDB Cloud Pre-PoC Intake Wizard ", self.BOLD, self.CYAN))
+        if step:
+            print(self.style(f" {step}", self.DIM))
+        print(self.style(bar, self.CYAN))
+        print("")
+        print(self.style(title, self.BOLD, self.MAGENTA))
+        if subtitle:
+            print("")
+            for line in self._wrap(subtitle):
+                print(line)
+        if bullets:
+            print("")
+            for bullet in bullets:
+                wrapped = self._wrap(bullet, indent=2)
+                if wrapped:
+                    print(f"  - {wrapped[0]}")
+                    for extra in wrapped[1:]:
+                        print(f"    {extra}")
+        print("")
+
+    def menu(
+        self,
+        title: str,
+        subtitle: str,
+        options: List[Tuple[str, str, str]],
+        default_idx: int = 0,
+        allow_back: bool = False,
+        allow_quit: bool = True,
+        step: str = "",
+        bullets: List[str] | None = None,
+    ) -> str:
+        while True:
+            self.render(title=title, subtitle=subtitle, step=step, bullets=bullets)
+
+            for i, (_, label, desc) in enumerate(options, 1):
+                line = self.style(f"  {i}. {label}", self.BOLD, self.GREEN)
+                if i - 1 == default_idx:
+                    line += self.style("  (default)", self.DIM)
+                print(line)
+                if desc:
+                    for wrapped in self._wrap(desc, indent=6):
+                        print(self.style(f"      {wrapped}", self.DIM))
+                print("")
+
+            nav = []
+            if allow_back:
+                nav.append("B=Back")
+            if allow_quit:
+                nav.append("Q=Quit")
+            nav.append("Enter=Default")
+
+            prompt = self.style("Select option", self.BOLD) + f" [{', '.join(nav)}]: "
+            raw = input(prompt).strip()
+            low = raw.lower()
+
+            if raw == "":
+                return options[default_idx][0]
+
+            if allow_back and low in {"b", "back"}:
+                return "__back__"
+
+            if allow_quit and low in {"q", "quit", "exit"}:
+                return "__quit__"
+
+            if raw.isdigit():
+                idx = int(raw) - 1
+                if 0 <= idx < len(options):
+                    return options[idx][0]
+
+            print(self.style("\nInvalid selection. Press Enter to try again.", self.RED, self.BOLD))
+            input()
+
+    def yes_no(
+        self,
+        title: str,
+        question: str,
+        default: bool,
+        allow_back: bool,
+        step: str,
+        yes_desc: str,
+        no_desc: str,
+        bullets: List[str] | None = None,
+    ) -> str:
+        options = [
+            ("yes", "Yes", yes_desc),
+            ("no", "No", no_desc),
+        ]
+        default_idx = 0 if default else 1
+        return self.menu(
+            title=title,
+            subtitle=question,
+            options=options,
+            default_idx=default_idx,
+            allow_back=allow_back,
+            allow_quit=True,
+            step=step,
+            bullets=bullets,
+        )
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Run pre-PoC intake and output resolved config")
@@ -166,53 +383,76 @@ def dump_yaml(path: str, payload: Dict) -> None:
         yaml.safe_dump(payload, f, sort_keys=False)
 
 
-def ask_yes_no(prompt: str, default: bool = True, non_interactive: bool = False) -> bool:
-    if non_interactive:
-        return default
-    suffix = "[Y/n]" if default else "[y/N]"
-    while True:
-        raw = input(f"{prompt} {suffix} ").strip().lower()
-        if not raw:
-            return default
-        if raw in {"y", "yes"}:
-            return True
-        if raw in {"n", "no"}:
-            return False
-        print("Please answer y or n.")
+def parse_existing_scenario(cfg: Dict) -> str:
+    maybe = cfg.get("pre_poc", {}).get("scenario_template")
+    return maybe if maybe in SCENARIOS else "oltp_migration"
 
 
-def ask_choice(prompt: str, options: List[str], default_idx: int = 0, non_interactive: bool = False) -> str:
-    if non_interactive:
-        return options[default_idx]
+def parse_default_decision_tree(cfg: Dict) -> Dict[str, bool]:
+    defaults = {
+        "need_customer_vpc": False,
+        "need_vpc_peering": False,
+        "need_pitr": False,
+        "need_backup_90d": False,
+        "need_regional_ha": False,
+        "need_cdc": False,
+        "allow_essential_cdc_whitelist": False,
+        "need_enterprise_controls": False,
+    }
+    dt = cfg.get("pre_poc", {}).get("decision_tree", {})
+    for key in defaults:
+        if isinstance(dt.get(key), bool):
+            defaults[key] = dt[key]
+    return defaults
 
-    print(f"\n{prompt}")
-    for i, opt in enumerate(options, 1):
-        marker = " (default)" if i - 1 == default_idx else ""
-        print(f"  {i}. {opt}{marker}")
 
-    while True:
-        raw = input("Select option number: ").strip()
-        if not raw:
-            return options[default_idx]
-        if raw.isdigit() and 1 <= int(raw) <= len(options):
-            return options[int(raw) - 1]
-        print(f"Enter a number between 1 and {len(options)}.")
+def active_decision_steps(ans: Dict[str, bool]) -> List[str]:
+    steps = ["need_customer_vpc"]
+    if ans.get("need_customer_vpc"):
+        return steps
+
+    steps.extend(["need_vpc_peering", "need_pitr"])
+    if ans.get("need_pitr"):
+        steps.append("need_backup_90d")
+
+    steps.extend(["need_regional_ha", "need_cdc"])
+    if ans.get("need_cdc"):
+        steps.append("allow_essential_cdc_whitelist")
+
+    steps.append("need_enterprise_controls")
+    return steps
+
+
+def normalize_decision_answers(ans: Dict[str, bool], defaults: Dict[str, bool]) -> Dict[str, bool]:
+    out = {}
+    for key in DECISION_ORDER:
+        out[key] = bool(ans.get(key, defaults.get(key, False)))
+
+    if out["need_customer_vpc"]:
+        # For BYOC-gated path, remaining feature gates are not required for selection.
+        out["need_vpc_peering"] = False
+        out["need_backup_90d"] = False
+        out["allow_essential_cdc_whitelist"] = False
+    else:
+        if not out["need_pitr"]:
+            out["need_backup_90d"] = False
+        if not out["need_cdc"]:
+            out["allow_essential_cdc_whitelist"] = False
+
+    return out
 
 
 def decide_tier(ans: Dict[str, bool]) -> Tuple[str, List[str]]:
     notes: List[str] = []
 
-    # Step 1 — Sovereignty / deployment control
     if ans["need_customer_vpc"]:
         notes.append("Data sovereignty / own-cloud requirement gates to BYOC.")
         return "byoc", notes
 
-    # Step 2 — VPC peering requirement
     if ans["need_vpc_peering"]:
         notes.append("VPC peering requirement gates to Dedicated.")
         return "dedicated", notes
 
-    # Baseline candidate from PITR + HA
     if ans["need_pitr"]:
         if ans["need_backup_90d"]:
             notes.append("PITR + 90-day retention requirement gates to Dedicated.")
@@ -227,7 +467,6 @@ def decide_tier(ans: Dict[str, bool]) -> Tuple[str, List[str]]:
             candidate = "serverless"
             notes.append("No PITR/regional HA gate: Serverless is valid for pilot/dev.")
 
-    # Step 5 — CDC
     if ans["need_cdc"]:
         if candidate == "serverless":
             candidate = "premium"
@@ -236,7 +475,6 @@ def decide_tier(ans: Dict[str, bool]) -> Tuple[str, List[str]]:
             candidate = "premium"
             notes.append("CDC requested without Essential whitelist assumption -> Premium.")
 
-    # Step 6 — Enterprise controls
     if ans["need_enterprise_controls"] and candidate in {"serverless", "essential"}:
         candidate = "premium"
         notes.append("Enterprise controls requirement upgrades selection to Premium.")
@@ -264,7 +502,6 @@ def build_tier_modules(
         "vector_search": False,
     }
 
-    # Preserve any explicit user choices first
     for k, v in (existing or {}).items():
         if isinstance(v, bool):
             modules[k] = v
@@ -280,7 +517,7 @@ def build_tier_modules(
         modules["vector_search"] = True
 
     if not enable_optional_advanced:
-        modules["vector_search"] = modules.get("vector_search", False)
+        modules["vector_search"] = False
 
     return modules
 
@@ -328,47 +565,9 @@ def applicable(item: Dict, tier: str) -> bool:
     return tier in applies_to
 
 
-def run_security_checklist(tier: str, non_interactive: bool) -> Dict:
-    responses = []
-    blocking_failures = []
-    non_blocking_failures = []
-
-    print("\nSecurity Architecture & Shared Responsibility checklist")
-    print("Answer each item based on current environment readiness.")
-
-    for item in SECURITY_ITEMS:
-        if not applicable(item, tier):
-            responses.append(
-                {
-                    "id": item["id"],
-                    "prompt": item["prompt"],
-                    "status": "na",
-                    "blocking": item["blocking"],
-                    "owner": item["owner"],
-                }
-            )
-            continue
-
-        if non_interactive:
-            status = "not_assessed"
-        else:
-            ok = ask_yes_no(item["prompt"], default=True, non_interactive=False)
-            status = "pass" if ok else "fail"
-
-        row = {
-            "id": item["id"],
-            "prompt": item["prompt"],
-            "status": status,
-            "blocking": item["blocking"],
-            "owner": item["owner"],
-        }
-        responses.append(row)
-
-        if status == "fail":
-            if item["blocking"]:
-                blocking_failures.append(item["id"])
-            else:
-                non_blocking_failures.append(item["id"])
+def summarize_security(items: List[Dict], non_interactive: bool) -> Dict:
+    blocking_failures = [r["id"] for r in items if r["status"] == "fail" and r["blocking"]]
+    non_blocking_failures = [r["id"] for r in items if r["status"] == "fail" and not r["blocking"]]
 
     if non_interactive:
         recommendation = "review_required"
@@ -384,12 +583,305 @@ def run_security_checklist(tier: str, non_interactive: bool) -> Dict:
         proceed = True
 
     return {
-        "items": responses,
+        "items": items,
         "blocking_failures": blocking_failures,
         "non_blocking_failures": non_blocking_failures,
         "recommendation": recommendation,
         "proceed": proceed,
     }
+
+
+def run_decision_tree_interactive(
+    ui: WizardUI,
+    defaults: Dict[str, bool],
+    existing: Dict[str, bool] | None = None,
+) -> Tuple[str, Dict[str, bool]]:
+    ans = copy.deepcopy(existing or defaults)
+    ans = normalize_decision_answers(ans, defaults)
+
+    idx = 0
+    while True:
+        steps = active_decision_steps(ans)
+        if idx >= len(steps):
+            break
+
+        key = steps[idx]
+        meta = DECISION_META[key]
+        default_val = bool(ans.get(key, defaults.get(key, False)))
+
+        result = ui.yes_no(
+            title=meta["title"],
+            question=meta["question"],
+            default=default_val,
+            allow_back=True,
+            step=f"Decision Tree {idx + 1}/{len(steps)}",
+            yes_desc=meta["yes_desc"],
+            no_desc=meta["no_desc"],
+            bullets=["Select an option, then continue.", "Use B to go to the previous question."],
+        )
+
+        if result == "__quit__":
+            return "quit", ans
+
+        if result == "__back__":
+            if idx == 0:
+                return "back", ans
+            idx -= 1
+            continue
+
+        ans[key] = (result == "yes")
+
+        if key == "need_customer_vpc" and ans[key]:
+            ans["need_vpc_peering"] = False
+            ans["need_backup_90d"] = False
+            ans["allow_essential_cdc_whitelist"] = False
+
+        if key == "need_pitr" and not ans[key]:
+            ans["need_backup_90d"] = False
+
+        if key == "need_cdc" and not ans[key]:
+            ans["allow_essential_cdc_whitelist"] = False
+
+        idx += 1
+
+    return "ok", normalize_decision_answers(ans, defaults)
+
+
+def run_security_checklist_interactive(
+    ui: WizardUI,
+    tier: str,
+    existing_statuses: Dict[str, str] | None = None,
+) -> Tuple[str, Dict]:
+    existing_statuses = existing_statuses or {}
+
+    applicable_items = [item for item in SECURITY_ITEMS if applicable(item, tier)]
+    statuses = {}
+    idx = 0
+
+    while idx < len(applicable_items):
+        item = applicable_items[idx]
+        default_status = existing_statuses.get(item["id"], "pass")
+        default_idx = 0 if default_status != "fail" else 1
+
+        options = [
+            ("pass", "PASS", "Requirement is met for this PoC."),
+            ("fail", "FAIL", "Gap exists; this will affect go/no-go decision."),
+        ]
+
+        result = ui.menu(
+            title="Security Architecture & Shared Responsibility",
+            subtitle=item["prompt"],
+            options=options,
+            default_idx=default_idx,
+            allow_back=True,
+            allow_quit=True,
+            step=f"Security Checklist {idx + 1}/{len(applicable_items)} | {'Blocking' if item['blocking'] else 'Non-blocking'}",
+            bullets=[
+                f"Owner: {item['owner']}",
+                "Use B to revisit previous control.",
+            ],
+        )
+
+        if result == "__quit__":
+            return "quit", {}
+
+        if result == "__back__":
+            if idx == 0:
+                return "back", {}
+            idx -= 1
+            continue
+
+        statuses[item["id"]] = result
+        idx += 1
+
+    rows = []
+    for item in SECURITY_ITEMS:
+        if not applicable(item, tier):
+            status = "na"
+        else:
+            status = statuses.get(item["id"], "pass")
+
+        rows.append(
+            {
+                "id": item["id"],
+                "prompt": item["prompt"],
+                "status": status,
+                "blocking": item["blocking"],
+                "owner": item["owner"],
+            }
+        )
+
+    return "ok", summarize_security(rows, non_interactive=False)
+
+
+def run_security_checklist_non_interactive(tier: str) -> Dict:
+    rows = []
+    for item in SECURITY_ITEMS:
+        if applicable(item, tier):
+            status = "not_assessed"
+        else:
+            status = "na"
+
+        rows.append(
+            {
+                "id": item["id"],
+                "prompt": item["prompt"],
+                "status": status,
+                "blocking": item["blocking"],
+                "owner": item["owner"],
+            }
+        )
+
+    return summarize_security(rows, non_interactive=True)
+
+
+def choose_scenario_interactive(ui: WizardUI, default_scenario: str) -> str:
+    options = [(k, f"{k}: {v}", "") for k, v in SCENARIOS.items()]
+    default_idx = list(SCENARIOS.keys()).index(default_scenario)
+    return ui.menu(
+        title="PoC Scenario Template",
+        subtitle="Choose the scenario to shape defaults and module emphasis.",
+        options=options,
+        default_idx=default_idx,
+        allow_back=False,
+        allow_quit=True,
+        step="Section 1/6",
+        bullets=["This can be changed later before finalizing."],
+    )
+
+
+def choose_tier_interactive(
+    ui: WizardUI,
+    recommended_tier: str,
+    selected_tier: str,
+    decision_notes: List[str],
+) -> str:
+    options = []
+    for t in TIERS:
+        label = f"{t}: {TIER_LABELS[t]}"
+        desc = ""
+        if t == recommended_tier:
+            label += " (recommended)"
+            desc = "Best fit based on the decision tree responses."
+        elif t == "serverless":
+            desc = "Fastest low-friction pilot path."
+        elif t in {"dedicated", "byoc"}:
+            desc = "Needed for stricter network/control requirements."
+        options.append((t, label, desc))
+
+    default_idx = TIERS.index(selected_tier if selected_tier in TIERS else recommended_tier)
+    bullets = decision_notes or ["No additional gating notes were produced."]
+    return ui.menu(
+        title="Tier Selection",
+        subtitle="Review recommendation and choose the tier to run now.",
+        options=options,
+        default_idx=default_idx,
+        allow_back=True,
+        allow_quit=True,
+        step="Section 3/6",
+        bullets=bullets,
+    )
+
+
+def choose_advanced_options_interactive(
+    ui: WizardUI,
+    selected_tier: str,
+    scenario: str,
+    run_ha_sim: bool,
+    enable_optional_advanced: bool,
+) -> Tuple[str, bool, bool]:
+    if selected_tier in {"dedicated", "byoc"}:
+        result = ui.yes_no(
+            title="Advanced Module Toggle",
+            question="Enable optional advanced modules (including vector search when supported)?",
+            default=enable_optional_advanced,
+            allow_back=True,
+            step="Section 4/6",
+            yes_desc="Enable optional advanced modules.",
+            no_desc="Keep optional advanced modules disabled.",
+            bullets=["Dedicated/BYOC already enables HA and HTAP by default."],
+        )
+        if result in {"__back__", "__quit__"}:
+            return result, run_ha_sim, enable_optional_advanced
+        return "ok", run_ha_sim, (result == "yes")
+
+    result_ha = ui.yes_no(
+        title="HA Behavior on Non-Dedicated Tiers",
+        question="Enable Module 3 simulated HA probe on this tier?",
+        default=run_ha_sim,
+        allow_back=True,
+        step="Section 4/6 | Option 1/2",
+        yes_desc="Run simulated HA probe.",
+        no_desc="Keep Module 3 disabled for this run.",
+        bullets=["Full node-stop HA validation is Dedicated/BYOC only."],
+    )
+    if result_ha in {"__back__", "__quit__"}:
+        return result_ha, run_ha_sim, enable_optional_advanced
+
+    default_adv = enable_optional_advanced or (scenario == "ai_vector")
+    result_adv = ui.yes_no(
+        title="Optional Advanced Modules",
+        question="Enable optional advanced modules that may require TiFlash or tier-specific features?",
+        default=default_adv,
+        allow_back=True,
+        step="Section 4/6 | Option 2/2",
+        yes_desc="Enable optional advanced modules.",
+        no_desc="Leave optional advanced modules disabled.",
+        bullets=["This affects HTAP/vector module defaults."],
+    )
+    if result_adv == "__quit__":
+        return "__quit__", run_ha_sim, enable_optional_advanced
+    if result_adv == "__back__":
+        return "back_to_ha", run_ha_sim, enable_optional_advanced
+
+    return "ok", (result_ha == "yes"), (result_adv == "yes")
+
+
+def choose_apply_profile_interactive(ui: WizardUI, default: bool) -> str:
+    return ui.yes_no(
+        title="Test Profile",
+        question="Apply tier-specific recommended test profile (scale, duration, concurrency)?",
+        default=default,
+        allow_back=True,
+        step="Section 6/6",
+        yes_desc="Apply tier defaults for this run.",
+        no_desc="Keep existing test values from config.",
+        bullets=["You can still edit config manually afterward."],
+    )
+
+
+def review_and_confirm_interactive(
+    ui: WizardUI,
+    scenario: str,
+    recommended_tier: str,
+    selected_tier: str,
+    security: Dict,
+) -> str:
+    bullets = [
+        f"Scenario: {SCENARIOS.get(scenario, scenario)}",
+        f"Recommended tier: {TIER_LABELS.get(recommended_tier, recommended_tier)}",
+        f"Selected tier: {TIER_LABELS.get(selected_tier, selected_tier)}",
+        f"Checklist recommendation: {security.get('recommendation')}",
+        f"Blocking failures: {len(security.get('blocking_failures', []))}",
+        "Choose continue to write resolved config and artifacts.",
+    ]
+
+    return ui.menu(
+        title="Review and Continue",
+        subtitle="Final check before generating outputs.",
+        options=[
+            ("continue", "Continue", "Write resolved config and checklist artifacts."),
+            ("edit_decision", "Edit decision tree", "Return to requirement questions."),
+            ("edit_tier", "Edit tier selection", "Choose a different tier."),
+            ("edit_security", "Edit security checklist", "Re-answer security controls."),
+            ("cancel", "Cancel wizard", "Abort without writing updates."),
+        ],
+        default_idx=0,
+        allow_back=True,
+        allow_quit=False,
+        step="Final",
+        bullets=bullets,
+    )
 
 
 def write_markdown(path: str, payload: Dict) -> None:
@@ -433,173 +925,170 @@ def write_markdown(path: str, payload: Dict) -> None:
             f.write(f"- **{row['issue']}**: {row['avoid']}\n")
 
 
-def parse_existing_scenario(cfg: Dict) -> str:
-    maybe = cfg.get("pre_poc", {}).get("scenario_template")
-    return maybe if maybe in SCENARIOS else "oltp_migration"
-
-
 def main() -> int:
     args = parse_args()
     cfg = load_yaml(args.config)
 
     interactive = (not args.non_interactive) and sys.stdin.isatty()
+    ui = WizardUI(interactive=interactive)
 
     print("\n=== TiDB Cloud Pre-PoC Intake ===")
-    if interactive:
-        print("This will gather tier requirements, security readiness, and module defaults before running the kit.")
 
-    # Scenario template
     default_scenario = parse_existing_scenario(cfg)
-    if interactive:
-        scenario = ask_choice(
-            "Select PoC scenario template:",
-            [f"{key}: {label}" for key, label in SCENARIOS.items()],
-            default_idx=list(SCENARIOS.keys()).index(default_scenario),
-            non_interactive=False,
-        ).split(":", 1)[0]
+    default_tree = parse_default_decision_tree(cfg)
+
+    scenario = default_scenario
+    ans = copy.deepcopy(default_tree)
+    recommended_tier = "serverless"
+    decision_notes: List[str] = []
+    selected_tier = cfg.get("tier", {}).get("selected") if cfg.get("tier", {}).get("selected") in TIERS else "serverless"
+    run_ha_sim = False
+    enable_optional_advanced = False
+    security: Dict = {}
+    apply_profile = True
+
+    if interactive and not args.tier:
+        section = "scenario"
+        security_statuses: Dict[str, str] = {}
+
+        while True:
+            if section == "scenario":
+                result = choose_scenario_interactive(ui, scenario)
+                if result == "__quit__":
+                    print("\nCancelled.")
+                    return 130
+                scenario = result
+                section = "decision"
+                continue
+
+            if section == "decision":
+                status, out = run_decision_tree_interactive(ui, default_tree, existing=ans)
+                if status == "quit":
+                    print("\nCancelled.")
+                    return 130
+                if status == "back":
+                    section = "scenario"
+                    continue
+                ans = out
+                recommended_tier, decision_notes = decide_tier(ans)
+                if selected_tier not in TIERS:
+                    selected_tier = recommended_tier
+                section = "tier"
+                continue
+
+            if section == "tier":
+                result = choose_tier_interactive(ui, recommended_tier, selected_tier, decision_notes)
+                if result == "__quit__":
+                    print("\nCancelled.")
+                    return 130
+                if result == "__back__":
+                    section = "decision"
+                    continue
+                selected_tier = result
+                section = "advanced"
+                continue
+
+            if section == "advanced":
+                status, new_ha, new_adv = choose_advanced_options_interactive(
+                    ui,
+                    selected_tier=selected_tier,
+                    scenario=scenario,
+                    run_ha_sim=run_ha_sim,
+                    enable_optional_advanced=enable_optional_advanced,
+                )
+                if status == "__quit__":
+                    print("\nCancelled.")
+                    return 130
+                if status == "__back__":
+                    section = "tier"
+                    continue
+                if status == "back_to_ha":
+                    continue
+                run_ha_sim, enable_optional_advanced = new_ha, new_adv
+                section = "security"
+                continue
+
+            if section == "security":
+                status, out = run_security_checklist_interactive(ui, selected_tier, existing_statuses=security_statuses)
+                if status == "quit":
+                    print("\nCancelled.")
+                    return 130
+                if status == "back":
+                    section = "advanced"
+                    continue
+                security = out
+                security_statuses = {r["id"]: r["status"] for r in security.get("items", [])}
+                section = "profile"
+                continue
+
+            if section == "profile":
+                result = choose_apply_profile_interactive(ui, default=apply_profile)
+                if result == "__quit__":
+                    print("\nCancelled.")
+                    return 130
+                if result == "__back__":
+                    section = "security"
+                    continue
+                apply_profile = (result == "yes")
+                section = "review"
+                continue
+
+            if section == "review":
+                action = review_and_confirm_interactive(
+                    ui,
+                    scenario=scenario,
+                    recommended_tier=recommended_tier,
+                    selected_tier=selected_tier,
+                    security=security,
+                )
+
+                if action == "__back__":
+                    section = "profile"
+                    continue
+
+                if action == "cancel":
+                    print("\nCancelled.")
+                    return 130
+
+                if action == "edit_decision":
+                    section = "decision"
+                    continue
+
+                if action == "edit_tier":
+                    section = "tier"
+                    continue
+
+                if action == "edit_security":
+                    section = "security"
+                    continue
+
+                if action == "continue":
+                    break
+
     else:
         scenario = default_scenario
+        ans = normalize_decision_answers(default_tree, default_tree)
+        recommended_tier, decision_notes = decide_tier(ans)
 
-    # Decision tree inputs
-    default_tree = {
-        "need_customer_vpc": False,
-        "need_vpc_peering": False,
-        "need_pitr": False,
-        "need_backup_90d": False,
-        "need_regional_ha": False,
-        "need_cdc": False,
-        "allow_essential_cdc_whitelist": False,
-        "need_enterprise_controls": False,
-    }
-
-    dt = cfg.get("pre_poc", {}).get("decision_tree", {})
-    for k in default_tree:
-        if isinstance(dt.get(k), bool):
-            default_tree[k] = dt[k]
-
-    if interactive:
-        print("\nTier decision tree (fast + feature-gated)")
-
-    ans = {
-        "need_customer_vpc": ask_yes_no(
-            "Q1: Need TiDB deployed in your own cloud account/VPC for sovereignty/compliance/IAM/KMS/spend control?",
-            default=default_tree["need_customer_vpc"],
-            non_interactive=not interactive,
-        ),
-    }
-
-    if ans["need_customer_vpc"]:
-        ans["need_vpc_peering"] = False
-        ans["need_pitr"] = default_tree["need_pitr"]
-        ans["need_backup_90d"] = default_tree["need_backup_90d"]
-        ans["need_regional_ha"] = default_tree["need_regional_ha"]
-        ans["need_cdc"] = default_tree["need_cdc"]
-        ans["allow_essential_cdc_whitelist"] = default_tree["allow_essential_cdc_whitelist"]
-        ans["need_enterprise_controls"] = default_tree["need_enterprise_controls"]
-    else:
-        ans["need_vpc_peering"] = ask_yes_no(
-            "Q2: Do you require VPC peering (not only private endpoint/private link)?",
-            default=default_tree["need_vpc_peering"],
-            non_interactive=not interactive,
-        )
-
-        ans["need_pitr"] = ask_yes_no(
-            "Q3: Do you need point-in-time restore (PITR)?",
-            default=default_tree["need_pitr"],
-            non_interactive=not interactive,
-        )
-        if ans["need_pitr"]:
-            ans["need_backup_90d"] = ask_yes_no(
-                "Q3a: Do you need longer backup retention (up to 90 days)?",
-                default=default_tree["need_backup_90d"],
-                non_interactive=not interactive,
-            )
+        if args.tier:
+            selected_tier = args.tier
+        elif cfg.get("tier", {}).get("selected") in TIERS:
+            selected_tier = cfg.get("tier", {}).get("selected")
         else:
-            ans["need_backup_90d"] = False
+            selected_tier = recommended_tier
 
-        ans["need_regional_ha"] = ask_yes_no(
-            "Q4: Is this production and requires cross-AZ (regional) failover?",
-            default=default_tree["need_regional_ha"],
-            non_interactive=not interactive,
-        )
-        ans["need_cdc"] = ask_yes_no(
-            "Q5: Do you need CDC/Changefeed (Kafka/MySQL/etc.)?",
-            default=default_tree["need_cdc"],
-            non_interactive=not interactive,
-        )
-        if ans["need_cdc"]:
-            ans["allow_essential_cdc_whitelist"] = ask_yes_no(
-                "If required, can you proceed with Essential CDC whitelist dependency?",
-                default=default_tree["allow_essential_cdc_whitelist"],
-                non_interactive=not interactive,
-            )
-        else:
-            ans["allow_essential_cdc_whitelist"] = False
-
-        ans["need_enterprise_controls"] = ask_yes_no(
-            "Q6: Need enterprise controls (maintenance window/CMEK/audit governance)?",
-            default=default_tree["need_enterprise_controls"],
-            non_interactive=not interactive,
-        )
-
-    recommended_tier, decision_notes = decide_tier(ans)
-
-    # Selection: recommended by default, serverless as fallback baseline
-    if args.tier:
-        selected_tier = args.tier
-    elif interactive:
-        opt_labels = [f"{t}: {TIER_LABELS[t]}" for t in TIERS]
-        default_idx = TIERS.index(recommended_tier if recommended_tier in TIERS else "serverless")
-        selected_tier = ask_choice(
-            "Select tier for this PoC run:",
-            opt_labels,
-            default_idx=default_idx,
-            non_interactive=False,
-        ).split(":", 1)[0]
-    else:
-        selected_tier = cfg.get("tier", {}).get("selected")
-        if selected_tier not in TIERS:
-            selected_tier = recommended_tier if recommended_tier in TIERS else "serverless"
+        run_ha_sim = False
+        enable_optional_advanced = False
+        security = run_security_checklist_non_interactive(selected_tier)
+        apply_profile = True
 
     print(f"\nRecommended tier: {TIER_LABELS.get(recommended_tier, recommended_tier)}")
     print(f"Selected tier   : {TIER_LABELS.get(selected_tier, selected_tier)}")
 
-    # Optional advanced toggles
-    run_ha_sim = False
-    enable_optional_advanced = False
-    if interactive:
-        if selected_tier not in {"dedicated", "byoc"}:
-            run_ha_sim = ask_yes_no(
-                "Enable Module 3 simulated HA probe on non-Dedicated tier?",
-                default=False,
-                non_interactive=False,
-            )
-            enable_optional_advanced = ask_yes_no(
-                "Enable optional advanced modules that may require TiFlash or tier-specific features?",
-                default=False,
-                non_interactive=False,
-            )
-        else:
-            enable_optional_advanced = ask_yes_no(
-                "Enable optional advanced modules (including vector search when supported)?",
-                default=False,
-                non_interactive=False,
-            )
-    else:
-        run_ha_sim = False
-        enable_optional_advanced = False
-
-    security = run_security_checklist(selected_tier, non_interactive=not interactive)
-
-    proceed = bool(security["proceed"])
+    proceed = bool(security.get("proceed", True))
     if (not proceed) and args.allow_blocked:
         proceed = True
 
-    if (not proceed) and interactive:
-        print("\nBlocking checklist items were marked FAIL.")
-        proceed = ask_yes_no("Continue anyway for a technical dry run?", default=False, non_interactive=False)
-
-    # Build resolved config
     resolved = copy.deepcopy(cfg)
     resolved.setdefault("modules", {})
     resolved.setdefault("test", {})
@@ -615,17 +1104,9 @@ def main() -> int:
     )
     resolved["modules"] = resolved_modules
 
-    # Backward-compatible alias for module 0 toggle
     if "customer_query_validation" in resolved["modules"]:
         resolved["modules"]["customer_query_validation"] = resolved["modules"]["customer_queries"]
 
-    apply_profile = True
-    if interactive:
-        apply_profile = ask_yes_no(
-            "Apply tier-specific recommended test profile (scale/duration/concurrency)?",
-            default=True,
-            non_interactive=False,
-        )
     if apply_profile:
         resolved["test"].update(tier_test_profile(selected_tier))
 
@@ -680,7 +1161,6 @@ def main() -> int:
         write_markdown(args.output_md, output)
         print(f"Checklist markdown    : {args.output_md}")
 
-    # Short terminal summary
     print("\nModule plan:")
     for k, v in resolved_modules.items():
         print(f"  - {k}: {str(v).lower()}")
