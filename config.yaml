@@ -1,0 +1,68 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TiDB Cloud Self-Service PoV Kit — Configuration
+# Fill in your TiDB Cloud connection details below, then run: ./run_all.sh
+# ─────────────────────────────────────────────────────────────────────────────
+
+# TiDB Cloud connection (required)
+tidb:
+  host: "gateway01.us-east-1.prod.aws.tidbcloud.com"
+  port: 4000
+  user: "root"
+  password: ""
+  database: "pov_test"
+  ssl: true
+
+# Existing MySQL / Aurora for head-to-head comparison (optional)
+# Leave host blank to skip the comparison track entirely.
+comparison_db:
+  host: ""
+  port: 3306
+  user: ""
+  password: ""
+  database: ""
+  label: "Aurora MySQL"   # Label shown in report charts
+
+# Tier metadata (wizard can update this automatically)
+tier:
+  selected: "serverless"   # serverless | essential | premium | dedicated | byoc
+
+# ─── Test configuration ───────────────────────────────────────────────────────
+test:
+  data_scale: "small"             # serverless default: small
+  duration_seconds: 120
+  concurrency_levels: [8, 16, 32]
+  ramp_duration_seconds: 300
+  workload_mix: "mixed"           # read_heavy | write_heavy | mixed
+
+# ─── Customer query injection (optional) ─────────────────────────────────────
+# Paste your top production queries here. Use ? for bind parameters.
+# Leave empty to use synthetic workload only.
+customer_queries: []
+#  - "SELECT * FROM transactions WHERE account_id = ? AND created_at > ?"
+#  - "UPDATE accounts SET balance = balance - ? WHERE id = ?"
+customer_query_ratio: 0.30        # 30% of load will use customer queries
+
+# ─── Modules to run ───────────────────────────────────────────────────────────
+# Wizard applies tier-aware defaults to results/config.resolved.yaml.
+modules:
+  customer_queries: true
+  baseline_perf: true
+  elastic_scale: true
+  high_availability: false   # Set true for Dedicated/BYOC or simulated HA probe
+  write_contention: true
+  htap: false                # Set true when TiFlash is provisioned and replicated
+  online_ddl: true
+  mysql_compat: true
+  data_import: true
+  vector_search: false       # Optional AI track
+
+# ─── Pre-PoC intake state (optional) ──────────────────────────────────────────
+pre_poc:
+  scenario_template: "oltp_migration"  # oltp_migration | htap_analytics | ai_vector
+
+# ─── Report options ───────────────────────────────────────────────────────────
+report:
+  company_name: "Your Company"
+  include_tco_model: true
+  current_db_monthly_cost_usd: 0  # Fill in for TCO comparison (leave 0 to skip)
+  output_dir: "results"

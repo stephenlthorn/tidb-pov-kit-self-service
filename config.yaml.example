@@ -1,0 +1,74 @@
+# TiDB Cloud PoV Kit — Configuration
+# Copy this file to config.yaml and fill in your values.
+
+tidb:
+  host:     "gateway01.us-west-2.prod.aws.tidbcloud.com"
+  port:     4000
+  user:     "root"
+  password: "YOUR_PASSWORD"
+  database: "pov_test"
+  ssl:      true
+
+# Optional: run the same workload against Aurora/MySQL simultaneously
+comparison_db:
+  enabled:  false
+  host:     "aurora-cluster.us-west-2.rds.amazonaws.com"
+  port:     3306
+  user:     "admin"
+  password: "YOUR_PASSWORD"
+  database: "pov_test"
+  ssl:      false
+
+# Tier metadata (wizard can update this automatically)
+tier:
+  selected: "serverless"   # serverless | essential | premium | dedicated | byoc
+
+test:
+  data_scale:            "small"      # serverless default: small
+  duration_seconds:      120
+  concurrency_levels:    [8, 16, 32]
+  ramp_duration_seconds: 300
+  import_rows:           1000000
+
+# Your production queries — validated in M0 and replayed in M1
+# Leave empty to use only synthetic workload
+customer_queries: []
+# Example:
+# customer_queries:
+#   - name: "get_user"
+#     sql:  "SELECT id, email FROM users WHERE id = ?"
+#     params: [1]
+#   - name: "recent_txns"
+#     sql:  "SELECT * FROM transactions WHERE account_id = ? ORDER BY created_at DESC LIMIT 20"
+#     params: [100]
+
+# Enable or disable individual test modules
+# Wizard will apply tier-aware defaults in results/config.resolved.yaml.
+modules:
+  customer_queries:  true
+  baseline_perf:     true
+  elastic_scale:     true
+  high_availability: false   # Dedicated/BYOC only by default
+  write_contention:  true
+  htap:              false   # enable when TiFlash is provisioned
+  online_ddl:        true
+  mysql_compat:      true
+  data_import:       true
+  vector_search:     false   # optional AI track
+
+# Pre-PoC intake state (written by setup/pre_poc_intake.py)
+pre_poc:
+  scenario_template: "oltp_migration"   # oltp_migration | htap_analytics | ai_vector
+
+report:
+  customer_name: "Acme Corp"
+  se_name:       "Your Name — PingCAP Sales Engineering"
+
+# TCO model inputs — adjust to match customer's actual environment
+tco:
+  data_size_gb:              1000
+  annual_growth_pct:         40
+  aurora_shards_year0:       4
+  engineers_managing_shards: 2
+  engineer_annual_cost:      180000
+  sharding_eng_fraction:     0.25
