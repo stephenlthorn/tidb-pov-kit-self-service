@@ -6,7 +6,7 @@ data_manifest.json into a single JSON payload used by generate_report.py.
 Run standalone:
     python report/collect_metrics.py > results/metrics_summary.json
 """
-import sys, os, json, time
+import sys, os, json, time, argparse
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.result_store import (
@@ -205,6 +205,10 @@ def _load_manifest() -> dict:
 
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Aggregate PoV metrics into JSON.")
+    parser.add_argument("--quiet", action="store_true", help="Write metrics file without printing full JSON payload")
+    args = parser.parse_args()
+
     metrics = collect()
     out_path = os.path.join(
         os.path.dirname(__file__), "..", "results", "metrics_summary.json"
@@ -213,5 +217,6 @@ if __name__ == "__main__":
     with open(out_path, "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"Metrics written to {out_path}")
-    # Also print to stdout for piping
-    print(json.dumps(metrics, indent=2), file=sys.stderr if len(sys.argv) < 2 else sys.stdout)
+
+    if not args.quiet:
+        print(json.dumps(metrics, indent=2), file=sys.stdout)

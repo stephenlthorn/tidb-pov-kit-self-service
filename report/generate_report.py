@@ -57,6 +57,39 @@ class PoVReport(FPDF):
         self.set_auto_page_break(auto=True, margin=20)
         self.set_margins(18, 18, 18)
 
+    def normalize_text(self, text):
+        """Normalize Unicode punctuation to core-font-safe characters.
+
+        The default Helvetica core font in fpdf only supports Latin-1. This
+        keeps report generation robust even when copy includes smart punctuation
+        (for example em dash, curly quotes, bullets, or ellipsis).
+        """
+        if text is None:
+            text = ""
+        if not isinstance(text, str):
+            text = str(text)
+
+        safe_map = str.maketrans(
+            {
+                "—": "-",
+                "–": "-",
+                "−": "-",
+                "“": '"',
+                "”": '"',
+                "‘": "'",
+                "’": "'",
+                "•": "-",
+                "…": "...",
+                "\u00a0": " ",
+            }
+        )
+        normalized = text.translate(safe_map)
+
+        try:
+            return super().normalize_text(normalized)
+        except Exception:
+            return normalized.encode("latin-1", "replace").decode("latin-1")
+
     def header(self):
         if self.page_no() == 1:
             return
@@ -295,11 +328,31 @@ def _chart_htap(metrics) -> plt.Figure:
 
 
 def _chart_compat(compat_data) -> plt.Figure:
-    details  = compat_data.get("details", [])
-    cats     = sorted(set(r["category"] for r in details))
-    pass_cnt = {c: sum(1 for r in details if r["category"]==c and r["status"]=="pass")
+    details = compat_data.get("details", [])
+    if not details:
+        return _empty_chart("No compatibility data")
+
+    normalized = []
+    for row in details:
+        if not isinstance(row, dict):
+            continue
+        category = str(row.get("category") or row.get("group") or row.get("module") or "Uncategorized")
+        raw_status = str(row.get("status") or row.get("result") or "").strip().lower()
+        if raw_status in {"pass", "passed", "ok", "success", "true", "1"}:
+            status = "pass"
+        elif raw_status in {"fail", "failed", "error", "false", "0"}:
+            status = "fail"
+        else:
+            status = "fail"
+        normalized.append({"category": category, "status": status})
+
+    if not normalized:
+        return _empty_chart("No compatibility data")
+
+    cats = sorted(set(r["category"] for r in normalized))
+    pass_cnt = {c: sum(1 for r in normalized if r["category"] == c and r["status"] == "pass")
                 for c in cats}
-    fail_cnt = {c: sum(1 for r in details if r["category"]==c and r["status"]!="pass")
+    fail_cnt = {c: sum(1 for r in normalized if r["category"] == c and r["status"] != "pass")
                 for c in cats}
     x = np.arange(len(cats))
 

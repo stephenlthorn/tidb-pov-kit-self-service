@@ -4,7 +4,8 @@
 #  run_all.sh
 #
 #  Usage:
-#    ./run_all.sh [config.yaml] [--regen] [--wizard|--no-wizard] [--tier TIER]
+#    ./run_all.sh [config.yaml] [--regen] [--report-only|--report-json-only]
+#                 [--wizard|--no-wizard] [--tier TIER]
 #
 #  What it does:
 #    1. Optional pre-PoC intake (tier decision + security checklist)
@@ -25,6 +26,8 @@ Usage:
   ./run_all.sh [config.yaml] [options]
 
 Options:
+  --report-only       Build PDF from existing results/* artifacts only
+  --report-json-only  Build results/metrics_summary.json only (no PDF, no tests)
   --regen             Regenerate synthetic data even if manifest exists
   --wizard            Force interactive pre-PoC intake wizard
   --no-wizard         Skip intake wizard
@@ -36,6 +39,8 @@ EOF
 
 CONFIG="config.yaml"
 REGEN=false
+REPORT_ONLY=false
+REPORT_JSON_ONLY=false
 RUN_INTAKE="auto"          # auto | yes | no
 FORCE_TIER=""
 ALLOW_BLOCKED=false
@@ -45,6 +50,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --regen)
       REGEN=true
+      shift
+      ;;
+    --report-only)
+      REPORT_ONLY=true
+      shift
+      ;;
+    --report-json-only)
+      REPORT_JSON_ONLY=true
       shift
       ;;
     --wizard|--intake)
@@ -82,6 +95,11 @@ if [[ ${#POSITIONAL[@]} -gt 0 ]]; then
   CONFIG="${POSITIONAL[0]}"
 fi
 
+if [[ "${REPORT_ONLY}" == "true" && "${REPORT_JSON_ONLY}" == "true" ]]; then
+  echo "Options --report-only and --report-json-only are mutually exclusive."
+  exit 1
+fi
+
 PYTHON="${PYTHON:-python3}"
 PIP="${PIP:-pip3}"
 RESULTS_DIR="results"
@@ -112,6 +130,14 @@ START_TS=$(date +%s)
 
 banner "TiDB Cloud PoV Kit"
 echo "  Config requested : ${CONFIG}"
+if [[ "${REPORT_ONLY}" == "true" ]]; then
+  MODE_LABEL="report-only"
+elif [[ "${REPORT_JSON_ONLY}" == "true" ]]; then
+  MODE_LABEL="report-json-only"
+else
+  MODE_LABEL="full-run"
+fi
+echo "  Mode             : ${MODE_LABEL}"
 echo "  Started          : $(date)"
 echo "  Log              : ${LOG_FILE}"
 
@@ -138,6 +164,51 @@ if ! "${PYTHON}" -c "import yaml" &>/dev/null; then
   "${PYTHON}" -m pip install -q pyyaml
 fi
 ok "PyYAML available"
+
+if [[ "${REPORT_ONLY}" == "true" || "${REPORT_JSON_ONLY}" == "true" ]]; then
+  CONFIG_EFFECTIVE="${CONFIG}"
+  if [[ -f "${RESOLVED_CONFIG}" ]]; then
+    CONFIG_EFFECTIVE="${RESOLVED_CONFIG}"
+    ok "Using resolved config from previous run: ${CONFIG_EFFECTIVE}"
+  fi
+
+  step "R1/3" "Validating report artifacts"
+  if [[ ! -f "${RESULTS_DIR}/results.db" ]]; then
+    err "Missing ${RESULTS_DIR}/results.db"
+    echo "  Run at least one full PoV execution first to populate results."
+    exit 1
+  fi
+  ok "Found ${RESULTS_DIR}/results.db"
+
+  step "R2/3" "Checking report dependencies"
+  if ! "${PYTHON}" - <<'PY' &>/dev/null
+import yaml, numpy, matplotlib, fpdf
+PY
+  then
+    warn "Report dependencies missing; installing requirements..."
+    if [[ -f "setup/01_install_deps.sh" ]]; then
+      bash setup/01_install_deps.sh
+    else
+      "${PIP}" install -q -r requirements.txt
+    fi
+  fi
+  ok "Report dependencies available"
+
+  if [[ "${REPORT_JSON_ONLY}" == "true" ]]; then
+    step "R3/3" "Generating metrics JSON from existing results"
+    "${PYTHON}" report/collect_metrics.py --quiet
+    ok "Metrics JSON written to ${RESULTS_DIR}/metrics_summary.json"
+    echo ""
+    echo "  To view the JSON, open: ${RESULTS_DIR}/metrics_summary.json"
+  else
+    step "R3/3" "Generating PDF report from existing results"
+    "${PYTHON}" report/generate_report.py "${CONFIG_EFFECTIVE}"
+    ok "Report written to ${RESULTS_DIR}/tidb_pov_report.pdf"
+    echo ""
+    echo "  To view the report, open: ${RESULTS_DIR}/tidb_pov_report.pdf"
+  fi
+  exit 0
+fi
 
 if ! "${PYTHON}" -c "import mysql.connector" &>/dev/null; then
   warn "mysql-connector-python not found. Installing bootstrap dependency..."

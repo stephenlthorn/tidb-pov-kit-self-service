@@ -56,6 +56,13 @@ chmod +x run_all.sh
 ./run_all.sh
 ```
 
+Optional interactive launcher:
+
+```bash
+chmod +x main_menu.sh
+./main_menu.sh
+```
+
 `run_all.sh` now includes an intake flow that:
 1. Runs a tier decision tree
 2. Captures a pre-PoC security/shared-responsibility checklist
@@ -67,6 +74,18 @@ That's it. The kit will:
 2. Generate synthetic data (3 schema archetypes, configurable scale)
 3. Run all enabled test modules sequentially
 4. Produce `results/tidb_pov_report.pdf`
+
+To regenerate only the PDF from existing `results/` artifacts (no load/tests):
+
+```bash
+./run_all.sh --report-only
+```
+
+To regenerate only `results/metrics_summary.json` from existing artifacts:
+
+```bash
+./run_all.sh --report-json-only
+```
 
 ---
 
@@ -227,6 +246,7 @@ each module — with descriptions of what to screenshot for customer slides.
 tidb-pov-kit/
 ├── config.yaml             ← Edit this first
 ├── run_all.sh              ← Run this to execute everything
+├── main_menu.sh            ← Interactive launcher (full run/report-only)
 ├── requirements.txt
 ├── setup/
 │   ├── 00_provision.md     ← Cluster setup guide
