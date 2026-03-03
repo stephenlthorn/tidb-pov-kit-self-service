@@ -56,18 +56,27 @@ chmod +x run_all.sh
 ./run_all.sh
 ```
 
-Optional interactive launcher:
+`run_all.sh` opens an interactive control panel by default in terminal sessions.
+From that parent menu you can:
+1. Run PoC with defaults
+2. Choose cloud tier (including Dedicated)
+3. Run security screener
+4. Print/open PDF report (after completed PoC)
+5. Clear PoC data with confirmation
+6. Exit
 
-```bash
-chmod +x main_menu.sh
-./main_menu.sh
-```
-
-`run_all.sh` now includes an intake flow that:
+The intake flow in `run_all.sh` supports:
 1. Runs a tier decision tree
 2. Captures a pre-PoC security/shared-responsibility checklist
 3. Writes `results/pre_poc_checklist.md` + `results/pre_poc_intake.json`
 4. Builds `results/config.resolved.yaml` and runs the kit automatically
+
+Direct-run shortcuts:
+
+```bash
+./run_all.sh --no-menu --no-wizard
+./run_all.sh --menu
+```
 
 That's it. The kit will:
 1. Install Python dependencies
@@ -253,6 +262,7 @@ tidb-pov-kit/
 │   ├── 01_install_deps.sh  ← Dependency installer
 │   ├── 02_observability_guide.md
 │   ├── 03_pre_poc_checklist.md
+│   ├── poc_control_panel.py← Parent interactive control panel
 │   ├── pre_poc_intake.py   ← Tier decision + security checklist wizard
 │   └── generate_data.py    ← Synthetic data generator
 ├── lib/

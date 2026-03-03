@@ -26,6 +26,8 @@ Usage:
   ./run_all.sh [config.yaml] [options]
 
 Options:
+  --menu             Open interactive PoC control panel
+  --no-menu          Skip control panel and run directly
   --report-only       Build PDF from existing results/* artifacts only
   --report-json-only  Build results/metrics_summary.json only (no PDF, no tests)
   --regen             Regenerate synthetic data even if manifest exists
@@ -44,28 +46,43 @@ REPORT_JSON_ONLY=false
 RUN_INTAKE="auto"          # auto | yes | no
 FORCE_TIER=""
 ALLOW_BLOCKED=false
+SHOW_MENU="auto"           # auto | yes | no
+HAS_EXEC_FLAGS=false
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --regen)
       REGEN=true
+      HAS_EXEC_FLAGS=true
       shift
       ;;
     --report-only)
       REPORT_ONLY=true
+      HAS_EXEC_FLAGS=true
       shift
       ;;
     --report-json-only)
       REPORT_JSON_ONLY=true
+      HAS_EXEC_FLAGS=true
+      shift
+      ;;
+    --menu)
+      SHOW_MENU="yes"
+      shift
+      ;;
+    --no-menu)
+      SHOW_MENU="no"
       shift
       ;;
     --wizard|--intake)
       RUN_INTAKE="yes"
+      HAS_EXEC_FLAGS=true
       shift
       ;;
     --no-wizard|--no-intake)
       RUN_INTAKE="no"
+      HAS_EXEC_FLAGS=true
       shift
       ;;
     --tier)
@@ -74,10 +91,12 @@ while [[ $# -gt 0 ]]; do
         exit 1
       fi
       FORCE_TIER="$2"
+      HAS_EXEC_FLAGS=true
       shift 2
       ;;
     --allow-blocked)
       ALLOW_BLOCKED=true
+      HAS_EXEC_FLAGS=true
       shift
       ;;
     -h|--help)
@@ -121,6 +140,23 @@ ok()     { echo -e "  ${GREEN}✓${NC} $1"; }
 warn()   { echo -e "  ${YELLOW}⚠${NC}  $1"; }
 err()    { echo -e "  ${RED}✗${NC} $1"; }
 step()   { echo -e "\n${BOLD}[$1]${NC} $2"; }
+
+SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+if ! command -v "${PYTHON}" &>/dev/null; then
+  echo "Python 3 not found. Install Python 3.9+ and retry."
+  exit 1
+fi
+
+if [[ "${SHOW_MENU}" == "yes" || ( "${SHOW_MENU}" == "auto" && -t 0 && "${HAS_EXEC_FLAGS}" == "false" ) ]]; then
+  if [[ ! -f "${CONFIG}" ]]; then
+    echo "Config file not found: ${CONFIG}"
+    echo "Copy config.yaml.example to config.yaml and fill in your TiDB credentials."
+    exit 1
+  fi
+  "${PYTHON}" setup/poc_control_panel.py --config "${CONFIG}" --runner "${SCRIPT_PATH}"
+  exit $?
+fi
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 mkdir -p "${RESULTS_DIR}"

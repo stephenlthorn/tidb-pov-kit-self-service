@@ -366,6 +366,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--output-config", required=True, help="Resolved config output path")
     p.add_argument("--output-json", required=False, help="Intake JSON output path")
     p.add_argument("--output-md", required=False, help="Intake Markdown output path")
+    p.add_argument(
+        "--mode",
+        choices=["full", "tier", "security"],
+        default="full",
+        help="Wizard mode: full intake, tier setup only, or security screener only.",
+    )
     p.add_argument("--tier", choices=TIERS, help="Force tier selection")
     p.add_argument("--non-interactive", action="store_true", help="Skip prompts and use defaults")
     p.add_argument("--allow-blocked", action="store_true", help="Proceed even with blocking checklist failures")
@@ -856,26 +862,33 @@ def review_and_confirm_interactive(
     recommended_tier: str,
     selected_tier: str,
     security: Dict,
+    include_security: bool = True,
+    include_decision: bool = True,
 ) -> str:
     bullets = [
         f"Scenario: {SCENARIOS.get(scenario, scenario)}",
         f"Recommended tier: {TIER_LABELS.get(recommended_tier, recommended_tier)}",
         f"Selected tier: {TIER_LABELS.get(selected_tier, selected_tier)}",
-        f"Checklist recommendation: {security.get('recommendation')}",
-        f"Blocking failures: {len(security.get('blocking_failures', []))}",
         "Choose continue to write resolved config and artifacts.",
     ]
+    if include_security:
+        bullets.insert(3, f"Checklist recommendation: {security.get('recommendation')}")
+        bullets.insert(4, f"Blocking failures: {len(security.get('blocking_failures', []))}")
+
+    options = [
+        ("continue", "Continue", "Write resolved config and checklist artifacts."),
+        ("edit_tier", "Edit tier selection", "Choose a different tier."),
+    ]
+    if include_decision:
+        options.insert(1, ("edit_decision", "Edit decision tree", "Return to requirement questions."))
+    if include_security:
+        options.append(("edit_security", "Edit security checklist", "Re-answer security controls."))
+    options.append(("cancel", "Cancel wizard", "Abort without writing updates."))
 
     return ui.menu(
         title="Review and Continue",
         subtitle="Final check before generating outputs.",
-        options=[
-            ("continue", "Continue", "Write resolved config and checklist artifacts."),
-            ("edit_decision", "Edit decision tree", "Return to requirement questions."),
-            ("edit_tier", "Edit tier selection", "Choose a different tier."),
-            ("edit_security", "Edit security checklist", "Re-answer security controls."),
-            ("cancel", "Cancel wizard", "Abort without writing updates."),
-        ],
+        options=options,
         default_idx=0,
         allow_back=True,
         allow_quit=False,
@@ -947,9 +960,25 @@ def main() -> int:
     security: Dict = {}
     apply_profile = True
 
+    mode = args.mode
+
     if interactive and not args.tier:
-        section = "scenario"
+        if mode == "security":
+            section = "security"
+            ans = normalize_decision_answers(default_tree, default_tree)
+            recommended_tier, decision_notes = decide_tier(ans)
+            if selected_tier not in TIERS:
+                selected_tier = recommended_tier
+            apply_profile = False
+        else:
+            section = "scenario"
+
         security_statuses: Dict[str, str] = {}
+        existing_security = cfg.get("pre_poc", {}).get("security")
+        if isinstance(existing_security, dict):
+            security = existing_security
+        else:
+            security = run_security_checklist_non_interactive(selected_tier)
 
         while True:
             if section == "scenario":
@@ -982,7 +1011,7 @@ def main() -> int:
                     print("\nCancelled.")
                     return 130
                 if result == "__back__":
-                    section = "decision"
+                    section = "decision" if mode != "security" else "security"
                     continue
                 selected_tier = result
                 section = "advanced"
@@ -1005,7 +1034,7 @@ def main() -> int:
                 if status == "back_to_ha":
                     continue
                 run_ha_sim, enable_optional_advanced = new_ha, new_adv
-                section = "security"
+                section = "security" if mode in {"full", "security"} else "profile"
                 continue
 
             if section == "security":
@@ -1014,11 +1043,14 @@ def main() -> int:
                     print("\nCancelled.")
                     return 130
                 if status == "back":
+                    if mode == "security":
+                        print("\nCancelled.")
+                        return 130
                     section = "advanced"
                     continue
                 security = out
                 security_statuses = {r["id"]: r["status"] for r in security.get("items", [])}
-                section = "profile"
+                section = "review" if mode == "security" else "profile"
                 continue
 
             if section == "profile":
@@ -1027,7 +1059,7 @@ def main() -> int:
                     print("\nCancelled.")
                     return 130
                 if result == "__back__":
-                    section = "security"
+                    section = "security" if mode == "full" else "advanced"
                     continue
                 apply_profile = (result == "yes")
                 section = "review"
@@ -1040,10 +1072,12 @@ def main() -> int:
                     recommended_tier=recommended_tier,
                     selected_tier=selected_tier,
                     security=security,
+                    include_security=(mode != "tier"),
+                    include_decision=(mode != "security"),
                 )
 
                 if action == "__back__":
-                    section = "profile"
+                    section = "security" if mode == "security" else "profile"
                     continue
 
                 if action == "cancel":
@@ -1079,15 +1113,30 @@ def main() -> int:
 
         run_ha_sim = False
         enable_optional_advanced = False
-        security = run_security_checklist_non_interactive(selected_tier)
-        apply_profile = True
+
+        if mode == "security":
+            security = run_security_checklist_non_interactive(selected_tier)
+            apply_profile = False
+        elif mode == "tier":
+            existing_security = cfg.get("pre_poc", {}).get("security")
+            if isinstance(existing_security, dict):
+                security = existing_security
+            else:
+                security = run_security_checklist_non_interactive(selected_tier)
+            apply_profile = True
+        else:
+            security = run_security_checklist_non_interactive(selected_tier)
+            apply_profile = True
 
     print(f"\nRecommended tier: {TIER_LABELS.get(recommended_tier, recommended_tier)}")
     print(f"Selected tier   : {TIER_LABELS.get(selected_tier, selected_tier)}")
 
-    proceed = bool(security.get("proceed", True))
-    if (not proceed) and args.allow_blocked:
+    if mode == "tier":
         proceed = True
+    else:
+        proceed = bool(security.get("proceed", True))
+        if (not proceed) and args.allow_blocked:
+            proceed = True
 
     resolved = copy.deepcopy(cfg)
     resolved.setdefault("modules", {})
