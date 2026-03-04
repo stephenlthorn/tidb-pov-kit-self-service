@@ -605,6 +605,63 @@
       flex-wrap: wrap;
     }
 
+    .planner-summary {
+      border: 1px solid #2d3440;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #10151b, #0c1116);
+      padding: 10px;
+      margin-bottom: 10px;
+      color: #d8e0ec;
+      font-size: 0.83rem;
+    }
+
+    .insight-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .insight-card {
+      border: 1px solid #2b323d;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 10px;
+      display: grid;
+      gap: 6px;
+      min-height: 164px;
+    }
+
+    .insight-card .title {
+      font-size: 0.86rem;
+      color: #f0f4fb;
+      font-weight: 700;
+      letter-spacing: 0.08px;
+    }
+
+    .insight-card .tag {
+      border: 1px solid #3a4658;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.69rem;
+      color: #cad5e6;
+      width: fit-content;
+      text-transform: uppercase;
+      letter-spacing: 0.12px;
+      background: #111722;
+    }
+
+    .insight-card .kv {
+      font-size: 0.78rem;
+      color: #c5cfde;
+      line-height: 1.45;
+    }
+
+    .planner-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
     .grid {
       display: grid;
       gap: 10px;
@@ -1246,7 +1303,9 @@
     @media (max-width: 1320px) {
       .stats-grid.stats-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
       .module-status-list,
-      .line-grid { grid-template-columns: 1fr; }
+      .line-grid,
+      .insight-grid,
+      .planner-actions { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 1120px) {
@@ -1277,7 +1336,9 @@
       .module-grid,
       .module-status-list,
       .wizard-steps,
-      .wizard-nav {
+      .wizard-nav,
+      .insight-grid,
+      .planner-actions {
         grid-template-columns: 1fr;
       }
 
@@ -1308,6 +1369,7 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
       <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Quickstart Wizard</button>
+      <button class="tab-btn" data-tab-btn="test-planner"><span class="ico">[T]</span>Test Planner</button>
       <button class="tab-btn" data-tab-btn="run-report"><span class="ico">[>]</span>Run and Report</button>
       <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
       <button class="tab-btn" data-tab-btn="report-dashboard"><span class="ico">[#]</span>Report Dashboard</button>
@@ -1423,6 +1485,23 @@
                       <option value="{{ key }}" {% if key == 'balanced_poc' %}selected{% endif %}>{{ meta.label }}</option>
                     {% endfor %}
                   </select>
+                </div>
+              </div>
+              <div class="grid cols-2">
+                <div class="field">
+                  <label>Module Suite</label>
+                  <select name="wiz_module_suite">
+                    <option value="tier_recommended" selected>Tier Recommended</option>
+                    <option value="all">All Modules (M0-M8)</option>
+                    <option value="oltp_migration">OLTP + Migration Suite</option>
+                    <option value="htap_analytics">HTAP Analytics Suite</option>
+                    <option value="ai_vector">AI / Vector Suite</option>
+                    <option value="smoke">Smoke Validation</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Enabled Modules (current config)</label>
+                  <input type="text" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
                 </div>
               </div>
               <div class="check-wrap">
@@ -1559,6 +1638,73 @@
               <button class="btn primary" type="submit" data-wizard-submit style="display:none;">Save and Continue</button>
             </div>
           </form>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab-pane="test-planner">
+      <div class="panel">
+        <h2>Test Planner</h2>
+        <p class="help">Understand what each module runs, then select all tests or only the suites you want before execution.</p>
+
+        <div class="planner-summary">
+          Active modules: <strong>{{ enabled_module_count }}</strong> / {{ module_order|length }} from current configuration.
+        </div>
+
+        <div class="pair-grid">
+          <div class="pair">
+            <div class="pk">OLTP + Migration Suite</div>
+            <div class="pv">M0 customer query validation, M1 baseline OLTP, M2 scaling, M3b contention, M5 online DDL, M6 compatibility, M7 import throughput.</div>
+          </div>
+          <div class="pair">
+            <div class="pk">HTAP Analytics Suite</div>
+            <div class="pv">All core OLTP checks plus M4 HTAP concurrency (TiKV+TiFlash isolation); AI suite extends this with M8 vector search.</div>
+          </div>
+        </div>
+
+        <div class="line"></div>
+        <div class="planner-actions">
+          <form method="post" action="/apply-module-suite" class="config-section">
+            <h3>Apply Suite</h3>
+            <div class="field">
+              <label>Suite Preset</label>
+              <select name="module_suite">
+                {% for key, suite in module_suites.items() %}
+                  <option value="{{ key }}" {% if key == 'oltp_migration' %}selected{% endif %}>{{ suite.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="tiny">`Tier Recommended` uses current tier + scenario logic. Other suites apply explicit module sets.</div>
+            <div class="check-wrap">
+              <label class="check"><input type="checkbox" name="suite_run_ha_sim" /> Simulated HA (for tier-recommended)</label>
+              <label class="check"><input type="checkbox" name="suite_enable_optional_advanced" /> Optional advanced (for tier-recommended)</label>
+            </div>
+            <button class="btn" type="submit">Apply Suite</button>
+          </form>
+
+          <form method="post" action="/save-module-selection" class="config-section">
+            <h3>Manual Module Selection</h3>
+            <div class="module-grid">
+              {% for key in module_order %}
+                <label class="check"><input type="checkbox" name="plan_mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
+              {% endfor %}
+            </div>
+            <button class="btn primary" type="submit">Save Selected Modules</button>
+          </form>
+        </div>
+
+        <div class="line"></div>
+        <h3 class="subhead">Module Insights</h3>
+        <div class="insight-grid">
+          {% for key in module_order %}
+            {% set insight = module_insights.get(key, {}) %}
+            <div class="insight-card">
+              <div class="title">{{ module_labels.get(key, key) }}</div>
+              <div class="tag">{{ insight.focus if insight.focus else 'Module' }}</div>
+              <div class="kv"><strong>Runs:</strong> {{ insight.runs if insight.runs else 'No details available.' }}</div>
+              <div class="kv"><strong>Value:</strong> {{ insight.value if insight.value else 'No value statement available.' }}</div>
+            </div>
+          {% endfor %}
         </div>
       </div>
     </section>

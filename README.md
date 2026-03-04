@@ -82,7 +82,8 @@ Direct-run shortcuts:
 Dark web UI:
 1. Open with `./run_all.sh --web-ui` (or `python setup/poc_web_ui.py`)
 2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
-3. Run security screener, run defaults, build report-only, and clear/reset data
+3. Use Test Planner to view per-module test insights and choose all/some suites before execution
+4. Run security screener, run defaults, build report-only, and clear/reset data
 
 That's it. The kit will:
 1. Install Python dependencies

@@ -164,6 +164,128 @@ MODULE_LABELS = {
     "vector_search": "M8 - Vector Search",
 }
 
+MODULE_INSIGHTS = {
+    "customer_queries": {
+        "focus": "Customer SQL validity",
+        "runs": "Executes EXPLAIN FORMAT='brief' for each query in customer_queries and records pass/fail with planner output.",
+        "value": "Validates migration SQL before load/perf testing starts.",
+    },
+    "baseline_perf": {
+        "focus": "OLTP baseline",
+        "runs": "Runs schema-A OLTP workload at configured concurrency levels; captures TPS plus p50/p95/p99 latency. Optional side-by-side target comparison is included when supported.",
+        "value": "Establishes migration baseline and throughput/latency envelope.",
+    },
+    "elastic_scale": {
+        "focus": "Scale headroom",
+        "runs": "Ramps load from baseline to 4x, sustains, then ramps down while collecting time-series TPS and latency.",
+        "value": "Shows autoscaling behavior under demand spikes.",
+    },
+    "high_availability": {
+        "focus": "Recovery behavior",
+        "runs": "Performs warmup, simulated failure window, and recovery observation; estimates recovery timing from workload telemetry.",
+        "value": "Demonstrates resilience and recovery expectations.",
+    },
+    "write_contention": {
+        "focus": "Hotspot mitigation",
+        "runs": "Compares sequential key UPSERT vs AUTO_RANDOM under high concurrency and reports p99 delta plus contention diagnostics.",
+        "value": "Shows write hotspot risk and mitigation approach.",
+    },
+    "htap": {
+        "focus": "HTAP isolation",
+        "runs": "Runs OLTP workload alone, then OLTP + analytical queries routed to TiFlash; compares OLTP degradation and checks TiFlash readiness.",
+        "value": "Proves analytics coexist with transactional workload.",
+    },
+    "online_ddl": {
+        "focus": "Zero-downtime schema change",
+        "runs": "Runs DDL operations (add column/index, modify column) with concurrent OLTP load and tracks DDL duration + p99 impact.",
+        "value": "Demonstrates online schema evolution without app downtime.",
+    },
+    "mysql_compat": {
+        "focus": "Migration compatibility",
+        "runs": "Executes broad MySQL feature checks across DDL/DML/functions/JSON/window functions/transactions/EXPLAIN and logs detailed results.",
+        "value": "Quantifies MySQL feature compatibility for migration planning.",
+    },
+    "data_import": {
+        "focus": "Migration ingest speed",
+        "runs": "Generates CSV and benchmarks batched INSERT, LOAD DATA LOCAL INFILE, and IMPORT INTO (if available) with rows/s and GB/min metrics.",
+        "value": "Provides ingestion strategy and throughput evidence.",
+    },
+    "vector_search": {
+        "focus": "AI/vector capability",
+        "runs": "Creates VECTOR table/index, inserts embeddings, runs ANN and hybrid vector+SQL queries across concurrencies, and captures latency/QPS.",
+        "value": "Validates vector workload readiness for AI use cases.",
+    },
+}
+
+MODULE_SUITE_KEYS = {
+    "tier_recommended": [],
+    "all": list(MODULE_ORDER),
+    "oltp_migration": [
+        "customer_queries",
+        "baseline_perf",
+        "elastic_scale",
+        "write_contention",
+        "online_ddl",
+        "mysql_compat",
+        "data_import",
+    ],
+    "htap_analytics": [
+        "customer_queries",
+        "baseline_perf",
+        "elastic_scale",
+        "htap",
+        "online_ddl",
+        "mysql_compat",
+        "data_import",
+    ],
+    "ai_vector": [
+        "customer_queries",
+        "baseline_perf",
+        "elastic_scale",
+        "htap",
+        "online_ddl",
+        "mysql_compat",
+        "data_import",
+        "vector_search",
+    ],
+    "smoke": [
+        "baseline_perf",
+        "mysql_compat",
+    ],
+    "none": [],
+}
+
+MODULE_SUITES = {
+    "tier_recommended": {
+        "label": "Tier Recommended",
+        "description": "Use tier/scenario-aware defaults from the decision logic.",
+    },
+    "all": {
+        "label": "All Modules (M0-M8)",
+        "description": "Enable every module for full coverage.",
+    },
+    "oltp_migration": {
+        "label": "OLTP + Migration Suite",
+        "description": "Focus on transactional migration readiness and import validation.",
+    },
+    "htap_analytics": {
+        "label": "HTAP Analytics Suite",
+        "description": "Includes OLTP baseline plus concurrent HTAP analytics checks.",
+    },
+    "ai_vector": {
+        "label": "AI / Vector Suite",
+        "description": "Adds vector search testing to HTAP-focused coverage.",
+    },
+    "smoke": {
+        "label": "Smoke Validation",
+        "description": "Fast minimal validation for environment shakeout.",
+    },
+    "none": {
+        "label": "Disable All",
+        "description": "Turn all modules off for manual re-selection.",
+    },
+}
+
 UI_TIERS = ["serverless", "essential", "premium", "dedicated"]
 UI_TIER_LABELS = {
     "serverless": "Starter",
@@ -402,6 +524,39 @@ def parse_import_methods_from_form(form, prefix: str) -> List[str]:
         if form.get(f"{prefix}{method}") == "on":
             selected.append(method)
     return selected or list(IMPORT_METHOD_LABELS.keys())
+
+
+def modules_from_suite(
+    suite_id: str,
+    *,
+    tier: str,
+    scenario: str,
+    run_ha_sim: bool,
+    enable_optional_advanced: bool,
+    existing: Dict,
+) -> Dict:
+    suite = str(suite_id or "tier_recommended").strip().lower()
+    if suite == "tier_recommended":
+        return build_tier_modules(
+            tier=tier,
+            scenario=scenario,
+            run_ha_sim=run_ha_sim,
+            enable_optional_advanced=enable_optional_advanced,
+            existing=existing,
+        )
+
+    if suite not in MODULE_SUITE_KEYS:
+        suite = "tier_recommended"
+        return build_tier_modules(
+            tier=tier,
+            scenario=scenario,
+            run_ha_sim=run_ha_sim,
+            enable_optional_advanced=enable_optional_advanced,
+            existing=existing,
+        )
+
+    enabled = set(MODULE_SUITE_KEYS[suite])
+    return {k: (k in enabled) for k in MODULE_ORDER}
 
 
 def load_counts_for_preview(cfg: Dict) -> Dict:
@@ -1065,6 +1220,9 @@ def create_app(config_path: Path) -> Flask:
             import_method_labels=IMPORT_METHOD_LABELS,
             quickstart_workload_presets=QUICKSTART_WORKLOAD_PRESETS,
             quickstart_security_modes=QUICKSTART_SECURITY_MODES,
+            module_insights=MODULE_INSIGHTS,
+            module_suites=MODULE_SUITES,
+            enabled_module_count=sum(1 for key in MODULE_ORDER if cfg.get("modules", {}).get(key)),
             comparison_targets=TARGET_DEFINITIONS,
             comparison_target_label=target_label(cfg["comparison_db"]["target"]),
             comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
@@ -1167,15 +1325,19 @@ def create_app(config_path: Path) -> Flask:
         enable_optional_advanced = to_bool(request.form.get("wiz_enable_optional_advanced"), False)
         apply_profile = to_bool(request.form.get("wiz_apply_profile"), False)
         workload_preset = request.form.get("wiz_workload_preset", "balanced_poc").strip().lower()
+        module_suite = request.form.get("wiz_module_suite", "tier_recommended").strip().lower()
         if workload_preset not in QUICKSTART_WORKLOAD_PRESETS:
             workload_preset = "balanced_poc"
+        if module_suite not in MODULE_SUITES:
+            module_suite = "tier_recommended"
 
         cfg.setdefault("modules", {})
         cfg.setdefault("test", {})
         cfg.setdefault("tier", {})
         cfg.setdefault("pre_poc", {})
 
-        cfg["modules"] = build_tier_modules(
+        cfg["modules"] = modules_from_suite(
+            module_suite,
             tier=selected_tier,
             scenario=scenario,
             run_ha_sim=run_ha_sim,
@@ -1195,7 +1357,10 @@ def create_app(config_path: Path) -> Flask:
                 "selected": selected_tier,
                 "recommended": selected_tier,
                 "decision_tree_version": "quickstart-wizard",
-                "decision_notes": [f"Quickstart wizard profile: {workload_preset}"],
+                "decision_notes": [
+                    f"Quickstart wizard profile: {workload_preset}",
+                    f"Quickstart module suite: {module_suite}",
+                ],
             }
         )
         cfg["pre_poc"]["scenario_template"] = scenario
@@ -1265,6 +1430,48 @@ def create_app(config_path: Path) -> Flask:
 
         flash("Quickstart configuration saved. Use Run and Report when ready.", "success")
         return redirect(url_for("index") + "#run-report")
+
+    @app.post("/apply-module-suite")
+    def apply_module_suite_route():
+        cfg = load_cfg(config_path)
+
+        suite_id = request.form.get("module_suite", "tier_recommended").strip().lower()
+        selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
+        if selected_tier not in TIERS:
+            selected_tier = "serverless"
+
+        scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
+        if scenario not in SCENARIOS:
+            scenario = "oltp_migration"
+
+        run_ha_sim = to_bool(request.form.get("suite_run_ha_sim"), False)
+        enable_optional_advanced = to_bool(request.form.get("suite_enable_optional_advanced"), False)
+
+        cfg.setdefault("modules", {})
+        cfg["modules"] = modules_from_suite(
+            suite_id,
+            tier=selected_tier,
+            scenario=scenario,
+            run_ha_sim=run_ha_sim,
+            enable_optional_advanced=enable_optional_advanced,
+            existing=cfg.get("modules", {}),
+        )
+
+        save_cfg(config_path, cfg)
+        suite_label = MODULE_SUITES.get(suite_id, {}).get("label", suite_id)
+        flash(f"Applied module suite: {suite_label}.", "success")
+        return redirect(url_for("index") + "#test-planner")
+
+    @app.post("/save-module-selection")
+    def save_module_selection_route():
+        cfg = load_cfg(config_path)
+        mods = cfg.setdefault("modules", {})
+        for key in MODULE_ORDER:
+            mods[key] = (request.form.get(f"plan_mod_{key}") == "on")
+        save_cfg(config_path, cfg)
+        enabled = sum(1 for key in MODULE_ORDER if mods.get(key))
+        flash(f"Saved module selection ({enabled}/{len(MODULE_ORDER)} enabled).", "success")
+        return redirect(url_for("index") + "#test-planner")
 
     @app.post("/apply-tier")
     def apply_tier_route():
