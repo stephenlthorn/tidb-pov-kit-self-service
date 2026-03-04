@@ -1506,8 +1506,8 @@
 
           <form method="post" action="/quickstart-deploy" id="quickstart_form">
             <div class="wizard-step-pane active" data-wizard-step="1">
-              <h3 class="wizard-step-title">Scope and Performance Profile</h3>
-              <div class="grid cols-4">
+              <h3 class="wizard-step-title">Scope, Preset, and Test Selection</h3>
+              <div class="grid cols-3">
                 <div class="field">
                   <label>Company Name (for report)</label>
                   <input type="text" name="wiz_company_name" value="{{ cfg.report.company_name }}" placeholder="Acme Corp" />
@@ -1521,46 +1521,68 @@
                   </select>
                 </div>
                 <div class="field">
-                  <label>Scenario Template</label>
-                  <select name="wiz_scenario">
-                    {% for key, label in scenarios.items() %}
-                      <option value="{{ key }}" {% if cfg.pre_poc.scenario_template == key %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Workload Preset</label>
-                  <select name="wiz_workload_preset">
-                    {% for key, meta in quickstart_workload_presets.items() %}
-                      <option value="{{ key }}" {% if key == 'balanced_poc' %}selected{% endif %}>{{ meta.label }}</option>
-                    {% endfor %}
-                  </select>
+                  <label>Selected Tests</label>
+                  <input type="text" id="wizard_selected_tests" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
                 </div>
               </div>
-              <div class="grid cols-2">
-                <div class="field">
-                  <label>Module Suite</label>
-                  <select name="wiz_module_suite">
-                    <option value="tier_recommended" selected>Tier Recommended</option>
-                    <option value="all">All Modules (M0-M8)</option>
-                    <option value="oltp_migration">OLTP + Migration Suite</option>
-                    <option value="htap_analytics">HTAP Analytics Suite</option>
-                    <option value="ai_vector">AI / Vector Suite</option>
-                    <option value="smoke">Smoke Validation</option>
-                  </select>
+
+              <input type="hidden" name="wiz_tests_menu_present" value="1" />
+
+              <div class="field">
+                <label>Workload Preset</label>
+                <div class="wizard-preset-grid">
+                  {% for key, meta in quickstart_workload_presets.items() %}
+                    {% set suite_key = quickstart_preset_suites.get(key, 'oltp_migration') %}
+                    {% set suite_meta = module_suites.get(suite_key, {}) %}
+                    <label class="wizard-preset-card">
+                      <input type="radio" name="wiz_workload_preset" value="{{ key }}" {% if key == 'balanced_poc' %}checked{% endif %} />
+                      <span class="wizard-preset-head">
+                        <span class="wizard-preset-title">{{ meta.label }}</span>
+                        <span class="wizard-preset-suite">{{ suite_meta.get('label', suite_key) }}</span>
+                      </span>
+                      <span class="wizard-preset-body">{{ meta.description }}</span>
+                    </label>
+                  {% endfor %}
                 </div>
-                <div class="field">
-                  <label>Enabled Modules (current config)</label>
-                  <input type="text" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
+                <div class="tiny">Preset picks the default module suite. You can tune individual tests below.</div>
+              </div>
+
+              <div class="field">
+                <div class="wizard-tests-head">
+                  <label>Tests to Run</label>
+                  <div class="wizard-tests-actions">
+                    <button class="btn soft small" type="button" data-tests-action="preset">Apply preset defaults</button>
+                    <button class="btn soft small" type="button" data-tests-action="all">Select all</button>
+                    <button class="btn soft small" type="button" data-tests-action="none">Clear all</button>
+                  </div>
+                </div>
+                <div class="wizard-tests-menu">
+                  {% for key in module_order %}
+                    {% set insight = module_insights.get(key, {}) %}
+                    <label class="wizard-test-item">
+                      <input
+                        type="checkbox"
+                        name="wiz_mod_{{ key }}"
+                        data-module-key="{{ key }}"
+                        {% if cfg.modules[key] %}checked{% endif %}
+                      />
+                      <span class="wizard-test-main">
+                        <span class="wizard-test-label">{{ module_labels.get(key, key) }}</span>
+                        <span class="wizard-test-meta">
+                          <span class="wizard-test-category">{{ quickstart_test_categories.get(key, 'General') }}</span>
+                          <span class="wizard-test-focus">{{ insight.get('focus', 'Coverage test') }}</span>
+                        </span>
+                      </span>
+                    </label>
+                  {% endfor %}
                 </div>
               </div>
+
               <div class="check-wrap">
-                <label class="check"><input type="checkbox" name="wiz_apply_profile" checked /> Apply tier test profile defaults</label>
-                <label class="check"><input type="checkbox" name="wiz_enable_optional_advanced" /> Enable optional advanced modules</label>
-                <label class="check"><input type="checkbox" name="wiz_run_ha_sim" /> Enable simulated HA test where applicable</label>
+                <label class="check"><input type="checkbox" name="wiz_apply_profile" checked /> Apply tier test profile defaults (duration, concurrency, scale)</label>
               </div>
               <div class="line"></div>
-              <div class="tiny">The wizard sets practical defaults. Full tuning remains available in Manual Configuration and Dashboards.</div>
+              <div class="tiny">Scenario and module suite are now inferred from selected tests. Optional advanced and HA simulation toggles were merged into this test menu for clarity.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="2">
@@ -2588,6 +2610,11 @@
   const wizardPrevBtn = document.querySelector('[data-wizard-prev]');
   const wizardNextBtn = document.querySelector('[data-wizard-next]');
   const wizardSubmitBtn = document.querySelector('[data-wizard-submit]');
+  const quickstartPresetModules = {{ quickstart_preset_modules | tojson }};
+  const wizardPresetRadios = Array.from(document.querySelectorAll('input[name="wiz_workload_preset"]'));
+  const wizardModuleChecks = Array.from(document.querySelectorAll('input[data-module-key]'));
+  const wizardSelectedTestsEl = document.getElementById('wizard_selected_tests');
+  const wizardTestsActionBtns = Array.from(document.querySelectorAll('[data-tests-action]'));
   let wizardStep = 1;
 
   function setWizardStep(nextStep) {
@@ -2620,6 +2647,89 @@
     }
     if (wizardNextBtn) {
       wizardNextBtn.addEventListener('click', () => setWizardStep(wizardStep + 1));
+    }
+
+    function getWizardPresetSelection() {
+      const selected = wizardPresetRadios.find((radio) => radio.checked);
+      return selected ? selected.value : 'balanced_poc';
+    }
+
+    function syncWizardPresetCards() {
+      wizardPresetRadios.forEach((radio) => {
+        const card = radio.closest('.wizard-preset-card');
+        if (card) {
+          card.classList.toggle('is-selected', radio.checked);
+        }
+      });
+    }
+
+    function syncWizardTestItems() {
+      wizardModuleChecks.forEach((check) => {
+        const row = check.closest('.wizard-test-item');
+        if (row) {
+          row.classList.toggle('is-checked', check.checked);
+        }
+      });
+    }
+
+    function updateWizardSelectedCount() {
+      if (!wizardSelectedTestsEl) {
+        return;
+      }
+      const selectedCount = wizardModuleChecks.filter((check) => check.checked).length;
+      wizardSelectedTestsEl.value = `${selectedCount} / ${wizardModuleChecks.length}`;
+    }
+
+    function applyPresetModules(presetKey) {
+      const selectedKeys = new Set(quickstartPresetModules[presetKey] || []);
+      wizardModuleChecks.forEach((check) => {
+        check.checked = selectedKeys.has(check.dataset.moduleKey || '');
+      });
+      syncWizardTestItems();
+      updateWizardSelectedCount();
+    }
+
+    wizardPresetRadios.forEach((radio) => {
+      radio.addEventListener('change', () => {
+        syncWizardPresetCards();
+        applyPresetModules(radio.value);
+      });
+    });
+
+    wizardModuleChecks.forEach((check) => {
+      check.addEventListener('change', () => {
+        syncWizardTestItems();
+        updateWizardSelectedCount();
+      });
+    });
+
+    wizardTestsActionBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.testsAction;
+        if (action === 'preset') {
+          applyPresetModules(getWizardPresetSelection());
+          return;
+        }
+        if (action === 'all') {
+          wizardModuleChecks.forEach((check) => {
+            check.checked = true;
+          });
+        }
+        if (action === 'none') {
+          wizardModuleChecks.forEach((check) => {
+            check.checked = false;
+          });
+        }
+        syncWizardTestItems();
+        updateWizardSelectedCount();
+      });
+    });
+
+    syncWizardPresetCards();
+    syncWizardTestItems();
+    updateWizardSelectedCount();
+    if (wizardModuleChecks.length > 0 && !wizardModuleChecks.some((check) => check.checked)) {
+      applyPresetModules(getWizardPresetSelection());
     }
     setWizardStep(1);
   }

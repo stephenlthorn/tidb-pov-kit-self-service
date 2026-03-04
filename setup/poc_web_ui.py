@@ -391,6 +391,30 @@ QUICKSTART_WORKLOAD_PRESETS = {
     },
 }
 
+QUICKSTART_PRESET_SUITES = {
+    "fast_validation": "smoke",
+    "balanced_poc": "oltp_migration",
+    "stress_run": "all",
+}
+
+QUICKSTART_PRESET_MODULES = {
+    preset: list(MODULE_SUITE_KEYS.get(suite, MODULE_SUITE_KEYS["oltp_migration"]))
+    for preset, suite in QUICKSTART_PRESET_SUITES.items()
+}
+
+QUICKSTART_TEST_CATEGORIES = {
+    "customer_queries": "Validation",
+    "baseline_perf": "Performance",
+    "elastic_scale": "Performance",
+    "high_availability": "Resilience",
+    "write_contention": "Performance",
+    "htap": "HTAP / Analytics",
+    "online_ddl": "Schema Change",
+    "mysql_compat": "Compatibility",
+    "data_import": "Migration",
+    "vector_search": "AI / Vector",
+}
+
 QUICKSTART_SECURITY_MODES = {
     "keep_existing": "Keep existing screener state",
     "all_pass": "Mark all controls PASS (for controlled test envs)",
@@ -557,6 +581,14 @@ def modules_from_suite(
 
     enabled = set(MODULE_SUITE_KEYS[suite])
     return {k: (k in enabled) for k in MODULE_ORDER}
+
+
+def infer_scenario_from_modules(modules: Dict) -> str:
+    if modules.get("vector_search"):
+        return "ai_vector"
+    if modules.get("htap"):
+        return "htap_analytics"
+    return "oltp_migration"
 
 
 def load_counts_for_preview(cfg: Dict) -> Dict:
@@ -1219,6 +1251,9 @@ def create_app(config_path: Path) -> Flask:
             workload_targets=WORKLOAD_TARGETS,
             import_method_labels=IMPORT_METHOD_LABELS,
             quickstart_workload_presets=QUICKSTART_WORKLOAD_PRESETS,
+            quickstart_preset_suites=QUICKSTART_PRESET_SUITES,
+            quickstart_preset_modules=QUICKSTART_PRESET_MODULES,
+            quickstart_test_categories=QUICKSTART_TEST_CATEGORIES,
             quickstart_security_modes=QUICKSTART_SECURITY_MODES,
             module_insights=MODULE_INSIGHTS,
             module_suites=MODULE_SUITES,
@@ -1336,33 +1371,33 @@ def create_app(config_path: Path) -> Flask:
         if selected_tier not in TIERS:
             selected_tier = "serverless"
 
-        scenario = request.form.get("wiz_scenario", "oltp_migration").strip()
-        if scenario not in SCENARIOS:
-            scenario = "oltp_migration"
-
-        run_ha_sim = to_bool(request.form.get("wiz_run_ha_sim"), False)
-        enable_optional_advanced = to_bool(request.form.get("wiz_enable_optional_advanced"), False)
         apply_profile = to_bool(request.form.get("wiz_apply_profile"), False)
         workload_preset = request.form.get("wiz_workload_preset", "balanced_poc").strip().lower()
-        module_suite = request.form.get("wiz_module_suite", "tier_recommended").strip().lower()
         if workload_preset not in QUICKSTART_WORKLOAD_PRESETS:
             workload_preset = "balanced_poc"
-        if module_suite not in MODULE_SUITES:
-            module_suite = "tier_recommended"
 
         cfg.setdefault("modules", {})
         cfg.setdefault("test", {})
         cfg.setdefault("tier", {})
         cfg.setdefault("pre_poc", {})
+        preset_suite = QUICKSTART_PRESET_SUITES.get(workload_preset, "oltp_migration")
 
-        cfg["modules"] = modules_from_suite(
-            module_suite,
-            tier=selected_tier,
-            scenario=scenario,
-            run_ha_sim=run_ha_sim,
-            enable_optional_advanced=enable_optional_advanced,
-            existing=cfg.get("modules", {}),
-        )
+        selected_modules = {key: (request.form.get(f"wiz_mod_{key}") == "on") for key in MODULE_ORDER}
+        tests_menu_present = request.form.get("wiz_tests_menu_present") == "1"
+
+        if tests_menu_present:
+            cfg["modules"] = selected_modules
+            module_source_note = "Quickstart tests selected manually from wizard menu."
+        else:
+            cfg["modules"] = modules_from_suite(
+                preset_suite,
+                tier=selected_tier,
+                scenario="oltp_migration",
+                run_ha_sim=False,
+                enable_optional_advanced=False,
+                existing=cfg.get("modules", {}),
+            )
+            module_source_note = f"Quickstart tests derived from preset suite: {preset_suite}."
 
         if apply_profile:
             cfg["test"].update(tier_test_profile(selected_tier))
@@ -1371,6 +1406,9 @@ def create_app(config_path: Path) -> Flask:
         if preset_overrides:
             cfg["test"].update(preset_overrides)
 
+        enabled_module_count = sum(1 for key in MODULE_ORDER if cfg["modules"].get(key))
+        scenario = infer_scenario_from_modules(cfg["modules"])
+
         cfg["tier"].update(
             {
                 "selected": selected_tier,
@@ -1378,7 +1416,9 @@ def create_app(config_path: Path) -> Flask:
                 "decision_tree_version": "quickstart-wizard",
                 "decision_notes": [
                     f"Quickstart wizard profile: {workload_preset}",
-                    f"Quickstart module suite: {module_suite}",
+                    f"Quickstart preset suite: {preset_suite}",
+                    f"Quickstart selected tests: {enabled_module_count}/{len(MODULE_ORDER)}",
+                    module_source_note,
                 ],
             }
         )
