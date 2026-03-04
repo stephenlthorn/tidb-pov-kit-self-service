@@ -15,12 +15,12 @@
       --text: #eceff4;
       --muted: #8d95a1;
       --primary: #ff7a1a;
-      --primary-soft: rgba(255, 122, 26, 0.14);
+      --primary-soft: rgba(255, 122, 26, 0.15);
       --success: #5fcf92;
-      --warning: #ffc26e;
       --danger: #ff7b8a;
+      --warning: #ffc26e;
       --radius: 9px;
-      --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
+      --shadow: 0 10px 24px rgba(0, 0, 0, 0.45);
     }
 
     * { box-sizing: border-box; }
@@ -28,12 +28,12 @@
     body {
       margin: 0;
       background:
-        radial-gradient(1100px 720px at -12% -20%, rgba(162, 19, 19, 0.24), transparent 60%),
-        radial-gradient(820px 520px at 98% -15%, rgba(255, 122, 26, 0.1), transparent 56%),
+        radial-gradient(1000px 680px at -8% -20%, rgba(137, 19, 19, 0.24), transparent 62%),
+        radial-gradient(760px 480px at 102% -16%, rgba(255, 122, 26, 0.1), transparent 58%),
         var(--bg);
       color: var(--text);
       font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
-      line-height: 1.45;
+      line-height: 1.44;
     }
 
     .layout {
@@ -45,7 +45,7 @@
     .sidebar {
       border-right: 1px solid var(--line);
       background: linear-gradient(180deg, #0a0c10 0%, #080a0e 100%);
-      padding: 18px 14px;
+      padding: 16px 13px;
       position: sticky;
       top: 0;
       height: 100vh;
@@ -54,11 +54,11 @@
     }
 
     .brand {
-      border: 1px solid #2e343d;
+      border: 1px solid #2d333d;
       border-radius: 10px;
       background: linear-gradient(180deg, #111419 0%, #0d1015 100%);
-      padding: 14px;
-      margin-bottom: 14px;
+      padding: 13px;
+      margin-bottom: 12px;
       box-shadow: var(--shadow);
     }
 
@@ -66,50 +66,107 @@
       display: flex;
       align-items: center;
       gap: 10px;
+      margin-bottom: 8px;
     }
 
     .brand-logo {
-      width: 26px;
-      height: 26px;
+      width: 27px;
+      height: 27px;
       object-fit: contain;
-      filter: saturate(1.05) brightness(1.02);
       flex: 0 0 auto;
+      filter: saturate(1.05);
     }
 
     .brand .title {
-      font-size: 1rem;
-      font-weight: 750;
-      letter-spacing: 0.28px;
-      margin-bottom: 4px;
+      font-size: 1.02rem;
+      font-weight: 760;
+      letter-spacing: 0.24px;
+      margin-bottom: 3px;
     }
 
     .brand .sub {
       color: var(--muted);
-      font-size: 0.82rem;
+      font-size: 0.79rem;
     }
 
     .status-chips {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
+      display: grid;
+      gap: 7px;
+      margin-top: 8px;
     }
 
     .chip {
-      border: 1px solid #393f49;
+      border: 1px solid #3a434f;
       border-radius: 999px;
-      padding: 4px 9px;
+      padding: 5px 10px;
       font-size: 0.74rem;
-      color: #c7ced8;
-      background: rgba(17, 20, 25, 0.9);
+      color: #d0d8e3;
+      background: rgba(16, 20, 26, 0.92);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .chip-tier-starter {
+      border-color: #3d78cb;
+      color: #dce9ff;
+      background: linear-gradient(180deg, rgba(50, 110, 205, 0.38), rgba(30, 54, 92, 0.45));
+    }
+
+    .chip-tier-essential {
+      border-color: #4a63c8;
+      color: #e2e8ff;
+      background: linear-gradient(180deg, rgba(74, 99, 200, 0.4), rgba(38, 47, 96, 0.5));
+    }
+
+    .chip-tier-premium {
+      border-color: #7151c9;
+      color: #ece2ff;
+      background: linear-gradient(180deg, rgba(113, 81, 201, 0.42), rgba(58, 38, 95, 0.52));
+    }
+
+    .chip-tier-dedicated,
+    .chip-tier-byoc {
+      border-color: #8652cf;
+      color: #f2e2ff;
+      background: linear-gradient(180deg, rgba(134, 82, 207, 0.42), rgba(66, 37, 99, 0.54));
+    }
+
+    .chip-scenario-oltp {
+      border-color: #396fbe;
+      color: #d9e8ff;
+      background: linear-gradient(180deg, rgba(56, 111, 190, 0.35), rgba(29, 53, 90, 0.45));
+    }
+
+    .chip-scenario-htap {
+      border-color: #5066c3;
+      color: #e2e8ff;
+      background: linear-gradient(180deg, rgba(80, 102, 195, 0.38), rgba(40, 49, 95, 0.48));
+    }
+
+    .chip-scenario-ai {
+      border-color: #7752cd;
+      color: #ecdefe;
+      background: linear-gradient(180deg, rgba(119, 82, 205, 0.4), rgba(55, 34, 90, 0.52));
+    }
+
+    .chip-report-ready {
+      border-color: #2f7a57;
+      color: #d5ffe8;
+      background: linear-gradient(180deg, rgba(38, 120, 82, 0.45), rgba(19, 57, 40, 0.58));
+    }
+
+    .chip-report-missing {
+      border-color: #8f3a49;
+      color: #ffd8de;
+      background: linear-gradient(180deg, rgba(134, 43, 63, 0.42), rgba(69, 23, 35, 0.58));
     }
 
     .tabs {
       display: grid;
       gap: 7px;
-      margin-top: 8px;
       border-top: 1px solid #1f242b;
-      padding-top: 11px;
+      padding-top: 10px;
     }
 
     .tab-btn {
@@ -118,11 +175,11 @@
       color: #c9d0da;
       text-align: left;
       border-radius: 8px;
-      padding: 10px 12px;
+      padding: 10px 11px;
       cursor: pointer;
       transition: all 0.16s ease;
-      font-weight: 650;
-      font-size: 0.91rem;
+      font-weight: 640;
+      font-size: 0.89rem;
       letter-spacing: 0.08px;
       position: relative;
     }
@@ -131,7 +188,7 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      width: 18px;
+      width: 20px;
       color: #ff9a52;
       margin-right: 7px;
       font-size: 0.82rem;
@@ -144,16 +201,16 @@
     }
 
     .tab-btn.active {
-      border-color: #614126;
+      border-color: #6a4327;
       color: #ffd9bd;
-      background: linear-gradient(180deg, rgba(255, 122, 26, 0.18), rgba(255, 122, 26, 0.08));
+      background: linear-gradient(180deg, rgba(255, 122, 26, 0.2), rgba(255, 122, 26, 0.07));
       box-shadow:
-        inset 2px 0 0 rgba(255, 122, 26, 0.95),
-        inset 0 0 0 1px rgba(255, 122, 26, 0.22);
+        inset 2px 0 0 rgba(255, 122, 26, 0.96),
+        inset 0 0 0 1px rgba(255, 122, 26, 0.25);
     }
 
     .main {
-      padding: 20px 24px 40px;
+      padding: 20px 22px 38px;
       overflow: auto;
     }
 
@@ -162,27 +219,27 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 12px;
-      margin-bottom: 10px;
-      padding: 0 4px 6px;
+      margin-bottom: 11px;
+      padding: 0 2px 8px;
       border-bottom: 1px solid #1f252d;
     }
 
     .header h1 {
       margin: 0;
-      font-size: 1.4rem;
-      letter-spacing: 0.2px;
+      font-size: 1.34rem;
+      letter-spacing: 0.18px;
       font-weight: 760;
       color: #f5f7fa;
     }
 
     .header p {
-      margin: 5px 0 0;
+      margin: 6px 0 0;
       color: #8f98a4;
-      font-size: 0.86rem;
+      font-size: 0.84rem;
     }
 
     .logo-ribbon {
-      margin: 0 4px 12px;
+      margin: 0 2px 12px;
       display: grid;
       grid-template-columns: 1fr auto 1fr;
       gap: 10px;
@@ -193,36 +250,30 @@
       border: 1px solid #2b323d;
       border-radius: 8px;
       background: linear-gradient(180deg, #12161d 0%, #0d1117 100%);
-      padding: 11px;
+      padding: 10px;
       display: grid;
-      gap: 8px;
-      align-items: center;
-      justify-items: start;
+      gap: 7px;
+      align-content: center;
       min-height: 72px;
     }
 
     .logo-card .lk {
-      font-size: 0.72rem;
+      font-size: 0.7rem;
       color: #9ea6b2;
       text-transform: uppercase;
-      letter-spacing: 0.22px;
+      letter-spacing: 0.23px;
     }
 
     .logo-img {
-      height: 26px;
+      height: 24px;
       width: auto;
       object-fit: contain;
-      filter: brightness(1.03);
     }
 
     .logo-stack {
       display: flex;
       align-items: center;
-      gap: 8px;
-    }
-
-    .logo-stack .logo-img {
-      height: 24px;
+      gap: 9px;
     }
 
     .logo-vs {
@@ -234,15 +285,15 @@
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      font-size: 0.76rem;
+      font-size: 0.74rem;
       font-weight: 700;
-      letter-spacing: 0.22px;
+      letter-spacing: 0.2px;
     }
 
     .flash-wrap {
       display: grid;
       gap: 10px;
-      margin-bottom: 14px;
+      margin-bottom: 13px;
     }
 
     .msg {
@@ -251,7 +302,7 @@
       color: #dde4ee;
       border-radius: 8px;
       padding: 10px 12px;
-      font-size: 0.9rem;
+      font-size: 0.88rem;
     }
 
     .msg.error { border-color: #8f3d55; background: #2d1420; color: #ffd8e3; }
@@ -260,7 +311,7 @@
 
     .tab-pane {
       display: none;
-      animation: fadeIn 130ms ease;
+      animation: fadeIn 120ms ease;
     }
 
     .tab-pane.active { display: block; }
@@ -274,16 +325,14 @@
       background: linear-gradient(180deg, #11151c 0%, #0d1117 100%);
       border: 1px solid #262d37;
       border-radius: var(--radius);
-      padding: 16px;
+      padding: 15px;
       margin-top: 12px;
-      box-shadow:
-        var(--shadow),
-        inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      box-shadow: var(--shadow);
     }
 
     .panel h2 {
       margin: 0;
-      font-size: 1.08rem;
+      font-size: 1.04rem;
       letter-spacing: 0.16px;
       color: #f6f8fb;
     }
@@ -291,7 +340,15 @@
     .panel p.help {
       margin: 6px 0 12px;
       color: #8e96a2;
-      font-size: 0.88rem;
+      font-size: 0.84rem;
+    }
+
+    .subhead {
+      margin: 0 0 8px;
+      font-size: 0.9rem;
+      color: #dbe2ed;
+      letter-spacing: 0.14px;
+      text-transform: uppercase;
     }
 
     .stats-grid {
@@ -300,26 +357,40 @@
       gap: 10px;
     }
 
+    .stats-grid.stats-5 {
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+    }
+
     .stat {
       border: 1px solid #2a313c;
       border-radius: 8px;
       background: linear-gradient(180deg, #0f1319, #0b0f14);
       padding: 11px;
+      min-height: 84px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
     }
 
     .stat .k {
       color: #8d95a2;
-      font-size: 0.76rem;
-      margin-bottom: 5px;
+      font-size: 0.72rem;
+      margin-bottom: 6px;
       letter-spacing: 0.2px;
       text-transform: uppercase;
     }
 
     .stat .v {
-      font-size: 0.92rem;
+      font-size: 0.9rem;
       font-weight: 650;
       word-break: break-word;
       color: #e9edf4;
+    }
+
+    .stat .sub {
+      color: #8b93a0;
+      font-size: 0.72rem;
+      margin-top: 6px;
     }
 
     .line {
@@ -327,75 +398,49 @@
       margin: 14px 0;
     }
 
-    .row {
+    .pair-grid {
       display: grid;
       gap: 10px;
-      grid-template-columns: repeat(4, minmax(0, 1fr));
-      margin-bottom: 10px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .row3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-    .row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-
-    label {
-      font-size: 0.8rem;
-      color: #9ba3af;
-      display: block;
-      margin-bottom: 6px;
-      letter-spacing: 0.15px;
+    .pair {
+      border: 1px solid #2a313c;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f1319, #0b0f14);
+      padding: 10px;
+      min-height: 74px;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
     }
 
-    input[type=text],
-    input[type=password],
-    input[type=number],
-    select,
-    textarea {
-      width: 100%;
-      border: 1px solid #2c333d;
-      background: #090c11;
-      color: var(--text);
-      border-radius: 7px;
-      padding: 10px 11px;
-      outline: none;
+    .pair .pk {
+      color: #959daa;
+      font-size: 0.76rem;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
+      margin-bottom: 4px;
+    }
+
+    .pair .pv {
+      font-weight: 650;
       font-size: 0.9rem;
+      word-break: break-word;
+      color: #e9edf4;
     }
 
-    textarea {
-      min-height: 115px;
-      resize: vertical;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.84rem;
-      line-height: 1.38;
+    .actions-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
     }
 
-    input:focus, select:focus, textarea:focus {
-      border-color: #ff7a1a;
-      box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.2);
-    }
-
-    .check-wrap {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px 12px;
-    }
-
-    .check {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      border: 1px solid #2a313b;
-      border-radius: 7px;
-      padding: 8px 9px;
-      background: linear-gradient(180deg, #0f1318, #0b0f14);
-      color: var(--text);
-      font-size: 0.88rem;
-    }
-
-    .actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      margin-top: 10px;
+    .actions-grid > form,
+    .actions-grid > a,
+    .actions-grid > div {
+      margin: 0;
+      width: 100%;
     }
 
     .btn {
@@ -403,15 +448,18 @@
       background: linear-gradient(180deg, #171b21, #11151b);
       color: #e8edf4;
       border-radius: 7px;
-      padding: 10px 13px;
+      padding: 10px 12px;
       font-weight: 650;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      min-height: 39px;
+      min-height: 41px;
+      width: 100%;
       transition: transform 0.12s ease, border-color 0.12s ease;
+      font-family: inherit;
+      font-size: 0.84rem;
     }
 
     .btn:hover {
@@ -440,29 +488,466 @@
       border-color: #a44d65;
     }
 
+    .btn.soft {
+      background: linear-gradient(180deg, #20252e, #171b22);
+      border-color: #434b58;
+      color: #d9e1ec;
+    }
+
+    .btn.small {
+      min-height: 34px;
+      font-size: 0.78rem;
+    }
+
     .btn[disabled] {
       opacity: 0.45;
       cursor: not-allowed;
     }
 
-    .security-grid {
+    .grid {
       display: grid;
       gap: 10px;
-      grid-template-columns: 1fr 130px;
-      align-items: center;
+      margin-bottom: 10px;
     }
 
-    .security-item {
-      font-size: 0.88rem;
+    .grid.cols-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .grid.cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .grid.cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+    .field {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+    }
+
+    label {
+      font-size: 0.78rem;
+      color: #9ba3af;
+      display: block;
+      margin-bottom: 6px;
+      letter-spacing: 0.15px;
+      text-transform: uppercase;
+    }
+
+    input[type=text],
+    input[type=password],
+    input[type=number],
+    select,
+    textarea {
+      width: 100%;
+      border: 1px solid #2c333d;
+      background: #090c11;
       color: var(--text);
-      padding: 10px;
-      border: 1px solid #2b323d;
       border-radius: 7px;
+      padding: 10px 11px;
+      outline: none;
+      font-size: 0.85rem;
+      min-height: 40px;
+      font-family: inherit;
+    }
+
+    textarea {
+      min-height: 128px;
+      resize: vertical;
+      line-height: 1.4;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      border-color: #ff7a1a;
+      box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.2);
+    }
+
+    .check-wrap {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 10px;
+    }
+
+    .check {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid #2a313b;
+      border-radius: 7px;
+      padding: 8px 9px;
+      background: linear-gradient(180deg, #0f1318, #0b0f14);
+      color: var(--text);
+      font-size: 0.82rem;
+      text-transform: none;
+      margin: 0;
+      font-weight: 500;
+    }
+
+    .check input { margin: 0; }
+
+    .module-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+    }
+
+    .config-section {
+      border: 1px solid #262d37;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #11161d, #0c1117);
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .config-section h3 {
+      margin: 0 0 9px;
+      font-size: 0.9rem;
+      color: #e6edf8;
+      letter-spacing: 0.14px;
+    }
+
+    .security-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .security-row {
+      display: grid;
+      grid-template-columns: 1fr 290px;
+      gap: 12px;
+      align-items: stretch;
+      border: 1px solid #2b323d;
+      border-radius: 8px;
       background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 10px;
+    }
+
+    .security-row.blocking {
+      border-color: #5f3a25;
+      box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.08);
+    }
+
+    .security-title {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 4px;
+      flex-wrap: wrap;
+    }
+
+    .security-id {
+      font-size: 0.8rem;
+      color: #f0f5fc;
+      font-weight: 700;
+    }
+
+    .security-badge {
+      border: 1px solid #3b4552;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.7rem;
+      color: #bcc7d6;
+      background: #10151c;
+      text-transform: uppercase;
+    }
+
+    .security-badge.blocking {
+      border-color: #6e4326;
+      color: #ffd5b8;
+      background: rgba(255, 122, 26, 0.08);
+    }
+
+    .security-owner {
+      font-size: 0.72rem;
+      color: #9ea8b7;
+      margin-bottom: 5px;
+      text-transform: uppercase;
+    }
+
+    .security-prompt {
+      font-size: 0.84rem;
+      color: #dbe3ee;
+    }
+
+    .toggle-group {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 0;
+      border: 1px solid #384352;
+      border-radius: 8px;
+      overflow: hidden;
+      min-height: 40px;
+    }
+
+    .toggle-group input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .toggle-group label {
+      margin: 0;
+      padding: 10px 8px;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      text-align: center;
+      border-right: 1px solid #384352;
+      color: #b9c4d3;
+      background: #11161d;
+      cursor: pointer;
+      letter-spacing: 0.16px;
+    }
+
+    .toggle-group label:last-child {
+      border-right: none;
+    }
+
+    .toggle-group input:checked + label {
+      color: #18100b;
+      background: linear-gradient(180deg, #ff8e38, #ff7618);
+      font-weight: 700;
+    }
+
+    .toggle-group input[value="na"]:checked + label {
+      color: #e3e9f2;
+      background: linear-gradient(180deg, #3f4f66, #2d394a);
+    }
+
+    .toggle-group input[value="fail"]:checked + label {
+      color: #ffe3e7;
+      background: linear-gradient(180deg, #8b3448, #5d2431);
+    }
+
+    .security-toolbar {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-bottom: 10px;
+    }
+
+    .security-summary {
+      margin-top: 10px;
+      font-size: 0.82rem;
+      color: #a8b2c0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .security-summary .pill {
+      border: 1px solid #364151;
+      border-radius: 999px;
+      padding: 4px 9px;
+      background: #10151b;
+      color: #d3dbe7;
+      font-size: 0.75rem;
+    }
+
+    .pill.pass { border-color: #2f7e5f; color: #d7ffe7; }
+    .pill.fail { border-color: #8f3d55; color: #ffd8e3; }
+
+    .report-grid-two {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .subpanel {
+      border: 1px solid #2a313c;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 11px;
+    }
+
+    .bar-list {
+      display: grid;
+      gap: 8px;
+    }
+
+    .bar-row {
+      display: grid;
+      gap: 4px;
+    }
+
+    .bar-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: #c4cede;
+    }
+
+    .bar-track {
+      height: 10px;
+      border-radius: 999px;
+      border: 1px solid #374150;
+      background: #121821;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      min-width: 2px;
+      border-radius: 999px;
+    }
+
+    .bar-fill.tps { background: linear-gradient(90deg, #ffaf70, #ff7a1a); }
+    .bar-fill.latency { background: linear-gradient(90deg, #7fa4ff, #5f73f1); }
+    .bar-fill.import { background: linear-gradient(90deg, #6aa8ff, #4276db); }
+
+    .compat-track {
+      height: 12px;
+      border: 1px solid #374150;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #121821;
+      margin: 8px 0 10px;
+    }
+
+    .compat-fill {
+      height: 100%;
+      background: linear-gradient(90deg, #61d39b, #2ea96d);
+    }
+
+    .compat-list {
+      margin: 8px 0 0;
+      padding-left: 16px;
+      color: #cfd8e5;
+      font-size: 0.78rem;
+    }
+
+    .compat-list li {
+      margin-bottom: 4px;
+    }
+
+    .status-stack {
+      display: flex;
+      width: 100%;
+      border: 1px solid #303844;
+      border-radius: 999px;
+      overflow: hidden;
+      min-height: 16px;
+      background: #11151c;
+      margin-bottom: 8px;
+    }
+
+    .status-seg {
+      height: 16px;
+      min-width: 3px;
+    }
+
+    .seg-pass { background: #2ea96d; }
+    .seg-fail { background: #b14962; }
+    .seg-skip { background: #86709a; }
+    .seg-na { background: #566274; }
+
+    .status-legend {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .status-legend .item {
+      border: 1px solid #354051;
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 0.73rem;
+      color: #cfd8e5;
+      background: #10151c;
+    }
+
+    .module-status-list {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .module-row {
+      border: 1px solid #2d3440;
+      border-radius: 7px;
+      background: #0f141a;
+      padding: 8px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      font-size: 0.77rem;
+    }
+
+    .module-row .name {
+      color: #dce4ef;
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill-status {
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 0.7rem;
+      text-transform: uppercase;
+      border: 1px solid #364151;
+      background: #10151c;
+      color: #ced7e4;
+    }
+
+    .pill-pass { border-color: #2f7e5f; color: #d7ffe7; }
+    .pill-fail { border-color: #8f3d55; color: #ffd8e3; }
+    .pill-skip { border-color: #6a5a84; color: #e6dcff; }
+    .pill-na { border-color: #4a5568; color: #d2d8e1; }
+
+    .line-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .line-card {
+      border: 1px solid #2a313c;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 10px;
+    }
+
+    .line-title {
+      font-size: 0.76rem;
+      color: #d5ddea;
+      margin-bottom: 6px;
+      min-height: 34px;
+    }
+
+    .spark {
+      width: 100%;
+      height: 155px;
+      display: block;
+      border: 1px solid #323a45;
+      border-radius: 7px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent),
+        #0a0f15;
+    }
+
+    .spark polyline {
+      stroke-width: 2.2;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .spark .line-tps { stroke: #ff9c4c; }
+    .spark .line-p99 { stroke: #74a4ff; }
+
+    .line-meta {
+      margin-top: 6px;
+      font-size: 0.72rem;
+      color: #a8b2c0;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
     }
 
     .tiny {
-      font-size: 0.8rem;
+      font-size: 0.75rem;
       color: #969eaa;
     }
 
@@ -475,69 +960,67 @@
       padding: 10px;
       background: #080b10;
       color: #d7dce5;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.8rem;
+      font-family: inherit;
+      font-size: 0.77rem;
+      line-height: 1.42;
     }
 
-    .pair {
-      display: grid;
-      grid-template-columns: 220px 1fr;
-      gap: 10px;
-      margin-bottom: 8px;
-      align-items: center;
+    code {
+      border: 1px solid #2f3844;
+      border-radius: 6px;
+      padding: 2px 6px;
+      background: #0b1016;
+      color: #dbe6f5;
+      font-family: inherit;
+      font-size: 0.75rem;
     }
 
-    .pair .pk {
-      color: #959daa;
-      font-size: 0.82rem;
-      text-transform: uppercase;
-      letter-spacing: 0.2px;
+    .empty-state {
+      border: 1px dashed #424b59;
+      border-radius: 8px;
+      background: #0d1117;
+      color: #c7d0dc;
+      padding: 14px;
+      font-size: 0.84rem;
     }
 
-    .pair .pv {
-      font-weight: 650;
-      font-size: 0.91rem;
-      word-break: break-word;
-      color: #e9edf4;
+    @media (max-width: 1320px) {
+      .stats-grid.stats-5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .module-status-list,
+      .line-grid { grid-template-columns: 1fr; }
     }
 
     @media (max-width: 1120px) {
-      .layout {
-        grid-template-columns: 1fr;
-      }
+      .layout { grid-template-columns: 1fr; }
 
       .sidebar {
         position: static;
         height: auto;
         border-right: none;
         border-bottom: 1px solid var(--line);
-        padding: 14px;
+        padding: 13px;
       }
 
-      .tabs {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-      }
-
-      .logo-ribbon {
-        grid-template-columns: 1fr;
-      }
-
-      .logo-vs {
-        justify-self: start;
-      }
-
-      .main {
-        padding: 16px 14px 30px;
-      }
-
+      .tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+      .logo-ribbon,
       .stats-grid,
-      .row,
-      .row2,
-      .row3,
-      .security-grid,
-      .pair {
+      .stats-grid.stats-5,
+      .pair-grid,
+      .grid.cols-4,
+      .grid.cols-3,
+      .grid.cols-2,
+      .security-row,
+      .security-toolbar,
+      .report-grid-two,
+      .line-grid,
+      .module-grid,
+      .module-status-list {
         grid-template-columns: 1fr;
       }
+
+      .logo-vs { justify-self: start; }
+
+      .main { padding: 15px 13px 30px; }
     }
   </style>
 </head>
@@ -553,15 +1036,16 @@
         </div>
       </div>
       <div class="status-chips">
-        <span class="chip">Tier: {{ cfg.tier.selected }}</span>
-        <span class="chip">Scenario: {{ cfg.pre_poc.scenario_template }}</span>
-        <span class="chip">Report: {% if report_ready %}Ready{% else %}Missing{% endif %}</span>
+        <span class="chip {{ tier_chip_class }}">Tier: {{ selected_tier_label }}</span>
+        <span class="chip {{ scenario_chip_class }}">Scenario: {{ selected_scenario_label }}</span>
+        <span class="chip {{ report_chip_class }}">Report: {% if report_ready %}Ready{% else %}Not Ready{% endif %}</span>
       </div>
     </div>
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
       <button class="tab-btn" data-tab-btn="run-report"><span class="ico">[>]</span>Run and Report</button>
+      <button class="tab-btn" data-tab-btn="report-dashboard"><span class="ico">[#]</span>Report Dashboard</button>
       <button class="tab-btn" data-tab-btn="cloud-tier"><span class="ico">[C]</span>Cloud Tier</button>
       <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
       <button class="tab-btn" data-tab-btn="configuration"><span class="ico">[*]</span>Configuration</button>
@@ -610,15 +1094,17 @@
         <p class="help">Current project state and high-level readiness summary.</p>
         <div class="stats-grid">
           <div class="stat"><div class="k">Config Path</div><div class="v">{{ config_path }}</div></div>
-          <div class="stat"><div class="k">Tier</div><div class="v">{{ cfg.tier.selected }} ({{ tier_labels.get(cfg.tier.selected, cfg.tier.selected) }})</div></div>
-          <div class="stat"><div class="k">Scenario</div><div class="v">{{ scenarios.get(cfg.pre_poc.scenario_template, cfg.pre_poc.scenario_template) }}</div></div>
+          <div class="stat"><div class="k">Tier</div><div class="v">{{ selected_tier_label }}</div></div>
+          <div class="stat"><div class="k">Scenario</div><div class="v">{{ selected_scenario_label }}</div></div>
           <div class="stat"><div class="k">Report PDF</div><div class="v">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
         </div>
         <div class="line"></div>
-        <div class="pair"><div class="pk">Run In Progress</div><div class="pv">{{ run_status.running }}{% if run_status.pid %} (pid {{ run_status.pid }}){% endif %}</div></div>
-        <div class="pair"><div class="pk">Security Recommendation</div><div class="pv">{{ security_result.recommendation }}</div></div>
-        <div class="pair"><div class="pk">Blocking Security Failures</div><div class="pv">{{ security_result.blocking_failures|length }}</div></div>
-        <div class="pair"><div class="pk">Proceed Flag</div><div class="pv">{{ security_result.proceed }}</div></div>
+        <div class="pair-grid">
+          <div class="pair"><div class="pk">Run In Progress</div><div class="pv">{{ run_status.running }}{% if run_status.pid %} (pid {{ run_status.pid }}){% endif %}</div></div>
+          <div class="pair"><div class="pk">Security Recommendation</div><div class="pv">{{ security_result.recommendation }}</div></div>
+          <div class="pair"><div class="pk">Blocking Security Failures</div><div class="pv">{{ security_result.blocking_failures|length }}</div></div>
+          <div class="pair"><div class="pk">Proceed Flag</div><div class="pv">{{ security_result.proceed }}</div></div>
+        </div>
       </div>
     </section>
 
@@ -626,37 +1112,206 @@
       <div class="panel">
         <h2>Run and Report Actions</h2>
         <p class="help">Run defaults, regenerate report only, and open the latest report artifact.</p>
-        <div class="actions">
+        <div class="actions-grid">
           <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run PoC with Defaults</button></form>
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
           {% if report_ready %}
             <a class="btn ok" href="/report" target="_blank">Open or Download Report PDF</a>
           {% else %}
-            <button class="btn" type="button" disabled title="Run PoC first">Open or Download Report PDF</button>
+            <div><button class="btn" type="button" disabled title="Run PoC first">Open or Download Report PDF</button></div>
           {% endif %}
         </div>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab-pane="report-dashboard">
+      <div class="panel">
+        <h2>Report Dashboard</h2>
+        <p class="help">Auto-populated from <code>results/metrics_summary.json</code> after a run or report build.</p>
+
+        {% if report_dashboard.ready %}
+          <div class="stats-grid stats-5">
+            {% for card in report_dashboard.summary_cards %}
+              <div class="stat">
+                <div class="k">{{ card.label }}</div>
+                <div class="v">{{ card.value }}</div>
+                <div class="sub">{{ card.sub }}</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="line"></div>
+          <h3 class="subhead">Module Status</h3>
+          <div class="status-stack">
+            {% for seg in report_dashboard.status_segments %}
+              {% if seg.pct > 0 %}
+                <div class="status-seg {{ seg.class }}" style="width: {{ seg.pct }}%"></div>
+              {% endif %}
+            {% endfor %}
+          </div>
+          <div class="status-legend">
+            {% for seg in report_dashboard.status_segments %}
+              <span class="item">{{ seg.label }}: {{ seg.count }} ({{ seg.pct }}%)</span>
+            {% endfor %}
+          </div>
+
+          {% if report_dashboard.module_rows %}
+            <div class="module-status-list">
+              {% for row in report_dashboard.module_rows %}
+                <div class="module-row">
+                  <span class="name">{{ row.name }}</span>
+                  <span class="pill-status {{ row.status_class }}">{{ row.status_label }}</span>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+
+          <div class="report-grid-two">
+            <div class="subpanel">
+              <h3 class="subhead">Baseline TPS by Concurrency</h3>
+              {% if report_dashboard.baseline_tps %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.baseline_tps %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.tps }}</span></div>
+                      <div class="bar-track"><div class="bar-fill tps" style="width: {{ row.tps_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No baseline TPS data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Baseline P99 Latency (ms)</h3>
+              {% if report_dashboard.baseline_p99 %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.baseline_p99 %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.p99_ms }}</span></div>
+                      <div class="bar-track"><div class="bar-fill latency" style="width: {{ row.p99_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No baseline latency data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Write Contention TPS</h3>
+              {% if report_dashboard.contention_tps %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.contention_tps %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.tps }}</span></div>
+                      <div class="bar-track"><div class="bar-fill tps" style="width: {{ row.tps_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No write contention data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Import Throughput (GB/min)</h3>
+              {% if report_dashboard.import_bars %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.import_bars %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.throughput }}</span></div>
+                      <div class="bar-track"><div class="bar-fill import" style="width: {{ row.throughput_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No import throughput data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">MySQL Compatibility</h3>
+              <div class="bar-meta">
+                <span>Passed {{ report_dashboard.compat_passed }} / {{ report_dashboard.compat_total }}</span>
+                <span>{{ report_dashboard.compat_pct }}%</span>
+              </div>
+              <div class="compat-track"><div class="compat-fill" style="width: {{ report_dashboard.compat_pct }}%"></div></div>
+              {% if report_dashboard.compat_failed_checks %}
+                <div class="tiny">Failed checks</div>
+                <ul class="compat-list">
+                  {% for item in report_dashboard.compat_failed_checks %}
+                    <li>{{ item.check_name }}{% if item.note %} - {{ item.note }}{% endif %}</li>
+                  {% endfor %}
+                </ul>
+              {% else %}
+                <div class="tiny">No failed compatibility checks.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Generated At</h3>
+              <div class="tiny">{{ report_dashboard.generated_at if report_dashboard.generated_at else 'n/a' }}</div>
+              <div class="line"></div>
+              <div class="actions-grid">
+                {% if report_ready %}
+                  <a class="btn ok" href="/report" target="_blank">Open Current PDF</a>
+                {% else %}
+                  <div><button class="btn" type="button" disabled>PDF not generated yet</button></div>
+                {% endif %}
+                <form method="post" action="/build-report"><button class="btn" type="submit">Refresh Report Artifacts</button></form>
+              </div>
+            </div>
+          </div>
+
+          {% if report_dashboard.line_charts %}
+            <div class="line"></div>
+            <h3 class="subhead">Time-Series Graphs</h3>
+            <div class="line-grid">
+              {% for chart in report_dashboard.line_charts %}
+                <div class="line-card">
+                  <div class="line-title">{{ chart.title }}</div>
+                  <svg class="spark" viewBox="0 0 460 150" preserveAspectRatio="none">
+                    <polyline class="{{ chart.class }}" points="{{ chart.points }}" fill="none"></polyline>
+                  </svg>
+                  <div class="line-meta">
+                    <span>Min: {{ chart.min }}</span>
+                    <span>Max: {{ chart.max }}</span>
+                    <span>Last: {{ chart.last }}</span>
+                    <span>Samples: {{ chart.samples }}</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="empty-state">
+            Report dashboard is empty because report artifacts are not ready yet. Run the workflow once, then open this tab again.
+          </div>
+        {% endif %}
       </div>
     </section>
 
     <section class="tab-pane" data-tab-pane="cloud-tier">
       <div class="panel">
         <h2>Cloud Tier</h2>
-        <p class="help">Apply tier profile directly (includes Dedicated cluster option) with module and test defaults.</p>
+        <p class="help">Apply tier profile directly with module and test defaults. Tier naming here matches TiDB Cloud packaging.</p>
         <form method="post" action="/apply-tier">
-          <div class="row3">
-            <div>
+          <div class="grid cols-3">
+            <div class="field">
               <label>Tier</label>
               <select name="apply_tier">
                 {% for t in tiers %}
-                  <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ t }} - {{ tier_labels.get(t, t) }}</option>
+                  <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
                 {% endfor %}
               </select>
             </div>
-            <div>
+            <div class="field">
               <label>Simulated HA for non-Dedicated tiers</label>
               <label class="check"><input type="checkbox" name="apply_run_ha_sim" /> Enable simulated M3</label>
             </div>
-            <div>
+            <div class="field">
               <label>Optional advanced modules</label>
               <label class="check"><input type="checkbox" name="apply_enable_optional_advanced" /> Enable optional advanced</label>
             </div>
@@ -664,13 +1319,13 @@
           <div class="check-wrap">
             <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
           </div>
-          <div class="actions"><button class="btn" type="submit">Apply Tier Profile</button></div>
+          <div class="actions-grid"><button class="btn" type="submit">Apply Tier Profile</button></div>
         </form>
 
         <div class="line"></div>
         <div class="tiny">
-          <strong>Tier Help:</strong> Serverless for fast pilots, Essential for PITR/regional baseline, Premium for stronger controls,
-          Dedicated for peering/90-day retention/full HA tests, BYOC for own-account sovereignty and IAM/KMS control.
+          <strong>Tier guide:</strong> Starter for fast pilots, Essential for PITR/regional baseline, Premium for stronger governance controls,
+          Dedicated for peering + 90-day retention + full HA tests.
         </div>
       </div>
     </section>
@@ -678,9 +1333,15 @@
     <section class="tab-pane" data-tab-pane="security">
       <div class="panel">
         <h2>Security Screener</h2>
-        <p class="help">Set PASS/FAIL/N/A for each control. Recommendation updates in config under pre_poc.security.</p>
+        <p class="help">Use quick toggles for each control: PASS, NOT PASS, or N/A (default).</p>
         <form method="post" action="/security">
-          <div class="security-grid">
+          <div class="security-toolbar">
+            <button class="btn soft small" type="button" data-sec-set="pass">Set all PASS</button>
+            <button class="btn soft small" type="button" data-sec-set="fail">Set all NOT PASS</button>
+            <button class="btn soft small" type="button" data-sec-set="na">Set all N/A</button>
+          </div>
+
+          <div class="security-list">
             {% for item in security_items %}
               {% set ns = namespace(current='not_assessed') %}
               {% for row in security_result["items"] %}
@@ -688,28 +1349,41 @@
                   {% set ns.current = row["status"] %}
                 {% endif %}
               {% endfor %}
-              <div class="security-item">
-                <div><strong>{{ item.id }}</strong> {% if item.blocking %}<span class="tiny">(blocking)</span>{% else %}<span class="tiny">(non-blocking)</span>{% endif %}</div>
-                <div class="tiny">Owner: {{ item.owner }}</div>
-                <div>{{ item.prompt }}</div>
-              </div>
-              <div>
-                <select name="sec_{{ item.id }}">
-                  <option value="pass" {% if ns.current == 'pass' %}selected{% endif %}>PASS</option>
-                  <option value="fail" {% if ns.current == 'fail' %}selected{% endif %}>FAIL</option>
-                  <option value="na" {% if ns.current == 'na' %}selected{% endif %}>N/A</option>
-                  <option value="not_assessed" {% if ns.current == 'not_assessed' %}selected{% endif %}>NOT ASSESSED</option>
-                </select>
+
+              <div class="security-row {% if item.blocking %}blocking{% endif %}">
+                <div>
+                  <div class="security-title">
+                    <span class="security-id">{{ item.id }}</span>
+                    <span class="security-badge {% if item.blocking %}blocking{% endif %}">{% if item.blocking %}Blocking{% else %}Non-blocking{% endif %}</span>
+                  </div>
+                  <div class="security-owner">Owner: {{ item.owner }}</div>
+                  <div class="security-prompt">{{ item.prompt }}</div>
+                </div>
+
+                <div class="toggle-group">
+                  <input id="{{ item.id }}_pass" type="radio" name="sec_{{ item.id }}" value="pass" {% if ns.current == 'pass' %}checked{% endif %} />
+                  <label for="{{ item.id }}_pass">Pass</label>
+
+                  <input id="{{ item.id }}_fail" type="radio" name="sec_{{ item.id }}" value="fail" {% if ns.current == 'fail' %}checked{% endif %} />
+                  <label for="{{ item.id }}_fail">Not Pass</label>
+
+                  <input id="{{ item.id }}_na" type="radio" name="sec_{{ item.id }}" value="na" {% if ns.current in ['na', 'not_assessed'] %}checked{% endif %} />
+                  <label for="{{ item.id }}_na">N/A</label>
+                </div>
               </div>
             {% endfor %}
           </div>
-          <div class="actions"><button class="btn warn" type="submit">Run Security Screener</button></div>
+
+          <div class="line"></div>
+          <div class="actions-grid">
+            <button class="btn warn" type="submit">Save Security Screener</button>
+          </div>
         </form>
-        <div class="line"></div>
-        <div class="tiny">
-          Recommendation: <strong>{{ security_result.recommendation }}</strong>
-          | Blocking failures: {{ security_result.blocking_failures|length }}
-          | Proceed: {{ security_result.proceed }}
+
+        <div class="security-summary">
+          <span class="pill">Recommendation: {{ security_result.recommendation }}</span>
+          <span class="pill">Blocking failures: {{ security_result.blocking_failures|length }}</span>
+          <span class="pill {% if security_result.proceed %}pass{% else %}fail{% endif %}">Proceed: {{ security_result.proceed }}</span>
         </div>
       </div>
     </section>
@@ -717,128 +1391,137 @@
     <section class="tab-pane" data-tab-pane="configuration">
       <div class="panel">
         <h2>Configuration</h2>
-        <p class="help">Edit all runtime config, including cluster credentials and module/test parameters.</p>
+        <p class="help">All runtime settings including TiDB/Aurora connection details, modules, and report controls.</p>
+
         <form method="post" action="/save-config">
-          <h3>TiDB Cluster Connection</h3>
-          <div class="row">
-            <div><label>Host</label><input type="text" name="tidb_host" value="{{ cfg.tidb.host }}" /></div>
-            <div><label>Port</label><input type="number" name="tidb_port" value="{{ cfg.tidb.port }}" /></div>
-            <div><label>User</label><input type="text" name="tidb_user" value="{{ cfg.tidb.user }}" /></div>
-            <div><label>Password</label><input type="password" name="tidb_password" value="{{ cfg.tidb.password }}" /></div>
-          </div>
-          <div class="row2">
-            <div><label>Database</label><input type="text" name="tidb_database" value="{{ cfg.tidb.database }}" /></div>
-            <div><label>SSL</label>
-              <select name="tidb_ssl">
-                <option value="true" {% if cfg.tidb.ssl %}selected{% endif %}>true</option>
-                <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
-              </select>
+          <div class="config-section">
+            <h3>TiDB Cluster Connection</h3>
+            <div class="grid cols-4">
+              <div class="field"><label>Host</label><input type="text" name="tidb_host" value="{{ cfg.tidb.host }}" /></div>
+              <div class="field"><label>Port</label><input type="number" name="tidb_port" value="{{ cfg.tidb.port }}" /></div>
+              <div class="field"><label>User</label><input type="text" name="tidb_user" value="{{ cfg.tidb.user }}" /></div>
+              <div class="field"><label>Password</label><input type="password" name="tidb_password" value="{{ cfg.tidb.password }}" /></div>
             </div>
-          </div>
-
-          <div class="line"></div>
-          <h3>Comparison DB (Optional)</h3>
-          <div class="check-wrap"><label class="check"><input type="checkbox" name="comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison DB</label></div>
-          <div class="row">
-            <div><label>Host</label><input type="text" name="comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
-            <div><label>Port</label><input type="number" name="comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
-            <div><label>User</label><input type="text" name="comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
-            <div><label>Password</label><input type="password" name="comparison_password" value="{{ cfg.comparison_db.password }}" /></div>
-          </div>
-          <div class="row3">
-            <div><label>Database</label><input type="text" name="comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
-            <div><label>Label</label><input type="text" name="comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
-            <div><label>SSL</label>
-              <select name="comparison_ssl">
-                <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
-                <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="line"></div>
-          <h3>Test and Scenario</h3>
-          <div class="row">
-            <div>
-              <label>Scenario Template</label>
-              <select name="scenario_template">
-                {% for key, label in scenarios.items() %}
-                  <option value="{{ key }}" {% if cfg.pre_poc.scenario_template == key %}selected{% endif %}>{{ key }} - {{ label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label>Tier Selected</label>
-              <select name="tier_selected">
-                {% for t in tiers %}
-                  <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ t }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div>
-              <label>Data Scale</label>
-              <select name="test_data_scale">
-                <option value="small" {% if cfg.test.data_scale == 'small' %}selected{% endif %}>small</option>
-                <option value="medium" {% if cfg.test.data_scale == 'medium' %}selected{% endif %}>medium</option>
-                <option value="large" {% if cfg.test.data_scale == 'large' %}selected{% endif %}>large</option>
-              </select>
-            </div>
-            <div>
-              <label>Workload Mix</label>
-              <select name="test_workload_mix">
-                <option value="mixed" {% if cfg.test.workload_mix == 'mixed' %}selected{% endif %}>mixed</option>
-                <option value="read_heavy" {% if cfg.test.workload_mix == 'read_heavy' %}selected{% endif %}>read_heavy</option>
-                <option value="write_heavy" {% if cfg.test.workload_mix == 'write_heavy' %}selected{% endif %}>write_heavy</option>
-              </select>
-            </div>
-          </div>
-          <div class="row">
-            <div><label>Duration Seconds</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
-            <div><label>Concurrency Levels (comma-separated)</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
-            <div><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
-            <div><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
-          </div>
-
-          <div class="line"></div>
-          <h3>Customer Queries and Modules</h3>
-          <div class="row2">
-            <div>
-              <label>Customer Queries (one SQL per line)</label>
-              <textarea name="customer_queries">{{ cfg.customer_queries | join('\n') }}</textarea>
-            </div>
-            <div>
-              <label>Customer Query Ratio</label>
-              <input type="number" step="0.01" name="customer_query_ratio" value="{{ cfg.customer_query_ratio }}" />
-              <div class="line"></div>
-              <label>Modules</label>
-              <div class="check-wrap">
-                {% for key in module_order %}
-                  <label class="check"><input type="checkbox" name="mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
-                {% endfor %}
+            <div class="grid cols-2">
+              <div class="field"><label>Database</label><input type="text" name="tidb_database" value="{{ cfg.tidb.database }}" /></div>
+              <div class="field"><label>SSL</label>
+                <select name="tidb_ssl">
+                  <option value="true" {% if cfg.tidb.ssl %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
+                </select>
               </div>
             </div>
           </div>
 
-          <div class="line"></div>
-          <h3>Report and TCO</h3>
-          <div class="row">
-            <div><label>Company Name</label><input type="text" name="report_company_name" value="{{ cfg.report.company_name }}" /></div>
-            <div><label>Output Dir</label><input type="text" name="report_output_dir" value="{{ cfg.report.output_dir }}" /></div>
-            <div><label>Current DB Monthly Cost USD</label><input type="number" step="0.01" name="report_current_db_monthly_cost_usd" value="{{ cfg.report.current_db_monthly_cost_usd }}" /></div>
-            <div><label>Include TCO</label><label class="check"><input type="checkbox" name="report_include_tco_model" {% if cfg.report.include_tco_model %}checked{% endif %} /> enabled</label></div>
-          </div>
-          <div class="row3">
-            <div><label>TCO Data Size GB</label><input type="number" name="tco_data_size_gb" value="{{ cfg.tco.data_size_gb }}" /></div>
-            <div><label>TCO Annual Growth %</label><input type="number" name="tco_annual_growth_pct" value="{{ cfg.tco.annual_growth_pct }}" /></div>
-            <div><label>Aurora Shards Year0</label><input type="number" name="tco_aurora_shards_year0" value="{{ cfg.tco.aurora_shards_year0 }}" /></div>
-          </div>
-          <div class="row3">
-            <div><label>Engineers Managing Shards</label><input type="number" name="tco_engineers_managing_shards" value="{{ cfg.tco.engineers_managing_shards }}" /></div>
-            <div><label>Engineer Annual Cost</label><input type="number" name="tco_engineer_annual_cost" value="{{ cfg.tco.engineer_annual_cost }}" /></div>
-            <div><label>Sharding Eng Fraction</label><input type="number" step="0.01" name="tco_sharding_eng_fraction" value="{{ cfg.tco.sharding_eng_fraction }}" /></div>
+          <div class="config-section">
+            <h3>Comparison DB (Aurora MySQL)</h3>
+            <div class="check-wrap"><label class="check"><input type="checkbox" name="comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison DB</label></div>
+            <div class="grid cols-4">
+              <div class="field"><label>Host</label><input type="text" name="comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
+              <div class="field"><label>Port</label><input type="number" name="comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
+              <div class="field"><label>User</label><input type="text" name="comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
+              <div class="field"><label>Password</label><input type="password" name="comparison_password" value="{{ cfg.comparison_db.password }}" /></div>
+            </div>
+            <div class="grid cols-3">
+              <div class="field"><label>Database</label><input type="text" name="comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
+              <div class="field"><label>Label</label><input type="text" name="comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
+              <div class="field"><label>SSL</label>
+                <select name="comparison_ssl">
+                  <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
+                </select>
+              </div>
+            </div>
           </div>
 
-          <div class="actions"><button class="btn primary" type="submit">Save Configuration</button></div>
+          <div class="config-section">
+            <h3>Scenario and Test Profile</h3>
+            <div class="grid cols-4">
+              <div class="field">
+                <label>Scenario Template</label>
+                <select name="scenario_template">
+                  {% for key, label in scenarios.items() %}
+                    <option value="{{ key }}" {% if cfg.pre_poc.scenario_template == key %}selected{% endif %}>{{ label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label>Tier Selected</label>
+                <select name="tier_selected">
+                  {% for t in tiers %}
+                    <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label>Data Scale</label>
+                <select name="test_data_scale">
+                  <option value="small" {% if cfg.test.data_scale == 'small' %}selected{% endif %}>small</option>
+                  <option value="medium" {% if cfg.test.data_scale == 'medium' %}selected{% endif %}>medium</option>
+                  <option value="large" {% if cfg.test.data_scale == 'large' %}selected{% endif %}>large</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Workload Mix</label>
+                <select name="test_workload_mix">
+                  <option value="mixed" {% if cfg.test.workload_mix == 'mixed' %}selected{% endif %}>mixed</option>
+                  <option value="read_heavy" {% if cfg.test.workload_mix == 'read_heavy' %}selected{% endif %}>read_heavy</option>
+                  <option value="write_heavy" {% if cfg.test.workload_mix == 'write_heavy' %}selected{% endif %}>write_heavy</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid cols-4">
+              <div class="field"><label>Duration Seconds</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
+              <div class="field"><label>Concurrency Levels</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
+              <div class="field"><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
+              <div class="field"><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
+            </div>
+          </div>
+
+          <div class="config-section">
+            <h3>Customer Queries and Modules</h3>
+            <div class="grid cols-2">
+              <div class="field">
+                <label>Customer Queries (one SQL per line)</label>
+                <textarea name="customer_queries">{{ cfg.customer_queries | join('\n') }}</textarea>
+              </div>
+              <div class="field">
+                <label>Customer Query Ratio</label>
+                <input type="number" step="0.01" name="customer_query_ratio" value="{{ cfg.customer_query_ratio }}" />
+                <div class="line"></div>
+                <label>Modules</label>
+                <div class="module-grid">
+                  {% for key in module_order %}
+                    <label class="check"><input type="checkbox" name="mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
+                  {% endfor %}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="config-section">
+            <h3>Report and TCO</h3>
+            <div class="grid cols-4">
+              <div class="field"><label>Company Name</label><input type="text" name="report_company_name" value="{{ cfg.report.company_name }}" /></div>
+              <div class="field"><label>Output Dir</label><input type="text" name="report_output_dir" value="{{ cfg.report.output_dir }}" /></div>
+              <div class="field"><label>Current DB Monthly Cost USD</label><input type="number" step="0.01" name="report_current_db_monthly_cost_usd" value="{{ cfg.report.current_db_monthly_cost_usd }}" /></div>
+              <div class="field"><label>Include TCO</label><label class="check"><input type="checkbox" name="report_include_tco_model" {% if cfg.report.include_tco_model %}checked{% endif %} /> enabled</label></div>
+            </div>
+            <div class="grid cols-3">
+              <div class="field"><label>TCO Data Size GB</label><input type="number" name="tco_data_size_gb" value="{{ cfg.tco.data_size_gb }}" /></div>
+              <div class="field"><label>TCO Annual Growth %</label><input type="number" name="tco_annual_growth_pct" value="{{ cfg.tco.annual_growth_pct }}" /></div>
+              <div class="field"><label>Aurora Shards Year0</label><input type="number" name="tco_aurora_shards_year0" value="{{ cfg.tco.aurora_shards_year0 }}" /></div>
+            </div>
+            <div class="grid cols-3">
+              <div class="field"><label>Engineers Managing Shards</label><input type="number" name="tco_engineers_managing_shards" value="{{ cfg.tco.engineers_managing_shards }}" /></div>
+              <div class="field"><label>Engineer Annual Cost</label><input type="number" name="tco_engineer_annual_cost" value="{{ cfg.tco.engineer_annual_cost }}" /></div>
+              <div class="field"><label>Sharding Eng Fraction</label><input type="number" step="0.01" name="tco_sharding_eng_fraction" value="{{ cfg.tco.sharding_eng_fraction }}" /></div>
+            </div>
+          </div>
+
+          <div class="actions-grid">
+            <button class="btn primary" type="submit">Save Configuration</button>
+          </div>
         </form>
       </div>
     </section>
@@ -848,12 +1531,12 @@
         <h2>Data Reset</h2>
         <p class="help">Safely clear local artifacts and optionally drop the configured PoC database.</p>
         <form method="post" action="/clear-data">
-          <div class="row2">
-            <div>
+          <div class="grid cols-2">
+            <div class="field">
               <label>Type CLEAR to delete local PoC artifacts</label>
               <input type="text" name="clear_token" placeholder="CLEAR" />
             </div>
-            <div>
+            <div class="field">
               <label>Type DROP only if dropping DB too (optional)</label>
               <input type="text" name="drop_token" placeholder="DROP" />
             </div>
@@ -861,7 +1544,7 @@
           <div class="check-wrap">
             <label class="check"><input type="checkbox" name="drop_db" /> Also drop configured database</label>
           </div>
-          <div class="actions"><button class="btn danger" type="submit">Clear PoC Data</button></div>
+          <div class="actions-grid"><button class="btn danger" type="submit">Clear PoC Data</button></div>
         </form>
       </div>
     </section>
@@ -870,9 +1553,12 @@
       <div class="panel">
         <h2>Run Monitor</h2>
         <p class="help">Background run status and tail of <code>results/web_ui_run.log</code>.</p>
-        <div class="pair"><div class="pk">Running</div><div class="pv">{{ run_status.running }}</div></div>
-        <div class="pair"><div class="pk">PID</div><div class="pv">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
-        <div class="pair"><div class="pk">Last Log Update</div><div class="pv">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
+        <div class="pair-grid">
+          <div class="pair"><div class="pk">Running</div><div class="pv">{{ run_status.running }}</div></div>
+          <div class="pair"><div class="pk">PID</div><div class="pv">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Last Log Update</div><div class="pv">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Report PDF</div><div class="pv">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
+        </div>
         <div class="line"></div>
         <pre class="log">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
       </div>
@@ -904,6 +1590,17 @@
 
   buttons.forEach((btn) => {
     btn.addEventListener('click', () => activate(btn.dataset.tabBtn));
+  });
+
+  document.querySelectorAll('[data-sec-set]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const next = btn.dataset.secSet;
+      document
+        .querySelectorAll(`input[type="radio"][name^="sec_"][value="${next}"]`)
+        .forEach((radio) => {
+          radio.checked = true;
+        });
+    });
   });
 
   const fromHash = window.location.hash ? window.location.hash.slice(1) : 'overview';

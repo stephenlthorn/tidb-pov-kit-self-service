@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import shutil
@@ -39,6 +40,7 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 RUN_SCRIPT = ROOT / "run_all.sh"
 
 REPORT_PDF = RESULTS_DIR / "tidb_pov_report.pdf"
+METRICS_JSON = RESULTS_DIR / "metrics_summary.json"
 RUN_LOG = RESULTS_DIR / "web_ui_run.log"
 RUN_PID = RESULTS_DIR / "web_ui_run.pid"
 
@@ -142,6 +144,56 @@ MODULE_LABELS = {
     "vector_search": "M8 - Vector Search",
 }
 
+UI_TIERS = ["serverless", "essential", "premium", "dedicated"]
+UI_TIER_LABELS = {
+    "serverless": "Starter",
+    "essential": "Essential",
+    "premium": "Premium",
+    "dedicated": "Dedicated",
+    "byoc": "BYOC",
+}
+
+TIER_CHIP_CLASSES = {
+    "serverless": "chip-tier-starter",
+    "essential": "chip-tier-essential",
+    "premium": "chip-tier-premium",
+    "dedicated": "chip-tier-dedicated",
+    "byoc": "chip-tier-byoc",
+}
+
+SCENARIO_CHIP_CLASSES = {
+    "oltp_migration": "chip-scenario-oltp",
+    "htap_analytics": "chip-scenario-htap",
+    "ai_vector": "chip-scenario-ai",
+}
+
+MODULE_REPORT_LABELS = {
+    "00_customer_queries": "M0 - Customer Query Validation",
+    "01_baseline_perf": "M1 - Baseline OLTP Performance",
+    "02_elastic_scale": "M2 - Elastic Auto-Scaling",
+    "03_high_availability": "M3 - High Availability",
+    "03b_write_contention": "M3b - Write Contention",
+    "04_htap_concurrent": "M4 - HTAP Concurrent",
+    "05_online_ddl": "M5 - Online DDL",
+    "06_mysql_compat": "M6 - MySQL Compatibility",
+    "07_data_import": "M7 - Data Import",
+    "08_vector_search": "M8 - Vector Search",
+}
+
+STATUS_LABELS = {
+    "passed": "Passed",
+    "failed": "Failed",
+    "skipped": "Skipped",
+    "not_run": "Not Run",
+}
+
+STATUS_CLASSES = {
+    "passed": "pill-pass",
+    "failed": "pill-fail",
+    "skipped": "pill-skip",
+    "not_run": "pill-na",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Launch PoC web UI")
@@ -233,6 +285,282 @@ def parse_concurrency(raw: str, default: List[int]) -> List[int]:
         if part.isdigit() and int(part) > 0:
             vals.append(int(part))
     return vals or default
+
+
+def ui_tier_label(tier: str) -> str:
+    return UI_TIER_LABELS.get(tier, tier.replace("_", " ").title())
+
+
+def visible_tiers_for_ui(selected_tier: str) -> List[str]:
+    visible = list(UI_TIERS)
+    if selected_tier in TIERS and selected_tier not in visible:
+        visible.append(selected_tier)
+    return visible
+
+
+def parse_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def parse_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def mean_series(points: List[Dict], key: str) -> float:
+    vals = [parse_float(p.get(key), 0.0) for p in points if isinstance(p, dict)]
+    vals = [v for v in vals if v > 0]
+    if not vals:
+        return 0.0
+    return sum(vals) / len(vals)
+
+
+def pct(value: float, total: float) -> float:
+    if total <= 0:
+        return 0.0
+    return round((value / total) * 100.0, 1)
+
+
+def parse_level_num(label: str) -> int:
+    m = re.search(r"\d+", label or "")
+    if not m:
+        return 10**6
+    return int(m.group(0))
+
+
+def build_svg_points(values: List[float], width: int = 460, height: int = 150) -> Tuple[str, float, float, float]:
+    if len(values) < 2:
+        return "", 0.0, 0.0, 0.0
+    min_v = min(values)
+    max_v = max(values)
+    span = max(max_v - min_v, 1.0)
+    points = []
+    for idx, val in enumerate(values):
+        x = (idx / (len(values) - 1)) * width
+        y = height - (((val - min_v) / span) * height)
+        points.append(f"{x:.2f},{y:.2f}")
+    return " ".join(points), min_v, max_v, values[-1]
+
+
+def load_metrics_summary() -> Dict | None:
+    if not METRICS_JSON.exists():
+        return None
+    try:
+        return json.loads(METRICS_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def build_report_dashboard() -> Dict:
+    out = {
+        "ready": False,
+        "generated_at": "",
+        "summary_cards": [],
+        "status_segments": [],
+        "module_rows": [],
+        "baseline_tps": [],
+        "baseline_p99": [],
+        "contention_tps": [],
+        "import_bars": [],
+        "compat_pct": 0.0,
+        "compat_total": 0,
+        "compat_passed": 0,
+        "compat_failed": 0,
+        "compat_failed_checks": [],
+        "line_charts": [],
+    }
+
+    metrics = load_metrics_summary()
+    if not metrics:
+        return out
+
+    out["ready"] = True
+    out["generated_at"] = str(metrics.get("generated_at") or "")
+
+    summary = metrics.get("summary") or {}
+    modules = metrics.get("modules") or {}
+    compat = metrics.get("compat_checks") or {}
+    import_stats = metrics.get("import_stats") or []
+
+    status_counts = {"passed": 0, "failed": 0, "skipped": 0, "not_run": 0}
+    module_rows = []
+    for key, data in modules.items():
+        if not isinstance(data, dict):
+            continue
+        status = str(data.get("status") or "not_run").lower()
+        if status not in status_counts:
+            status = "not_run"
+        status_counts[status] += 1
+        module_rows.append(
+            {
+                "name": MODULE_REPORT_LABELS.get(key, key),
+                "status": status,
+                "status_label": STATUS_LABELS.get(status, status),
+                "status_class": STATUS_CLASSES.get(status, "pill-na"),
+            }
+        )
+    out["module_rows"] = sorted(module_rows, key=lambda r: r["name"])
+
+    status_total = sum(status_counts.values()) or 1
+    out["status_segments"] = [
+        {
+            "label": STATUS_LABELS["passed"],
+            "count": status_counts["passed"],
+            "pct": pct(status_counts["passed"], status_total),
+            "class": "seg-pass",
+        },
+        {
+            "label": STATUS_LABELS["failed"],
+            "count": status_counts["failed"],
+            "pct": pct(status_counts["failed"], status_total),
+            "class": "seg-fail",
+        },
+        {
+            "label": STATUS_LABELS["skipped"],
+            "count": status_counts["skipped"],
+            "pct": pct(status_counts["skipped"], status_total),
+            "class": "seg-skip",
+        },
+        {
+            "label": STATUS_LABELS["not_run"],
+            "count": status_counts["not_run"],
+            "pct": pct(status_counts["not_run"], status_total),
+            "class": "seg-na",
+        },
+    ]
+
+    best_tps = parse_float(summary.get("best_tps"), 0.0)
+    best_p99 = parse_float(summary.get("best_p99_ms"), 0.0)
+    mysql_compat_pct = parse_float(summary.get("mysql_compat_pct"), parse_float(compat.get("pct"), 0.0))
+    modules_passed = parse_int(summary.get("modules_passed"), status_counts["passed"])
+    modules_run = parse_int(summary.get("modules_run"), status_total)
+    import_throughputs = [parse_float(item.get("throughput_gbpm"), 0.0) for item in import_stats if isinstance(item, dict)]
+    best_import = max(import_throughputs) if import_throughputs else 0.0
+
+    out["summary_cards"] = [
+        {"label": "Modules Passed", "value": f"{modules_passed}/{modules_run}", "sub": "Execution coverage"},
+        {"label": "Best TPS", "value": f"{best_tps:,.1f}", "sub": "Higher is better"},
+        {"label": "Best P99 (ms)", "value": f"{best_p99:,.2f}", "sub": "Lower is better"},
+        {"label": "MySQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "Syntax/behavior checks"},
+        {"label": "Best Import GB/min", "value": f"{best_import:.4f}", "sub": "Data import throughput"},
+    ]
+
+    baseline = modules.get("01_baseline_perf") if isinstance(modules.get("01_baseline_perf"), dict) else {}
+    baseline_tidb = baseline.get("tidb") if isinstance(baseline.get("tidb"), dict) else {}
+    baseline_ts = baseline.get("time_series") if isinstance(baseline.get("time_series"), dict) else {}
+    baseline_rows = []
+    for level in sorted(baseline_tidb.keys(), key=parse_level_num):
+        vals = baseline_tidb.get(level) or {}
+        ts_points = baseline_ts.get(level) if isinstance(baseline_ts.get(level), list) else []
+        tps_val = parse_float(vals.get("tps"), 0.0)
+        if tps_val <= 0:
+            tps_val = mean_series(ts_points, "tps")
+        p99_val = parse_float(vals.get("p99_ms"), 0.0)
+        baseline_rows.append(
+            {
+                "label": level.upper(),
+                "tps": round(tps_val, 2),
+                "p99_ms": round(p99_val, 2),
+                "avg_ms": round(parse_float(vals.get("avg_ms"), 0.0), 2),
+            }
+        )
+
+    max_tps = max((r["tps"] for r in baseline_rows), default=0.0)
+    max_p99 = max((r["p99_ms"] for r in baseline_rows), default=0.0)
+    for row in baseline_rows:
+        row["tps_pct"] = pct(row["tps"], max_tps or 1.0)
+        row["p99_pct"] = pct(row["p99_ms"], max_p99 or 1.0)
+    out["baseline_tps"] = baseline_rows
+    out["baseline_p99"] = baseline_rows
+
+    contention = modules.get("03b_write_contention") if isinstance(modules.get("03b_write_contention"), dict) else {}
+    contention_tidb = contention.get("tidb") if isinstance(contention.get("tidb"), dict) else {}
+    contention_ts = contention.get("time_series") if isinstance(contention.get("time_series"), dict) else {}
+    contention_rows = []
+    for mode in sorted(contention_tidb.keys()):
+        vals = contention_tidb.get(mode) or {}
+        ts_points = contention_ts.get(mode) if isinstance(contention_ts.get(mode), list) else []
+        tps_val = parse_float(vals.get("tps"), 0.0)
+        if tps_val <= 0:
+            tps_val = mean_series(ts_points, "tps")
+        contention_rows.append(
+            {
+                "label": mode.replace("_", " ").title(),
+                "tps": round(tps_val, 2),
+                "p99_ms": round(parse_float(vals.get("p99_ms"), 0.0), 2),
+            }
+        )
+    max_contention = max((r["tps"] for r in contention_rows), default=0.0)
+    for row in contention_rows:
+        row["tps_pct"] = pct(row["tps"], max_contention or 1.0)
+    out["contention_tps"] = contention_rows
+
+    import_rows = []
+    for idx, item in enumerate(import_stats, start=1):
+        if not isinstance(item, dict):
+            continue
+        throughput = parse_float(item.get("throughput_gbpm"), 0.0)
+        import_rows.append(
+            {
+                "label": f"Run {idx}",
+                "throughput": round(throughput, 5),
+                "duration_sec": round(parse_float(item.get("duration_sec"), 0.0), 2),
+                "rows_imported": parse_int(item.get("rows_imported"), 0),
+            }
+        )
+    max_import = max((r["throughput"] for r in import_rows), default=0.0)
+    for row in import_rows:
+        row["throughput_pct"] = pct(row["throughput"], max_import or 1.0)
+    out["import_bars"] = import_rows
+
+    out["compat_total"] = parse_int(compat.get("total"), 0)
+    out["compat_passed"] = parse_int(compat.get("passed"), 0)
+    out["compat_failed"] = parse_int(compat.get("failed"), 0)
+    out["compat_pct"] = parse_float(compat.get("pct"), 0.0)
+    out["compat_failed_checks"] = [
+        d for d in (compat.get("details") or []) if isinstance(d, dict) and d.get("status") == "fail"
+    ]
+
+    line_charts = []
+    for module_key, data in modules.items():
+        if not isinstance(data, dict):
+            continue
+        ts_map = data.get("time_series")
+        if not isinstance(ts_map, dict):
+            continue
+
+        module_label = MODULE_REPORT_LABELS.get(module_key, module_key)
+        for series_name, points in ts_map.items():
+            if not isinstance(points, list) or len(points) < 2:
+                continue
+            for metric, metric_label, color_class in (
+                ("tps", "TPS", "line-tps"),
+                ("p99_ms", "P99 Latency (ms)", "line-p99"),
+            ):
+                values = [parse_float(p.get(metric), 0.0) for p in points if isinstance(p, dict)]
+                if len(values) < 2:
+                    continue
+                svg_points, min_v, max_v, last_v = build_svg_points(values)
+                if not svg_points:
+                    continue
+                line_charts.append(
+                    {
+                        "title": f"{module_label} - {series_name.upper()} - {metric_label}",
+                        "points": svg_points,
+                        "min": round(min_v, 2),
+                        "max": round(max_v, 2),
+                        "last": round(last_v, 2),
+                        "class": color_class,
+                        "samples": len(values),
+                    }
+                )
+    out["line_charts"] = line_charts
+    return out
 
 
 def pid_alive(pid: int) -> bool:
@@ -416,21 +744,33 @@ def create_app(config_path: Path) -> Flask:
         sec = security_from_cfg(cfg)
         st = run_status()
         report_ready = REPORT_PDF.exists()
+        report_dashboard = build_report_dashboard()
+
+        selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
+        selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
+        tiers_for_ui = visible_tiers_for_ui(selected_tier)
 
         return render_template(
             "poc_web_ui.html",
             cfg=cfg,
             report_ready=report_ready,
+            report_dashboard=report_dashboard,
             report_path=str(REPORT_PDF),
             run_status=st,
-            tiers=TIERS,
-            tier_labels=TIER_LABELS,
+            tiers=tiers_for_ui,
+            tier_labels=UI_TIER_LABELS,
             scenarios=SCENARIOS,
             security_items=SECURITY_ITEMS,
             security_result=sec,
             module_order=MODULE_ORDER,
             module_labels=MODULE_LABELS,
             config_path=str(config_path),
+            selected_tier_label=ui_tier_label(selected_tier),
+            selected_scenario_label=SCENARIOS.get(selected_scenario, selected_scenario),
+            tier_chip_class=TIER_CHIP_CLASSES.get(selected_tier, "chip-tier-starter"),
+            scenario_chip_class=SCENARIO_CHIP_CLASSES.get(selected_scenario, "chip-scenario-oltp"),
+            report_chip_class="chip-report-ready" if report_ready else "chip-report-missing",
+            status_classes=STATUS_CLASSES,
         )
 
     @app.post("/save-config")
@@ -455,7 +795,8 @@ def create_app(config_path: Path) -> Flask:
         comp["label"] = request.form.get("comparison_label", "Aurora MySQL").strip() or "Aurora MySQL"
         comp["ssl"] = to_bool(request.form.get("comparison_ssl"), False)
 
-        cfg.setdefault("tier", {})["selected"] = request.form.get("tier_selected", "serverless")
+        chosen_tier = request.form.get("tier_selected", "serverless")
+        cfg.setdefault("tier", {})["selected"] = chosen_tier if chosen_tier in TIERS else "serverless"
 
         test = cfg.setdefault("test", {})
         test["data_scale"] = request.form.get("test_data_scale", "small")
@@ -537,7 +878,7 @@ def create_app(config_path: Path) -> Flask:
         )
 
         save_cfg(config_path, cfg)
-        flash(f"Applied tier profile: {selected_tier}.", "success")
+        flash(f"Applied tier profile: {ui_tier_label(selected_tier)}.", "success")
         return redirect(url_for("index"))
 
     @app.post("/security")
