@@ -505,6 +505,14 @@ pre.log,
   color: var(--muted);
 }
 
+.wizard-steps {
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)) !important;
+}
+
+.wizard-nav {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+}
+
 .wizard-preset-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -513,12 +521,13 @@ pre.log,
 }
 
 .wizard-preset-card {
-  display: grid;
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--surface-2);
-  padding: 10px;
+  padding: 11px;
   cursor: pointer;
   transition: border-color 120ms ease, background 120ms ease;
 }
@@ -527,8 +536,15 @@ pre.log,
   border-color: var(--line-2);
 }
 
-.wizard-preset-card input[type=radio] {
+.wizard-preset-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+}
+
+.wizard-preset-top input[type=radio] {
   margin: 0;
+  margin-top: 2px;
   accent-color: var(--primary);
 }
 
@@ -542,6 +558,7 @@ pre.log,
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  width: 100%;
 }
 
 .wizard-preset-title {
@@ -559,16 +576,17 @@ pre.log,
 }
 
 .wizard-preset-body {
-  font-size: 13px;
+  font-size: 12px;
   color: var(--muted);
+  line-height: 1.45;
 }
 
-.wizard-tests-head {
-  display: flex;
+.wizard-tests-toolbar {
+  margin-top: 8px;
+  display: grid;
+  grid-template-columns: minmax(190px, 240px) minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  flex-wrap: wrap;
 }
 
 .wizard-tests-actions {
@@ -576,15 +594,24 @@ pre.log,
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.wizard-tests-count {
+  display: grid;
+  gap: 4px;
+}
+
+.wizard-tests-count .k {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .wizard-tests-menu {
   margin-top: 8px;
   display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
-  max-height: 360px;
-  overflow: auto;
-  padding-right: 2px;
 }
 
 .wizard-test-item {
@@ -675,12 +702,20 @@ pre.log,
   .grid.cols-3,
   .grid.cols-2,
   .actions-grid,
-  .wizard-tests-head,
+  .wizard-tests-toolbar,
   .planner-actions,
   .path-grid,
   .pair-grid,
   .stats-grid,
   .status-chips {
     grid-template-columns: 1fr !important;
+  }
+
+  .wizard-tests-actions {
+    justify-content: flex-start;
+  }
+
+  .wizard-tests-menu {
+    grid-template-columns: 1fr;
   }
 }

@@ -545,7 +545,7 @@
 
     .wizard-steps {
       display: grid;
-      grid-template-columns: repeat(5, minmax(0, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       gap: 8px;
       margin-bottom: 12px;
     }
@@ -591,7 +591,7 @@
 
     .wizard-nav {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 8px;
       margin-top: 8px;
     }
@@ -1500,29 +1500,24 @@
             <div class="wizard-step-chip active" data-wizard-step-indicator="1">1. Scope</div>
             <div class="wizard-step-chip" data-wizard-step-indicator="2">2. TiDB</div>
             <div class="wizard-step-chip" data-wizard-step-indicator="3">3. Comparison</div>
-            <div class="wizard-step-chip" data-wizard-step-indicator="4">4. Security</div>
-            <div class="wizard-step-chip" data-wizard-step-indicator="5">5. Run</div>
+            <div class="wizard-step-chip" data-wizard-step-indicator="4">4. Run</div>
           </div>
 
           <form method="post" action="/quickstart-deploy" id="quickstart_form">
             <div class="wizard-step-pane active" data-wizard-step="1">
               <h3 class="wizard-step-title">Scope, Preset, and Test Selection</h3>
-              <div class="grid cols-3">
+              <div class="grid cols-2">
                 <div class="field">
                   <label>Company Name (for report)</label>
-                  <input type="text" name="wiz_company_name" value="{{ cfg.report.company_name }}" placeholder="Acme Corp" />
+                  <input id="wiz_company_name" type="text" name="wiz_company_name" value="{{ cfg.report.company_name }}" placeholder="Acme Corp" />
                 </div>
                 <div class="field">
                   <label>Cloud Tier</label>
-                  <select name="wiz_tier">
+                  <select id="wiz_tier" name="wiz_tier">
                     {% for t in tiers %}
                       <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
                     {% endfor %}
                   </select>
-                </div>
-                <div class="field">
-                  <label>Selected Tests</label>
-                  <input type="text" id="wizard_selected_tests" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
                 </div>
               </div>
 
@@ -1535,10 +1530,12 @@
                     {% set suite_key = quickstart_preset_suites.get(key, 'oltp_migration') %}
                     {% set suite_meta = module_suites.get(suite_key, {}) %}
                     <label class="wizard-preset-card">
-                      <input type="radio" name="wiz_workload_preset" value="{{ key }}" {% if key == 'balanced_poc' %}checked{% endif %} />
-                      <span class="wizard-preset-head">
-                        <span class="wizard-preset-title">{{ meta.label }}</span>
-                        <span class="wizard-preset-suite">{{ suite_meta.get('label', suite_key) }}</span>
+                      <span class="wizard-preset-top">
+                        <input type="radio" name="wiz_workload_preset" value="{{ key }}" {% if key == 'balanced_poc' %}checked{% endif %} />
+                        <span class="wizard-preset-head">
+                          <span class="wizard-preset-title">{{ meta.label }}</span>
+                          <span class="wizard-preset-suite">{{ suite_meta.get('label', suite_key) }}</span>
+                        </span>
                       </span>
                       <span class="wizard-preset-body">{{ meta.description }}</span>
                     </label>
@@ -1548,14 +1545,7 @@
               </div>
 
               <div class="field">
-                <div class="wizard-tests-head">
-                  <label>Tests to Run</label>
-                  <div class="wizard-tests-actions">
-                    <button class="btn soft small" type="button" data-tests-action="preset">Apply preset defaults</button>
-                    <button class="btn soft small" type="button" data-tests-action="all">Select all</button>
-                    <button class="btn soft small" type="button" data-tests-action="none">Clear all</button>
-                  </div>
-                </div>
+                <label>Tests to Run</label>
                 <div class="wizard-tests-menu">
                   {% for key in module_order %}
                     {% set insight = module_insights.get(key, {}) %}
@@ -1576,27 +1566,38 @@
                     </label>
                   {% endfor %}
                 </div>
+                <div class="wizard-tests-toolbar">
+                  <div class="wizard-tests-count">
+                    <span class="k">Selected Tests</span>
+                    <input type="text" id="wizard_selected_tests" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
+                  </div>
+                  <div class="wizard-tests-actions">
+                    <button class="btn soft small" type="button" data-tests-action="preset">Apply preset defaults</button>
+                    <button class="btn soft small" type="button" data-tests-action="all">Select all</button>
+                    <button class="btn soft small" type="button" data-tests-action="none">Clear all</button>
+                  </div>
+                </div>
               </div>
 
               <div class="check-wrap">
                 <label class="check"><input type="checkbox" name="wiz_apply_profile" checked /> Apply tier test profile defaults (duration, concurrency, scale)</label>
               </div>
               <div class="line"></div>
-              <div class="tiny">Scenario and module suite are now inferred from selected tests. Optional advanced and HA simulation toggles were merged into this test menu for clarity.</div>
+              <div class="tiny">Scenario and module suite are inferred from selected tests. Presets are starting points and you can tune each test directly.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="2">
               <h3 class="wizard-step-title">TiDB Cluster Connection</h3>
               <div class="grid cols-4">
-                <div class="field"><label>Host</label><input type="text" name="wiz_tidb_host" value="{{ cfg.tidb.host }}" placeholder="gateway01.xxxxx.tidbcloud.com" /></div>
-                <div class="field"><label>Port</label><input type="number" name="wiz_tidb_port" value="{{ cfg.tidb.port }}" /></div>
-                <div class="field"><label>User</label><input type="text" name="wiz_tidb_user" value="{{ cfg.tidb.user }}" placeholder="clusterPrefix.root" /></div>
+                <div class="field"><label>Host</label><input id="wiz_tidb_host" type="text" name="wiz_tidb_host" value="{{ cfg.tidb.host }}" placeholder="gateway01.xxxxx.tidbcloud.com" /></div>
+                <div class="field"><label>Port</label><input id="wiz_tidb_port" type="number" name="wiz_tidb_port" value="{{ cfg.tidb.port }}" /></div>
+                <div class="field"><label>User</label><input id="wiz_tidb_user" type="text" name="wiz_tidb_user" value="{{ cfg.tidb.user }}" placeholder="clusterPrefix.root" /></div>
                 <div class="field"><label>Password</label><input type="password" name="wiz_tidb_password" value="" /></div>
               </div>
               <div class="grid cols-2">
-                <div class="field"><label>Database</label><input type="text" name="wiz_tidb_database" value="{{ cfg.tidb.database }}" /></div>
+                <div class="field"><label>Database</label><input id="wiz_tidb_database" type="text" name="wiz_tidb_database" value="{{ cfg.tidb.database }}" /></div>
                 <div class="field"><label>SSL</label>
-                  <select name="wiz_tidb_ssl">
+                  <select id="wiz_tidb_ssl" name="wiz_tidb_ssl">
                     <option value="true" {% if cfg.tidb.ssl %}selected{% endif %}>true</option>
                     <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
                   </select>
@@ -1608,7 +1609,7 @@
             <div class="wizard-step-pane" data-wizard-step="3">
               <h3 class="wizard-step-title">Optional Comparison Target</h3>
               <div class="check-wrap">
-                <label class="check"><input type="checkbox" name="wiz_comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison run</label>
+                <label class="check"><input id="wiz_comparison_enabled" type="checkbox" name="wiz_comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison run</label>
               </div>
               <div class="grid cols-4">
                 <div class="field">
@@ -1625,13 +1626,13 @@
                   </select>
                 </div>
                 <div class="field"><label>Label</label><input type="text" name="wiz_comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
-                <div class="field"><label>Host</label><input type="text" name="wiz_comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
-                <div class="field"><label>Port</label><input type="number" name="wiz_comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
+                <div class="field"><label>Host</label><input id="wiz_comparison_host" type="text" name="wiz_comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
+                <div class="field"><label>Port</label><input id="wiz_comparison_port" type="number" name="wiz_comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
               </div>
               <div class="grid cols-4">
                 <div class="field"><label>User</label><input type="text" name="wiz_comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
                 <div class="field"><label>Password</label><input type="password" name="wiz_comparison_password" value="" /></div>
-                <div class="field"><label>Database</label><input type="text" name="wiz_comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
+                <div class="field"><label>Database</label><input id="wiz_comparison_database" type="text" name="wiz_comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
                 <div class="field"><label>Schema</label><input type="text" name="wiz_comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
               </div>
               <div class="grid cols-4">
@@ -1669,45 +1670,35 @@
                 <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="wiz_comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
                 <div class="field"></div>
               </div>
+              <div class="tiny">Technology-specific options: PostgreSQL uses SSL Mode, SQL Server uses Driver/Encrypt/Trust Certificate, and MySQL-family targets use standard SSL settings.</div>
               <div class="tiny">Automated side-by-side workload execution currently supports MySQL family targets. Postgres and SQL Server targets are captured for planning/config parity.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="4">
-              <h3 class="wizard-step-title">Security and Governance Handling</h3>
-              <div class="grid cols-2">
-                <div class="field">
-                  <label>Security Screener Behavior</label>
-                  <select name="wiz_security_mode">
-                    {% for key, label in quickstart_security_modes.items() %}
-                      <option value="{{ key }}" {% if key == 'keep_existing' %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                  </select>
-                </div>
-                <div class="field">
-                  <label>Run Mode</label>
-                  <label class="check"><input type="checkbox" name="wiz_allow_blocked" /> Allow blocked run (dry-run only)</label>
-                </div>
-              </div>
-              <div class="tiny">`N/A` is intentionally treated as review-required hold. Keep that mode for production-like validation; use allow-blocked only for dry-runs.</div>
-            </div>
-
-            <div class="wizard-step-pane" data-wizard-step="5">
-              <h3 class="wizard-step-title">Review and Execute</h3>
+              <h3 class="wizard-step-title">Run Review</h3>
+              <div class="tiny">Final check before execution. Review scope, connection targets, and selected tests.</div>
               <div class="pair-grid">
-                <div class="pair"><div class="pk">Flow</div><div class="pv">Save configuration -> Apply tier/module defaults -> Optionally run full PoC</div></div>
-                <div class="pair"><div class="pk">Artifacts</div><div class="pv">Logs + metrics + report data under results/ and PDF when report is generated</div></div>
-                <div class="pair"><div class="pk">Advanced Tuning</div><div class="pv">Manual Configuration and Workload Lab stay available after wizard run</div></div>
-                <div class="pair"><div class="pk">Safety</div><div class="pv">No destructive actions are performed in this wizard</div></div>
+                <div class="pair"><div class="pk">Company</div><div class="pv" id="wiz_summary_company">n/a</div></div>
+                <div class="pair"><div class="pk">Tier</div><div class="pv" id="wiz_summary_tier">n/a</div></div>
+                <div class="pair"><div class="pk">Preset</div><div class="pv" id="wiz_summary_preset">n/a</div></div>
+                <div class="pair"><div class="pk">Selected Tests</div><div class="pv" id="wiz_summary_tests_count">0</div></div>
+                <div class="pair"><div class="pk">TiDB Target</div><div class="pv" id="wiz_summary_tidb">n/a</div></div>
+                <div class="pair"><div class="pk">Comparison</div><div class="pv" id="wiz_summary_comparison">Disabled</div></div>
+                <div class="pair"><div class="pk">Test List</div><div class="pv" id="wiz_summary_tests_list">n/a</div></div>
+                <div class="pair"><div class="pk">Run Safety</div><div class="pv">No destructive actions are performed by this wizard</div></div>
               </div>
               <div class="check-wrap">
-                <label class="check"><input type="checkbox" name="wiz_run_now" checked /> Run PoC now after saving</label>
+                <label class="check"><input type="checkbox" name="wiz_allow_blocked" /> Allow blocked run (dry-run only)</label>
+              </div>
+              <div class="actions-grid">
+                <div><button class="btn" type="submit" name="wiz_action" value="save">Save Configuration</button></div>
+                <div><button class="btn primary" type="submit" name="wiz_action" value="run">Save and Run PoC</button></div>
               </div>
             </div>
 
             <div class="wizard-nav">
               <button class="btn soft" type="button" data-wizard-prev disabled>Back</button>
               <button class="btn" type="button" data-wizard-next>Next</button>
-              <button class="btn primary" type="submit" data-wizard-submit style="display:none;">Save and Continue</button>
             </div>
           </form>
         </div>
@@ -1881,20 +1872,19 @@
         <div class="planner-actions">
           <form method="post" action="/apply-module-suite" class="config-section">
             <h3>Apply Suite</h3>
-            <div class="field">
-              <label>Suite Preset</label>
-              <select name="module_suite">
-                {% for key, suite in module_suites.items() %}
-                  <option value="{{ key }}" {% if key == 'oltp_migration' %}selected{% endif %}>{{ suite.label }}</option>
-                {% endfor %}
-              </select>
+            <div class="module-grid">
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="oltp_migration" checked /> OLTP + Migration</label>
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" /> HTAP Analytics</label>
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" /> AI / Vector</label>
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="all" /> All Modules</label>
+              <label class="check"><input type="checkbox" name="module_suite_pick" value="tier_recommended" /> Tier Recommended</label>
             </div>
-            <div class="tiny">`Tier Recommended` uses current tier + scenario logic. Other suites apply explicit module sets.</div>
+            <div class="tiny">Multiple selections are combined (union) so you can quickly compose custom coverage.</div>
             <div class="check-wrap">
-              <label class="check"><input type="checkbox" name="suite_run_ha_sim" /> Simulated HA (for tier-recommended)</label>
-              <label class="check"><input type="checkbox" name="suite_enable_optional_advanced" /> Optional advanced (for tier-recommended)</label>
+              <label class="check"><input type="checkbox" name="suite_apply_profile" /> Also apply current tier workload profile</label>
             </div>
-            <button class="btn" type="submit">Apply Suite</button>
+            <button class="btn" type="submit">Apply Suite Selection</button>
           </form>
 
           <form method="post" action="/save-module-selection" class="config-section">
@@ -2268,7 +2258,7 @@
           <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
         </div>
         <form method="post" action="/apply-tier">
-          <div class="grid cols-3">
+          <div class="grid cols-2">
             <div class="field">
               <label>Tier</label>
               <select name="apply_tier">
@@ -2277,14 +2267,7 @@
                 {% endfor %}
               </select>
             </div>
-            <div class="field">
-              <label>Simulated HA for non-Dedicated tiers</label>
-              <label class="check"><input type="checkbox" name="apply_run_ha_sim" /> Enable simulated M3</label>
-            </div>
-            <div class="field">
-              <label>Optional advanced modules</label>
-              <label class="check"><input type="checkbox" name="apply_enable_optional_advanced" /> Enable optional advanced</label>
-            </div>
+            <div class="field"></div>
           </div>
           <div class="check-wrap">
             <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
@@ -2367,42 +2350,22 @@
           Full-control mode: configure everything, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
         </div>
 
-        <div class="planner-actions">
-          <form method="post" action="/apply-tier" class="config-section">
-            <h3>Tier Profile Helper</h3>
-            <div class="field">
-              <label>Tier</label>
-              <select name="apply_tier">
-                {% for t in tiers %}
-                  <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="check-wrap">
-              <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
-              <label class="check"><input type="checkbox" name="apply_run_ha_sim" /> Enable simulated HA module</label>
-              <label class="check"><input type="checkbox" name="apply_enable_optional_advanced" /> Enable optional advanced modules</label>
-            </div>
-            <button class="btn" type="submit">Apply Tier Profile</button>
-          </form>
-
-          <form method="post" action="/apply-module-suite" class="config-section">
-            <h3>Module Suite Helper</h3>
-            <div class="field">
-              <label>Suite Preset</label>
-              <select name="module_suite">
-                {% for key, suite in module_suites.items() %}
-                  <option value="{{ key }}" {% if key == 'oltp_migration' %}selected{% endif %}>{{ suite.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="check-wrap">
-              <label class="check"><input type="checkbox" name="suite_run_ha_sim" /> Simulated HA (tier-recommended only)</label>
-              <label class="check"><input type="checkbox" name="suite_enable_optional_advanced" /> Optional advanced (tier-recommended only)</label>
-            </div>
-            <button class="btn" type="submit">Apply Module Suite</button>
-          </form>
-        </div>
+        <form method="post" action="/apply-module-suite" class="config-section">
+          <h3>Module Suite Helper</h3>
+          <div class="tiny">Select one or more suites. If multiple are checked, the helper combines them and enables the union of module coverage.</div>
+          <div class="module-grid">
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="oltp_migration" {% if cfg.pre_poc.scenario_template == 'oltp_migration' %}checked{% endif %} /> OLTP + Migration</label>
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" {% if cfg.pre_poc.scenario_template == 'htap_analytics' %}checked{% endif %} /> HTAP Analytics</label>
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" {% if cfg.pre_poc.scenario_template == 'ai_vector' %}checked{% endif %} /> AI / Vector</label>
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="all" /> All Modules</label>
+            <label class="check"><input type="checkbox" name="module_suite_pick" value="tier_recommended" /> Tier Recommended</label>
+          </div>
+          <div class="check-wrap">
+            <label class="check"><input type="checkbox" name="suite_apply_profile" /> Also apply current tier workload profile</label>
+          </div>
+          <button class="btn" type="submit">Apply Module Suite Selection</button>
+        </form>
 
         <form method="post" action="/save-config">
           <div class="config-section">
@@ -2707,13 +2670,37 @@
   const wizardStepIndicators = Array.from(document.querySelectorAll('[data-wizard-step-indicator]'));
   const wizardPrevBtn = document.querySelector('[data-wizard-prev]');
   const wizardNextBtn = document.querySelector('[data-wizard-next]');
-  const wizardSubmitBtn = document.querySelector('[data-wizard-submit]');
   const quickstartPresetModules = {{ quickstart_preset_modules | tojson }};
+  const quickstartPresetMeta = {{ quickstart_workload_presets | tojson }};
+  const quickstartTierLabels = {{ tier_labels | tojson }};
+  const quickstartModuleLabels = {{ module_labels | tojson }};
   const wizardPresetRadios = Array.from(document.querySelectorAll('input[name="wiz_workload_preset"]'));
   const wizardModuleChecks = Array.from(document.querySelectorAll('input[data-module-key]'));
   const wizardSelectedTestsEl = document.getElementById('wizard_selected_tests');
   const wizardTestsActionBtns = Array.from(document.querySelectorAll('[data-tests-action]'));
+  const wizCompanyEl = document.getElementById('wiz_company_name');
+  const wizTierEl = document.getElementById('wiz_tier');
+  const wizTidbHostEl = document.getElementById('wiz_tidb_host');
+  const wizTidbPortEl = document.getElementById('wiz_tidb_port');
+  const wizTidbUserEl = document.getElementById('wiz_tidb_user');
+  const wizTidbDatabaseEl = document.getElementById('wiz_tidb_database');
+  const wizTidbSslEl = document.getElementById('wiz_tidb_ssl');
+  const wizComparisonEnabledEl = document.getElementById('wiz_comparison_enabled');
+  const wizComparisonTargetEl = document.getElementById('wiz_comparison_target');
+  const wizComparisonHostEl = document.getElementById('wiz_comparison_host');
+  const wizComparisonPortValueEl = document.getElementById('wiz_comparison_port');
+  const wizComparisonDatabaseEl = document.getElementById('wiz_comparison_database');
+  const wizComparisonPortEl = document.querySelector('input[name="wiz_comparison_port"]');
+  const wizComparisonSchemaEl = document.querySelector('input[name="wiz_comparison_schema"]');
+  const wizSummaryCompanyEl = document.getElementById('wiz_summary_company');
+  const wizSummaryTierEl = document.getElementById('wiz_summary_tier');
+  const wizSummaryPresetEl = document.getElementById('wiz_summary_preset');
+  const wizSummaryTestsCountEl = document.getElementById('wiz_summary_tests_count');
+  const wizSummaryTestsListEl = document.getElementById('wiz_summary_tests_list');
+  const wizSummaryTidbEl = document.getElementById('wiz_summary_tidb');
+  const wizSummaryComparisonEl = document.getElementById('wiz_summary_comparison');
   let wizardStep = 1;
+  let updateWizardRunSummary = () => {};
 
   function setWizardStep(nextStep) {
     const total = wizardStepPanes.length;
@@ -2733,10 +2720,7 @@
     if (wizardNextBtn) {
       wizardNextBtn.style.display = wizardStep === total ? 'none' : 'inline-flex';
     }
-    if (wizardSubmitBtn) {
-      wizardSubmitBtn.style.display = wizardStep === total ? 'inline-flex' : 'none';
-      wizardSubmitBtn.textContent = 'Save and Continue';
-    }
+    updateWizardRunSummary();
   }
 
   if (wizardForm) {
@@ -2778,6 +2762,44 @@
       wizardSelectedTestsEl.value = `${selectedCount} / ${wizardModuleChecks.length}`;
     }
 
+    updateWizardRunSummary = function () {
+      const companyName = (wizCompanyEl && wizCompanyEl.value.trim()) || 'n/a';
+      const tierKey = (wizTierEl && wizTierEl.value) || '';
+      const tierLabel = quickstartTierLabels[tierKey] || tierKey || 'n/a';
+      const presetKey = getWizardPresetSelection();
+      const presetLabel = (quickstartPresetMeta[presetKey] && quickstartPresetMeta[presetKey].label) || presetKey || 'n/a';
+      const selectedModuleKeys = wizardModuleChecks
+        .filter((check) => check.checked)
+        .map((check) => check.dataset.moduleKey || '')
+        .filter((key) => !!key);
+      const selectedModuleLabels = selectedModuleKeys.map((key) => quickstartModuleLabels[key] || key);
+
+      const tidbHost = (wizTidbHostEl && wizTidbHostEl.value.trim()) || 'n/a';
+      const tidbPort = (wizTidbPortEl && wizTidbPortEl.value.trim()) || '4000';
+      const tidbUser = (wizTidbUserEl && wizTidbUserEl.value.trim()) || 'n/a';
+      const tidbDb = (wizTidbDatabaseEl && wizTidbDatabaseEl.value.trim()) || 'test';
+      const tidbSsl = (wizTidbSslEl && wizTidbSslEl.value) || 'true';
+
+      const comparisonEnabled = !!(wizComparisonEnabledEl && wizComparisonEnabledEl.checked);
+      let comparisonSummary = 'Disabled';
+      if (comparisonEnabled && wizComparisonTargetEl) {
+        const targetOption = wizComparisonTargetEl.options[wizComparisonTargetEl.selectedIndex];
+        const targetLabel = targetOption ? targetOption.text : 'Comparison target';
+        const host = (wizComparisonHostEl && wizComparisonHostEl.value.trim()) || 'n/a';
+        const port = (wizComparisonPortValueEl && wizComparisonPortValueEl.value.trim()) || 'n/a';
+        const database = (wizComparisonDatabaseEl && wizComparisonDatabaseEl.value.trim()) || 'n/a';
+        comparisonSummary = `${targetLabel} @ ${host}:${port} db=${database}`;
+      }
+
+      if (wizSummaryCompanyEl) wizSummaryCompanyEl.textContent = companyName;
+      if (wizSummaryTierEl) wizSummaryTierEl.textContent = tierLabel;
+      if (wizSummaryPresetEl) wizSummaryPresetEl.textContent = presetLabel;
+      if (wizSummaryTestsCountEl) wizSummaryTestsCountEl.textContent = `${selectedModuleKeys.length} / ${wizardModuleChecks.length}`;
+      if (wizSummaryTestsListEl) wizSummaryTestsListEl.textContent = selectedModuleLabels.length ? selectedModuleLabels.join(', ') : 'None selected';
+      if (wizSummaryTidbEl) wizSummaryTidbEl.textContent = `${tidbHost}:${tidbPort} user=${tidbUser} db=${tidbDb} ssl=${tidbSsl}`;
+      if (wizSummaryComparisonEl) wizSummaryComparisonEl.textContent = comparisonSummary;
+    };
+
     function applyPresetModules(presetKey) {
       const selectedKeys = new Set(quickstartPresetModules[presetKey] || []);
       wizardModuleChecks.forEach((check) => {
@@ -2785,6 +2807,7 @@
       });
       syncWizardTestItems();
       updateWizardSelectedCount();
+      updateWizardRunSummary();
     }
 
     wizardPresetRadios.forEach((radio) => {
@@ -2798,6 +2821,7 @@
       check.addEventListener('change', () => {
         syncWizardTestItems();
         updateWizardSelectedCount();
+        updateWizardRunSummary();
       });
     });
 
@@ -2820,8 +2844,16 @@
         }
         syncWizardTestItems();
         updateWizardSelectedCount();
+        updateWizardRunSummary();
       });
     });
+
+    [wizCompanyEl, wizTierEl, wizTidbHostEl, wizTidbPortEl, wizTidbUserEl, wizTidbDatabaseEl, wizTidbSslEl, wizComparisonEnabledEl, wizComparisonTargetEl, wizComparisonHostEl, wizComparisonPortValueEl, wizComparisonDatabaseEl]
+      .filter((el) => !!el)
+      .forEach((el) => {
+        el.addEventListener('input', updateWizardRunSummary);
+        el.addEventListener('change', updateWizardRunSummary);
+      });
 
     syncWizardPresetCards();
     syncWizardTestItems();
@@ -2829,12 +2861,10 @@
     if (wizardModuleChecks.length > 0 && !wizardModuleChecks.some((check) => check.checked)) {
       applyPresetModules(getWizardPresetSelection());
     }
+    updateWizardRunSummary();
     setWizardStep(1);
   }
 
-  const wizComparisonTargetEl = document.getElementById('wiz_comparison_target');
-  const wizComparisonPortEl = document.querySelector('input[name="wiz_comparison_port"]');
-  const wizComparisonSchemaEl = document.querySelector('input[name="wiz_comparison_schema"]');
   let wizPreviousDefaultPort = null;
   let wizPreviousDefaultSchema = null;
 
@@ -2883,6 +2913,7 @@
 
     wizPreviousDefaultPort = defaultPort;
     wizPreviousDefaultSchema = defaultSchema;
+    updateWizardRunSummary();
   }
 
   if (wizComparisonTargetEl) {

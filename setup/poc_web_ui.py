@@ -1464,15 +1464,10 @@ def create_app(config_path: Path) -> Flask:
         if company_name:
             report["company_name"] = company_name
 
-        security_mode = request.form.get("wiz_security_mode", "keep_existing")
-        sec_profile = build_security_profile(security_mode)
-        if sec_profile is not None:
-            cfg["pre_poc"]["security"] = sec_profile
-            cfg["pre_poc"]["go_no_go"] = "proceed" if sec_profile["proceed"] else "hold"
-
         save_cfg(config_path, cfg)
 
-        run_now = to_bool(request.form.get("wiz_run_now"), False)
+        wiz_action = str(request.form.get("wiz_action", "save")).strip().lower()
+        run_now = wiz_action == "run"
         allow_blocked = to_bool(request.form.get("wiz_allow_blocked"), False)
 
         if run_now and not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
@@ -1487,14 +1482,13 @@ def create_app(config_path: Path) -> Flask:
             flash(msg, "success" if ok else "error")
             return redirect(url_for("index") + "#dashboards")
 
-        flash("Quickstart configuration saved. Open Dashboards when ready to run.", "success")
-        return redirect(url_for("index") + "#dashboards")
+        flash("Quickstart configuration saved.", "success")
+        return redirect(url_for("index") + "#quickstart")
 
     @app.post("/apply-module-suite")
     def apply_module_suite_route():
         cfg = load_cfg(config_path)
 
-        suite_id = request.form.get("module_suite", "tier_recommended").strip().lower()
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         if selected_tier not in TIERS:
             selected_tier = "serverless"
@@ -1503,22 +1497,48 @@ def create_app(config_path: Path) -> Flask:
         if scenario not in SCENARIOS:
             scenario = "oltp_migration"
 
-        run_ha_sim = to_bool(request.form.get("suite_run_ha_sim"), False)
-        enable_optional_advanced = to_bool(request.form.get("suite_enable_optional_advanced"), False)
+        selected_suites = [str(v).strip().lower() for v in request.form.getlist("module_suite_pick") if str(v).strip()]
+        if not selected_suites:
+            legacy_suite = str(request.form.get("module_suite", "")).strip().lower()
+            if legacy_suite:
+                selected_suites = [legacy_suite]
+        selected_suites = [s for s in selected_suites if s in MODULE_SUITES]
+        if not selected_suites:
+            selected_suites = ["oltp_migration"]
 
         cfg.setdefault("modules", {})
-        cfg["modules"] = modules_from_suite(
-            suite_id,
-            tier=selected_tier,
-            scenario=scenario,
-            run_ha_sim=run_ha_sim,
-            enable_optional_advanced=enable_optional_advanced,
-            existing=cfg.get("modules", {}),
-        )
+        enabled_modules = set()
+        for suite_id in selected_suites:
+            if suite_id == "tier_recommended":
+                tier_modules = modules_from_suite(
+                    suite_id,
+                    tier=selected_tier,
+                    scenario=scenario,
+                    run_ha_sim=False,
+                    enable_optional_advanced=False,
+                    existing=cfg.get("modules", {}),
+                )
+                for key, is_enabled in tier_modules.items():
+                    if is_enabled:
+                        enabled_modules.add(key)
+            else:
+                enabled_modules.update(MODULE_SUITE_KEYS.get(suite_id, []))
+
+        cfg["modules"] = {key: (key in enabled_modules) for key in MODULE_ORDER}
+        cfg.setdefault("pre_poc", {})
+        cfg["pre_poc"]["scenario_template"] = infer_scenario_from_modules(cfg["modules"])
+
+        if to_bool(request.form.get("suite_apply_profile"), False):
+            cfg.setdefault("test", {})
+            cfg["test"].update(tier_test_profile(selected_tier))
 
         save_cfg(config_path, cfg)
-        suite_label = MODULE_SUITES.get(suite_id, {}).get("label", suite_id)
-        flash(f"Applied module suite: {suite_label}.", "success")
+        suite_labels = [MODULE_SUITES.get(suite_id, {}).get("label", suite_id) for suite_id in selected_suites]
+        enabled_count = sum(1 for key in MODULE_ORDER if cfg["modules"].get(key))
+        flash(
+            f"Applied module suite helper: {', '.join(suite_labels)} ({enabled_count}/{len(MODULE_ORDER)} modules enabled).",
+            "success",
+        )
         return redirect(url_for("index") + "#manual-config")
 
     @app.post("/save-module-selection")
