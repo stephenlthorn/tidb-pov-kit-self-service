@@ -3,33 +3,36 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TiDB PoC Web UI</title>
+  <title>TiDB PoV Copilot</title>
   <style>
     :root {
-      --bg: #0b1018;
-      --surface: #121a26;
-      --surface-2: #151f2d;
-      --surface-3: #0f1723;
-      --line: #243143;
-      --line-2: #30445d;
-      --text: #e8eef8;
-      --muted: #9db0c8;
-      --primary: #3ab8ff;
-      --primary-soft: rgba(58, 184, 255, 0.14);
-      --success: #5de2ad;
-      --warning: #ffca7a;
-      --danger: #ff7f9f;
-      --radius: 12px;
-      --shadow: 0 12px 28px rgba(0, 0, 0, 0.28);
+      --bg: #07090d;
+      --surface: #0f1217;
+      --surface-2: #11151b;
+      --surface-3: #0a0d12;
+      --line: #222833;
+      --line-2: #343d4a;
+      --text: #eceff4;
+      --muted: #8d95a1;
+      --primary: #ff7a1a;
+      --primary-soft: rgba(255, 122, 26, 0.14);
+      --success: #5fcf92;
+      --warning: #ffc26e;
+      --danger: #ff7b8a;
+      --radius: 9px;
+      --shadow: 0 10px 26px rgba(0, 0, 0, 0.45);
     }
 
     * { box-sizing: border-box; }
 
     body {
       margin: 0;
-      background: radial-gradient(1000px 700px at 5% -15%, #17253a 0%, transparent 55%), var(--bg);
+      background:
+        radial-gradient(1100px 720px at -12% -20%, rgba(162, 19, 19, 0.24), transparent 60%),
+        radial-gradient(820px 520px at 98% -15%, rgba(255, 122, 26, 0.1), transparent 56%),
+        var(--bg);
       color: var(--text);
-      font-family: "Avenir Next", "Segoe UI", "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
       line-height: 1.45;
     }
 
@@ -41,33 +44,48 @@
 
     .sidebar {
       border-right: 1px solid var(--line);
-      background: linear-gradient(180deg, #101925 0%, #0d141f 100%);
-      padding: 20px 14px;
+      background: linear-gradient(180deg, #0a0c10 0%, #080a0e 100%);
+      padding: 18px 14px;
       position: sticky;
       top: 0;
       height: 100vh;
       overflow: auto;
+      box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.02);
     }
 
     .brand {
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      background: linear-gradient(160deg, #152235 0%, #111a28 65%);
+      border: 1px solid #2e343d;
+      border-radius: 10px;
+      background: linear-gradient(180deg, #111419 0%, #0d1015 100%);
       padding: 14px;
       margin-bottom: 14px;
       box-shadow: var(--shadow);
     }
 
+    .brand-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .brand-logo {
+      width: 26px;
+      height: 26px;
+      object-fit: contain;
+      filter: saturate(1.05) brightness(1.02);
+      flex: 0 0 auto;
+    }
+
     .brand .title {
       font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: 0.3px;
+      font-weight: 750;
+      letter-spacing: 0.28px;
       margin-bottom: 4px;
     }
 
     .brand .sub {
       color: var(--muted);
-      font-size: 0.84rem;
+      font-size: 0.82rem;
     }
 
     .status-chips {
@@ -78,46 +96,64 @@
     }
 
     .chip {
-      border: 1px solid var(--line-2);
+      border: 1px solid #393f49;
       border-radius: 999px;
       padding: 4px 9px;
-      font-size: 0.75rem;
-      color: var(--muted);
-      background: rgba(255, 255, 255, 0.02);
+      font-size: 0.74rem;
+      color: #c7ced8;
+      background: rgba(17, 20, 25, 0.9);
     }
 
     .tabs {
       display: grid;
-      gap: 8px;
+      gap: 7px;
       margin-top: 8px;
+      border-top: 1px solid #1f242b;
+      padding-top: 11px;
     }
 
     .tab-btn {
-      border: 1px solid transparent;
-      background: transparent;
-      color: var(--text);
+      border: 1px solid #252b34;
+      background: linear-gradient(180deg, #111419 0%, #0d1015 100%);
+      color: #c9d0da;
       text-align: left;
-      border-radius: 10px;
+      border-radius: 8px;
       padding: 10px 12px;
       cursor: pointer;
       transition: all 0.16s ease;
-      font-weight: 600;
-      font-size: 0.93rem;
+      font-weight: 650;
+      font-size: 0.91rem;
+      letter-spacing: 0.08px;
+      position: relative;
+    }
+
+    .tab-btn .ico {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 18px;
+      color: #ff9a52;
+      margin-right: 7px;
+      font-size: 0.82rem;
     }
 
     .tab-btn:hover {
-      border-color: var(--line-2);
-      background: rgba(255, 255, 255, 0.02);
+      border-color: #3a414b;
+      transform: translateX(1px);
+      background: linear-gradient(180deg, #141920 0%, #10141a 100%);
     }
 
     .tab-btn.active {
-      border-color: #3d81b3;
-      background: linear-gradient(180deg, var(--primary-soft), rgba(58, 184, 255, 0.04));
-      box-shadow: inset 0 0 0 1px rgba(58, 184, 255, 0.18);
+      border-color: #614126;
+      color: #ffd9bd;
+      background: linear-gradient(180deg, rgba(255, 122, 26, 0.18), rgba(255, 122, 26, 0.08));
+      box-shadow:
+        inset 2px 0 0 rgba(255, 122, 26, 0.95),
+        inset 0 0 0 1px rgba(255, 122, 26, 0.22);
     }
 
     .main {
-      padding: 22px 20px 42px;
+      padding: 20px 24px 40px;
       overflow: auto;
     }
 
@@ -126,19 +162,81 @@
       justify-content: space-between;
       align-items: flex-start;
       gap: 12px;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
+      padding: 0 4px 6px;
+      border-bottom: 1px solid #1f252d;
     }
 
     .header h1 {
       margin: 0;
-      font-size: 1.7rem;
+      font-size: 1.4rem;
       letter-spacing: 0.2px;
+      font-weight: 760;
+      color: #f5f7fa;
     }
 
     .header p {
-      margin: 4px 0 0;
-      color: var(--muted);
-      font-size: 0.96rem;
+      margin: 5px 0 0;
+      color: #8f98a4;
+      font-size: 0.86rem;
+    }
+
+    .logo-ribbon {
+      margin: 0 4px 12px;
+      display: grid;
+      grid-template-columns: 1fr auto 1fr;
+      gap: 10px;
+      align-items: stretch;
+    }
+
+    .logo-card {
+      border: 1px solid #2b323d;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #12161d 0%, #0d1117 100%);
+      padding: 11px;
+      display: grid;
+      gap: 8px;
+      align-items: center;
+      justify-items: start;
+      min-height: 72px;
+    }
+
+    .logo-card .lk {
+      font-size: 0.72rem;
+      color: #9ea6b2;
+      text-transform: uppercase;
+      letter-spacing: 0.22px;
+    }
+
+    .logo-img {
+      height: 26px;
+      width: auto;
+      object-fit: contain;
+      filter: brightness(1.03);
+    }
+
+    .logo-stack {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .logo-stack .logo-img {
+      height: 24px;
+    }
+
+    .logo-vs {
+      border: 1px solid #5f3b20;
+      background: linear-gradient(180deg, rgba(255, 122, 26, 0.2), rgba(255, 122, 26, 0.08));
+      color: #ffc59f;
+      border-radius: 999px;
+      padding: 0 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.76rem;
+      font-weight: 700;
+      letter-spacing: 0.22px;
     }
 
     .flash-wrap {
@@ -148,49 +246,52 @@
     }
 
     .msg {
-      border: 1px solid #2d425a;
-      background: #102238;
-      color: #d6ebff;
-      border-radius: 10px;
+      border: 1px solid #333945;
+      background: linear-gradient(180deg, #151921, #11151b);
+      color: #dde4ee;
+      border-radius: 8px;
       padding: 10px 12px;
-      font-size: 0.92rem;
+      font-size: 0.9rem;
     }
 
-    .msg.error { border-color: #7f3244; background: #2e141d; color: #ffd8e2; }
-    .msg.warning { border-color: #7f6431; background: #2f2413; color: #ffeac6; }
-    .msg.success { border-color: #2d6a4e; background: #13251d; color: #dbffe9; }
+    .msg.error { border-color: #8f3d55; background: #2d1420; color: #ffd8e3; }
+    .msg.warning { border-color: #8f6f3b; background: #302514; color: #ffe8c0; }
+    .msg.success { border-color: #2f7e5f; background: #13261f; color: #d7ffe7; }
 
     .tab-pane {
       display: none;
-      animation: fadeIn 140ms ease;
+      animation: fadeIn 130ms ease;
     }
 
     .tab-pane.active { display: block; }
 
     @keyframes fadeIn {
-      from { opacity: 0; transform: translateY(3px); }
+      from { opacity: 0; transform: translateY(2px); }
       to { opacity: 1; transform: translateY(0); }
     }
 
     .panel {
-      background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent 50%), var(--surface);
-      border: 1px solid var(--line);
+      background: linear-gradient(180deg, #11151c 0%, #0d1117 100%);
+      border: 1px solid #262d37;
       border-radius: var(--radius);
       padding: 16px;
       margin-top: 12px;
-      box-shadow: var(--shadow);
+      box-shadow:
+        var(--shadow),
+        inset 0 1px 0 rgba(255, 255, 255, 0.03);
     }
 
     .panel h2 {
       margin: 0;
-      font-size: 1.12rem;
-      letter-spacing: 0.2px;
+      font-size: 1.08rem;
+      letter-spacing: 0.16px;
+      color: #f6f8fb;
     }
 
     .panel p.help {
       margin: 6px 0 12px;
-      color: var(--muted);
-      font-size: 0.92rem;
+      color: #8e96a2;
+      font-size: 0.88rem;
     }
 
     .stats-grid {
@@ -200,26 +301,29 @@
     }
 
     .stat {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: var(--surface-3);
+      border: 1px solid #2a313c;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f1319, #0b0f14);
       padding: 11px;
     }
 
     .stat .k {
-      color: var(--muted);
-      font-size: 0.8rem;
+      color: #8d95a2;
+      font-size: 0.76rem;
       margin-bottom: 5px;
+      letter-spacing: 0.2px;
+      text-transform: uppercase;
     }
 
     .stat .v {
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-size: 0.92rem;
+      font-weight: 650;
       word-break: break-word;
+      color: #e9edf4;
     }
 
     .line {
-      border-top: 1px solid var(--line);
+      border-top: 1px solid #21262f;
       margin: 14px 0;
     }
 
@@ -234,10 +338,11 @@
     .row2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
     label {
-      font-size: 0.82rem;
-      color: var(--muted);
+      font-size: 0.8rem;
+      color: #9ba3af;
       display: block;
       margin-bottom: 6px;
+      letter-spacing: 0.15px;
     }
 
     input[type=text],
@@ -246,13 +351,13 @@
     select,
     textarea {
       width: 100%;
-      border: 1px solid #2a3a50;
-      background: var(--surface-2);
+      border: 1px solid #2c333d;
+      background: #090c11;
       color: var(--text);
-      border-radius: 9px;
+      border-radius: 7px;
       padding: 10px 11px;
       outline: none;
-      font-size: 0.92rem;
+      font-size: 0.9rem;
     }
 
     textarea {
@@ -260,11 +365,12 @@
       resize: vertical;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.84rem;
+      line-height: 1.38;
     }
 
     input:focus, select:focus, textarea:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 2px var(--primary-soft);
+      border-color: #ff7a1a;
+      box-shadow: 0 0 0 2px rgba(255, 122, 26, 0.2);
     }
 
     .check-wrap {
@@ -277,12 +383,12 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      border: 1px solid var(--line);
-      border-radius: 9px;
+      border: 1px solid #2a313b;
+      border-radius: 7px;
       padding: 8px 9px;
-      background: var(--surface-3);
+      background: linear-gradient(180deg, #0f1318, #0b0f14);
       color: var(--text);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
     }
 
     .actions {
@@ -293,40 +399,45 @@
     }
 
     .btn {
-      border: 1px solid #324965;
-      background: linear-gradient(180deg, #1e2f45, #16253a);
-      color: var(--text);
-      border-radius: 10px;
+      border: 1px solid #303846;
+      background: linear-gradient(180deg, #171b21, #11151b);
+      color: #e8edf4;
+      border-radius: 7px;
       padding: 10px 13px;
-      font-weight: 600;
+      font-weight: 650;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       min-height: 39px;
+      transition: transform 0.12s ease, border-color 0.12s ease;
     }
 
-    .btn:hover { border-color: var(--primary); }
+    .btn:hover {
+      border-color: #ff7a1a;
+      transform: translateY(-1px);
+    }
 
     .btn.primary {
-      background: linear-gradient(180deg, #20516e, #123a52);
-      border-color: #2e82b2;
+      color: #1f0f06;
+      background: linear-gradient(180deg, #ff8b2f, #ff7414);
+      border-color: #ff9f57;
     }
 
     .btn.ok {
-      background: linear-gradient(180deg, #215342, #16382d);
-      border-color: #2e7a60;
+      background: linear-gradient(180deg, #1f5b40, #17452f);
+      border-color: #327657;
     }
 
     .btn.warn {
-      background: linear-gradient(180deg, #5d4622, #382a15);
-      border-color: #8c6b38;
+      background: linear-gradient(180deg, #6c4f24, #4a3618);
+      border-color: #a78347;
     }
 
     .btn.danger {
-      background: linear-gradient(180deg, #5a2532, #39171f);
-      border-color: #873748;
+      background: linear-gradient(180deg, #6c2a3c, #4a1d2a);
+      border-color: #a44d65;
     }
 
     .btn[disabled] {
@@ -342,30 +453,30 @@
     }
 
     .security-item {
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       color: var(--text);
       padding: 10px;
-      border: 1px solid #28374b;
-      border-radius: 10px;
-      background: #101926;
+      border: 1px solid #2b323d;
+      border-radius: 7px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
     }
 
     .tiny {
-      font-size: 0.82rem;
-      color: var(--muted);
+      font-size: 0.8rem;
+      color: #969eaa;
     }
 
     pre.log {
       margin: 0;
       max-height: 380px;
       overflow: auto;
-      border: 1px solid #2c3d53;
-      border-radius: 10px;
+      border: 1px solid #303743;
+      border-radius: 7px;
       padding: 10px;
-      background: #0b131e;
-      color: #d4e0f1;
+      background: #080b10;
+      color: #d7dce5;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 0.82rem;
+      font-size: 0.8rem;
     }
 
     .pair {
@@ -377,14 +488,17 @@
     }
 
     .pair .pk {
-      color: var(--muted);
-      font-size: 0.85rem;
+      color: #959daa;
+      font-size: 0.82rem;
+      text-transform: uppercase;
+      letter-spacing: 0.2px;
     }
 
     .pair .pv {
-      font-weight: 600;
-      font-size: 0.93rem;
+      font-weight: 650;
+      font-size: 0.91rem;
       word-break: break-word;
+      color: #e9edf4;
     }
 
     @media (max-width: 1120px) {
@@ -402,6 +516,14 @@
 
       .tabs {
         grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+
+      .logo-ribbon {
+        grid-template-columns: 1fr;
+      }
+
+      .logo-vs {
+        justify-self: start;
       }
 
       .main {
@@ -423,8 +545,13 @@
 <div class="layout">
   <aside class="sidebar">
     <div class="brand">
-      <div class="title">TiDB PoC Co-Pilot</div>
-      <div class="sub">Self-Service Workflow Console</div>
+      <div class="brand-row">
+        <img class="brand-logo" src="{{ url_for('static', filename='img/tidb-logo.svg') }}" alt="TiDB" />
+        <div>
+          <div class="title">TiDB PoV Copilot</div>
+          <div class="sub">Self-Service GTM Workflow Console</div>
+        </div>
+      </div>
       <div class="status-chips">
         <span class="chip">Tier: {{ cfg.tier.selected }}</span>
         <span class="chip">Scenario: {{ cfg.pre_poc.scenario_template }}</span>
@@ -433,21 +560,37 @@
     </div>
 
     <nav class="tabs">
-      <button class="tab-btn active" data-tab-btn="overview">Overview</button>
-      <button class="tab-btn" data-tab-btn="run-report">Run and Report</button>
-      <button class="tab-btn" data-tab-btn="cloud-tier">Cloud Tier</button>
-      <button class="tab-btn" data-tab-btn="security">Security Screener</button>
-      <button class="tab-btn" data-tab-btn="configuration">Configuration</button>
-      <button class="tab-btn" data-tab-btn="data-reset">Data Reset</button>
-      <button class="tab-btn" data-tab-btn="monitor">Run Monitor</button>
+      <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
+      <button class="tab-btn" data-tab-btn="run-report"><span class="ico">[>]</span>Run and Report</button>
+      <button class="tab-btn" data-tab-btn="cloud-tier"><span class="ico">[C]</span>Cloud Tier</button>
+      <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
+      <button class="tab-btn" data-tab-btn="configuration"><span class="ico">[*]</span>Configuration</button>
+      <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
+      <button class="tab-btn" data-tab-btn="monitor"><span class="ico">[~]</span>Run Monitor</button>
     </nav>
   </aside>
 
   <main class="main">
     <div class="header">
       <div>
-        <h1>TiDB Cloud PoC Control Surface</h1>
-        <p>Dark-mode, tabbed workflow for cluster setup, screening, execution, reporting, and reset.</p>
+        <h1>TiDB PoV Copilot</h1>
+        <p>Structured workflow for tiering, security screening, execution, reporting, and reset.</p>
+      </div>
+    </div>
+
+    <div class="logo-ribbon">
+      <div class="logo-card">
+        <div class="lk">Primary Target</div>
+        <img class="logo-img" src="{{ url_for('static', filename='img/tidb-logo.svg') }}" alt="TiDB" />
+      </div>
+      <div class="logo-vs">vs</div>
+      <div class="logo-card">
+        <div class="lk">Comparison Target</div>
+        <div class="logo-stack">
+          <img class="logo-img" src="{{ url_for('static', filename='img/aws-aurora.svg') }}" alt="Amazon Aurora" />
+          <img class="logo-img" src="{{ url_for('static', filename='img/mysql.svg') }}" alt="MySQL" />
+        </div>
+        <div class="tiny">Aurora MySQL</div>
       </div>
     </div>
 
