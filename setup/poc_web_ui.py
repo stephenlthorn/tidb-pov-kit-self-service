@@ -1306,8 +1306,23 @@ def create_app(config_path: Path) -> Flask:
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
 
         save_cfg(config_path, cfg)
+        action = str(request.form.get("save_action", "save")).strip().lower()
+        allow_blocked = to_bool(request.form.get("manual_allow_blocked"), False)
+
+        if action == "save_and_run":
+            if not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
+                flash("Configuration saved, but run skipped: TiDB host/user/password are required.", "warning")
+                return redirect(url_for("index") + "#manual-config")
+
+            cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
+            if allow_blocked:
+                cmd.append("--allow-blocked")
+            ok, msg = start_background(cmd, "manual-save-run")
+            flash(msg, "success" if ok else "error")
+            return redirect(url_for("index") + "#dashboards")
+
         flash("Configuration saved.", "success")
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#manual-config")
 
     @app.post("/quickstart-deploy")
     def quickstart_deploy_route():
@@ -1426,10 +1441,10 @@ def create_app(config_path: Path) -> Flask:
                 cmd.append("--allow-blocked")
             ok, msg = start_background(cmd, "quickstart-run")
             flash(msg, "success" if ok else "error")
-            return redirect(url_for("index") + "#monitor")
+            return redirect(url_for("index") + "#dashboards")
 
-        flash("Quickstart configuration saved. Use Run and Report when ready.", "success")
-        return redirect(url_for("index") + "#run-report")
+        flash("Quickstart configuration saved. Open Dashboards when ready to run.", "success")
+        return redirect(url_for("index") + "#dashboards")
 
     @app.post("/apply-module-suite")
     def apply_module_suite_route():
@@ -1460,7 +1475,7 @@ def create_app(config_path: Path) -> Flask:
         save_cfg(config_path, cfg)
         suite_label = MODULE_SUITES.get(suite_id, {}).get("label", suite_id)
         flash(f"Applied module suite: {suite_label}.", "success")
-        return redirect(url_for("index") + "#test-planner")
+        return redirect(url_for("index") + "#manual-config")
 
     @app.post("/save-module-selection")
     def save_module_selection_route():
@@ -1471,7 +1486,7 @@ def create_app(config_path: Path) -> Flask:
         save_cfg(config_path, cfg)
         enabled = sum(1 for key in MODULE_ORDER if mods.get(key))
         flash(f"Saved module selection ({enabled}/{len(MODULE_ORDER)} enabled).", "success")
-        return redirect(url_for("index") + "#test-planner")
+        return redirect(url_for("index") + "#manual-config")
 
     @app.post("/apply-tier")
     def apply_tier_route():
@@ -1480,7 +1495,7 @@ def create_app(config_path: Path) -> Flask:
         selected_tier = request.form.get("apply_tier", "serverless")
         if selected_tier not in TIERS:
             flash("Invalid tier selection.", "error")
-            return redirect(url_for("index"))
+            return redirect(url_for("index") + "#manual-config")
 
         scenario = cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration")
         if scenario not in SCENARIOS:
@@ -1516,7 +1531,7 @@ def create_app(config_path: Path) -> Flask:
 
         save_cfg(config_path, cfg)
         flash(f"Applied tier profile: {ui_tier_label(selected_tier)}.", "success")
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#manual-config")
 
     @app.post("/security")
     def security_route():
@@ -1532,21 +1547,21 @@ def create_app(config_path: Path) -> Flask:
             f"Security screener saved. Recommendation: {result['recommendation']}",
             "warning" if not result["proceed"] else "success",
         )
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#security")
 
     @app.post("/run-defaults")
     def run_defaults_route():
         cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
         ok, msg = start_background(cmd, "run-defaults")
         flash(msg, "success" if ok else "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#dashboards")
 
     @app.post("/build-report")
     def build_report_route():
         cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--report-only"]
         ok, msg = start_background(cmd, "report-only")
         flash(msg, "success" if ok else "error")
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#dashboards")
 
     @app.post("/run-workload")
     def run_workload_route():
@@ -1611,7 +1626,7 @@ def create_app(config_path: Path) -> Flask:
         token = request.form.get("clear_token", "")
         if token != "CLEAR":
             flash("Clear cancelled: token did not match CLEAR.", "error")
-            return redirect(url_for("index"))
+            return redirect(url_for("index") + "#data-reset")
 
         cfg = load_cfg(config_path)
         clear_local_results()
@@ -1621,7 +1636,7 @@ def create_app(config_path: Path) -> Flask:
             drop_token = request.form.get("drop_token", "")
             if drop_token != "DROP":
                 flash("Local results cleared, but DB drop skipped (DROP token not provided).", "warning")
-                return redirect(url_for("index"))
+                return redirect(url_for("index") + "#data-reset")
 
             success, db_msg = drop_configured_database(cfg)
             if success:
@@ -1629,16 +1644,16 @@ def create_app(config_path: Path) -> Flask:
                 flash(msg, "success")
             else:
                 flash(f"Local results cleared, but DB drop failed: {db_msg}", "error")
-            return redirect(url_for("index"))
+            return redirect(url_for("index") + "#data-reset")
 
         flash(msg, "success")
-        return redirect(url_for("index"))
+        return redirect(url_for("index") + "#data-reset")
 
     @app.get("/report")
     def report_route():
         if not REPORT_PDF.exists():
             flash("Report PDF not available yet.", "error")
-            return redirect(url_for("index"))
+            return redirect(url_for("index") + "#dashboards")
         return send_file(REPORT_PDF, as_attachment=False)
 
     @app.get("/run-status")

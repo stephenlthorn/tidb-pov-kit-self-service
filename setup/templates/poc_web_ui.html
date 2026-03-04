@@ -662,6 +662,35 @@
       gap: 10px;
     }
 
+    .path-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .path-card {
+      border: 1px solid #2b323d;
+      border-radius: 8px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 11px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .path-card .title {
+      font-size: 0.9rem;
+      font-weight: 700;
+      color: #eef3fb;
+      letter-spacing: 0.12px;
+    }
+
+    .path-card .desc {
+      font-size: 0.8rem;
+      color: #c9d2df;
+      line-height: 1.45;
+    }
+
     .grid {
       display: grid;
       gap: 10px;
@@ -1369,15 +1398,10 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
       <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Quickstart Wizard</button>
-      <button class="tab-btn" data-tab-btn="test-planner"><span class="ico">[T]</span>Test Planner</button>
-      <button class="tab-btn" data-tab-btn="run-report"><span class="ico">[>]</span>Run and Report</button>
-      <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
-      <button class="tab-btn" data-tab-btn="report-dashboard"><span class="ico">[#]</span>Report Dashboard</button>
-      <button class="tab-btn" data-tab-btn="cloud-tier"><span class="ico">[C]</span>Cloud Tier</button>
+      <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
+      <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
       <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
-      <button class="tab-btn" data-tab-btn="configuration"><span class="ico">[*]</span>Configuration</button>
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
-      <button class="tab-btn" data-tab-btn="monitor"><span class="ico">[~]</span>Run Monitor</button>
     </nav>
   </aside>
 
@@ -1418,11 +1442,35 @@
     <section class="tab-pane active" data-tab-pane="overview">
       <div class="panel">
         <h2>Environment Snapshot</h2>
-        <p class="help">Current project state and high-level readiness summary.</p>
+        <p class="help">Choose one setup path, then execute from Dashboards.</p>
         <div class="quickstart-cta">
-          <div class="headline">New Deployment Path</div>
-          <div class="text">Use the guided quickstart wizard for step-by-step setup, one-click save, and automatic PoC run. Advanced tuning remains available in Configuration and Workload Lab.</div>
-          <button class="btn primary xl" type="button" data-tab-jump="quickstart">Launch Guided Setup Wizard</button>
+          <div class="headline">Two Setup Paths</div>
+          <div class="text">Quickstart for fastest deployment, or Manual Config for complete control. Both paths end in the same execution and reporting flow.</div>
+        </div>
+        <div class="path-grid">
+          <div class="path-card">
+            <div class="title">Quick Start</div>
+            <div class="desc">Guided multi-step wizard with recommended defaults and optional one-click run.</div>
+            <button class="btn primary" type="button" data-tab-jump="quickstart">Open Quickstart Wizard</button>
+          </div>
+          <div class="path-card">
+            <div class="title">Manual Configuration</div>
+            <div class="desc">Full control over tiering, modules, workload tuning, and target connection details.</div>
+            <button class="btn" type="button" data-tab-jump="manual-config">Open Manual Config</button>
+          </div>
+          <div class="path-card">
+            <div class="title">Run and Observe</div>
+            <div class="desc">Launch runs, view live CLI output, inspect workload behavior, and build report artifacts.</div>
+            <button class="btn" type="button" data-tab-jump="dashboards">Open Dashboards</button>
+          </div>
+          <div class="path-card">
+            <div class="title">Security and Reset</div>
+            <div class="desc">Screen controls with go/no-go logic and safely clear PoC artifacts when needed.</div>
+            <div class="actions-grid">
+              <div><button class="btn soft" type="button" data-tab-jump="security">Open Security</button></div>
+              <div><button class="btn soft" type="button" data-tab-jump="data-reset">Open Data Reset</button></div>
+            </div>
+          </div>
         </div>
         <div class="stats-grid">
           <div class="stat"><div class="k">Config Path</div><div class="v">{{ config_path }}</div></div>
@@ -1510,7 +1558,7 @@
                 <label class="check"><input type="checkbox" name="wiz_run_ha_sim" /> Enable simulated HA test where applicable</label>
               </div>
               <div class="line"></div>
-              <div class="tiny">The wizard sets practical defaults. Full module-by-module tuning is always available in Configuration and Workload Lab.</div>
+              <div class="tiny">The wizard sets practical defaults. Full tuning remains available in Manual Configuration and Dashboards.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="2">
@@ -1624,7 +1672,7 @@
               <div class="pair-grid">
                 <div class="pair"><div class="pk">Flow</div><div class="pv">Save configuration -> Apply tier/module defaults -> Optionally run full PoC</div></div>
                 <div class="pair"><div class="pk">Artifacts</div><div class="pv">Logs + metrics + report data under results/ and PDF when report is generated</div></div>
-                <div class="pair"><div class="pk">Advanced Tuning</div><div class="pv">Configuration and Workload Lab tabs remain available after wizard run</div></div>
+                <div class="pair"><div class="pk">Advanced Tuning</div><div class="pv">Manual Configuration and Workload Lab stay available after wizard run</div></div>
                 <div class="pair"><div class="pk">Safety</div><div class="pv">No destructive actions are performed in this wizard</div></div>
               </div>
               <div class="check-wrap">
@@ -1642,10 +1690,55 @@
       </div>
     </section>
 
+    <section class="tab-pane" data-tab-pane="dashboards">
+      <div class="panel">
+        <h2>Dashboards and Execution</h2>
+        <p class="help">Run scenarios, watch live CLI output, and open detailed dashboards.</p>
+        <div class="actions-grid">
+          <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run Full PoC</button></form>
+          <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
+          {% if report_ready %}
+            <a class="btn ok" href="/report" target="_blank">Open Report PDF</a>
+          {% else %}
+            <div><button class="btn" type="button" disabled title="Run PoC first">Open Report PDF</button></div>
+          {% endif %}
+        </div>
+        <div class="line"></div>
+        <div class="pair-grid">
+          <div class="pair"><div class="pk">Running</div><div class="pv" id="monitor_running">{{ run_status.running }}</div></div>
+          <div class="pair"><div class="pk">PID</div><div class="pv" id="monitor_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
+        </div>
+        <div class="monitor-toolbar">
+          <button class="btn soft small" type="button" id="monitor_refresh_btn">Refresh Output</button>
+          <span class="tiny" id="monitor_refresh_state">Auto-refresh every 3s</span>
+        </div>
+        <pre class="log" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
+
+        <div class="line"></div>
+        <div class="path-grid">
+          <div class="path-card">
+            <div class="title">Workload Lab</div>
+            <div class="desc">Tune thread count, duration, mix, and import settings. Run targeted workload tests directly on the cluster.</div>
+            <button class="btn soft" type="button" data-tab-jump="workload-lab">Open Workload Lab</button>
+          </div>
+          <div class="path-card">
+            <div class="title">Report Dashboard</div>
+            <div class="desc">View charted module outcomes, TPS/latency trends, import throughput, and compatibility status.</div>
+            <button class="btn soft" type="button" data-tab-jump="report-dashboard">Open Report Dashboard</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <section class="tab-pane" data-tab-pane="test-planner">
       <div class="panel">
         <h2>Test Planner</h2>
         <p class="help">Understand what each module runs, then select all tests or only the suites you want before execution.</p>
+        <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
+        </div>
 
         <div class="planner-summary">
           Active modules: <strong>{{ enabled_module_count }}</strong> / {{ module_order|length }} from current configuration.
@@ -1714,6 +1807,9 @@
         <h2>Run and Report Actions</h2>
         <p class="help">Run defaults, regenerate report only, and open the latest report artifact.</p>
         <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-tab-jump="dashboards">Back to Dashboards</button></div>
+        </div>
+        <div class="actions-grid">
           <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run PoC with Defaults</button></form>
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
           {% if report_ready %}
@@ -1729,6 +1825,9 @@
       <div class="panel">
         <h2>Workload Lab</h2>
         <p class="help">Tune workload generation, run targeted workload modules on-cluster, and inspect active query templates.</p>
+        <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-tab-jump="dashboards">Back to Dashboards</button></div>
+        </div>
 
         <form method="post" action="/run-workload">
           <div class="grid cols-4">
@@ -1871,6 +1970,9 @@
       <div class="panel">
         <h2>Report Dashboard</h2>
         <p class="help">Auto-populated from <code>results/metrics_summary.json</code> after a run or report build.</p>
+        <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-tab-jump="dashboards">Back to Dashboards</button></div>
+        </div>
 
         {% if report_dashboard.ready %}
           <div class="stats-grid stats-5">
@@ -2040,6 +2142,9 @@
       <div class="panel">
         <h2>Cloud Tier</h2>
         <p class="help">Apply tier profile directly with module and test defaults. Tier naming here matches TiDB Cloud packaging.</p>
+        <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
+        </div>
         <form method="post" action="/apply-tier">
           <div class="grid cols-3">
             <div class="field">
@@ -2131,10 +2236,51 @@
       </div>
     </section>
 
-    <section class="tab-pane" data-tab-pane="configuration">
+    <section class="tab-pane" data-tab-pane="manual-config">
       <div class="panel">
-        <h2>Configuration</h2>
-        <p class="help">All runtime settings including TiDB/comparison-target connection details, modules, and report controls.</p>
+        <h2>Manual Configuration</h2>
+        <p class="help">Complete control over tier, module plan, workload tuning, targets, and reporting settings.</p>
+
+        <div class="planner-summary">
+          Full-control mode: configure everything, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
+        </div>
+
+        <div class="planner-actions">
+          <form method="post" action="/apply-tier" class="config-section">
+            <h3>Tier Profile Helper</h3>
+            <div class="field">
+              <label>Tier</label>
+              <select name="apply_tier">
+                {% for t in tiers %}
+                  <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="check-wrap">
+              <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
+              <label class="check"><input type="checkbox" name="apply_run_ha_sim" /> Enable simulated HA module</label>
+              <label class="check"><input type="checkbox" name="apply_enable_optional_advanced" /> Enable optional advanced modules</label>
+            </div>
+            <button class="btn" type="submit">Apply Tier Profile</button>
+          </form>
+
+          <form method="post" action="/apply-module-suite" class="config-section">
+            <h3>Module Suite Helper</h3>
+            <div class="field">
+              <label>Suite Preset</label>
+              <select name="module_suite">
+                {% for key, suite in module_suites.items() %}
+                  <option value="{{ key }}" {% if key == 'oltp_migration' %}selected{% endif %}>{{ suite.label }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="check-wrap">
+              <label class="check"><input type="checkbox" name="suite_run_ha_sim" /> Simulated HA (tier-recommended only)</label>
+              <label class="check"><input type="checkbox" name="suite_enable_optional_advanced" /> Optional advanced (tier-recommended only)</label>
+            </div>
+            <button class="btn" type="submit">Apply Module Suite</button>
+          </form>
+        </div>
 
         <form method="post" action="/save-config">
           <div class="config-section">
@@ -2342,7 +2488,11 @@
           </div>
 
           <div class="actions-grid">
-            <button class="btn primary" type="submit">Save Configuration</button>
+            <div><button class="btn" type="submit" name="save_action" value="save">Save Configuration</button></div>
+            <div>
+              <label class="check"><input type="checkbox" name="manual_allow_blocked" /> Allow blocked run (dry-run only)</label>
+            </div>
+            <div><button class="btn primary" type="submit" name="save_action" value="save_and_run">Save and Run Scenario</button></div>
           </div>
         </form>
       </div>
@@ -2371,24 +2521,6 @@
       </div>
     </section>
 
-    <section class="tab-pane" data-tab-pane="monitor">
-      <div class="panel">
-        <h2>Run Monitor</h2>
-        <p class="help">Background run status and tail of <code>results/web_ui_run.log</code>.</p>
-        <div class="monitor-toolbar">
-          <button class="btn soft small" type="button" id="monitor_refresh_btn">Refresh Output</button>
-          <span class="tiny" id="monitor_refresh_state">Auto-refresh every 3s</span>
-        </div>
-        <div class="pair-grid">
-          <div class="pair"><div class="pk">Running</div><div class="pv" id="monitor_running">{{ run_status.running }}</div></div>
-          <div class="pair"><div class="pk">PID</div><div class="pv" id="monitor_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
-        </div>
-        <div class="line"></div>
-        <pre class="log" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
-      </div>
-    </section>
   </main>
 </div>
 
@@ -2396,13 +2528,28 @@
 (function () {
   const buttons = Array.from(document.querySelectorAll('[data-tab-btn]'));
   const panes = Array.from(document.querySelectorAll('[data-tab-pane]'));
+  const legacyTabMap = {
+    configuration: 'manual-config',
+    monitor: 'dashboards',
+  };
+  const buttonFallback = {
+    'test-planner': 'manual-config',
+    'cloud-tier': 'manual-config',
+    'run-report': 'dashboards',
+    'workload-lab': 'dashboards',
+    'report-dashboard': 'dashboards',
+  };
 
   function activate(tabId, updateHash = true) {
-    const exists = panes.some((p) => p.dataset.tabPane === tabId);
-    const next = exists ? tabId : 'overview';
+    const requested = legacyTabMap[tabId] || tabId;
+    const exists = panes.some((p) => p.dataset.tabPane === requested);
+    const next = exists ? requested : 'overview';
+    const activeButton = buttons.some((btn) => btn.dataset.tabBtn === next)
+      ? next
+      : (buttonFallback[next] || 'overview');
 
     buttons.forEach((btn) => {
-      btn.classList.toggle('active', btn.dataset.tabBtn === next);
+      btn.classList.toggle('active', btn.dataset.tabBtn === activeButton);
     });
 
     panes.forEach((pane) => {
