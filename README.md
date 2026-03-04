@@ -112,7 +112,7 @@ tidb:
   port:     4000
   user:     "root"
   password: "your-password"
-  database: "pov_test"
+  database: "test"
   ssl:      true
 
 # Optional: side-by-side comparison target (multi-engine config).

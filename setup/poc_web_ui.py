@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 try:
-    from flask import Flask, flash, redirect, render_template, request, send_file, url_for
+    from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
 except ModuleNotFoundError:
     print(
         "Missing dependency: flask. Install dependencies first "
@@ -71,7 +71,7 @@ DEFAULT_CFG = {
         "port": 4000,
         "user": "",
         "password": "",
-        "database": "pov_test",
+        "database": "test",
         "ssl": True,
     },
     "comparison_db": {
@@ -1080,7 +1080,7 @@ def create_app(config_path: Path) -> Flask:
         tidb["port"] = to_int(request.form.get("tidb_port"), tidb.get("port", 4000))
         tidb["user"] = request.form.get("tidb_user", "").strip()
         tidb["password"] = request.form.get("tidb_password", "")
-        tidb["database"] = request.form.get("tidb_database", "pov_test").strip() or "pov_test"
+        tidb["database"] = request.form.get("tidb_database", "test").strip() or "test"
         tidb["ssl"] = to_bool(request.form.get("tidb_ssl"), True)
 
         comp = cfg.setdefault("comparison_db", {})
@@ -1207,7 +1207,7 @@ def create_app(config_path: Path) -> Flask:
         new_tidb_password = request.form.get("wiz_tidb_password", "")
         if new_tidb_password:
             tidb["password"] = new_tidb_password
-        tidb["database"] = request.form.get("wiz_tidb_database", "pov_test").strip() or "pov_test"
+        tidb["database"] = request.form.get("wiz_tidb_database", "test").strip() or "test"
         tidb["ssl"] = to_bool(request.form.get("wiz_tidb_ssl"), True)
 
         comp = cfg.setdefault("comparison_db", {})
@@ -1433,6 +1433,12 @@ def create_app(config_path: Path) -> Flask:
             flash("Report PDF not available yet.", "error")
             return redirect(url_for("index"))
         return send_file(REPORT_PDF, as_attachment=False)
+
+    @app.get("/run-status")
+    def run_status_route():
+        st = run_status()
+        st["report_ready"] = REPORT_PDF.exists()
+        return jsonify(st)
 
     return app
 

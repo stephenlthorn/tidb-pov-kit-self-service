@@ -6,7 +6,7 @@ tidb:
   port:     4000
   user:     "root"
   password: "YOUR_PASSWORD"
-  database: "pov_test"
+  database: "test"
   ssl:      true
 
 # Optional: configure a comparison target for side-by-side benchmarking.

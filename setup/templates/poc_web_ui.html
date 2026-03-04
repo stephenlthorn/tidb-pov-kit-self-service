@@ -596,6 +596,15 @@
       margin-top: 8px;
     }
 
+    .monitor-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+
     .grid {
       display: grid;
       gap: 10px;
@@ -1431,7 +1440,7 @@
                 <div class="field"><label>Host</label><input type="text" name="wiz_tidb_host" value="{{ cfg.tidb.host }}" placeholder="gateway01.xxxxx.tidbcloud.com" /></div>
                 <div class="field"><label>Port</label><input type="number" name="wiz_tidb_port" value="{{ cfg.tidb.port }}" /></div>
                 <div class="field"><label>User</label><input type="text" name="wiz_tidb_user" value="{{ cfg.tidb.user }}" placeholder="clusterPrefix.root" /></div>
-                <div class="field"><label>Password</label><input type="password" name="wiz_tidb_password" value="" placeholder="Leave blank to keep existing saved password" /></div>
+                <div class="field"><label>Password</label><input type="password" name="wiz_tidb_password" value="" /></div>
               </div>
               <div class="grid cols-2">
                 <div class="field"><label>Database</label><input type="text" name="wiz_tidb_database" value="{{ cfg.tidb.database }}" /></div>
@@ -1470,7 +1479,7 @@
               </div>
               <div class="grid cols-4">
                 <div class="field"><label>User</label><input type="text" name="wiz_comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
-                <div class="field"><label>Password</label><input type="password" name="wiz_comparison_password" value="" placeholder="Leave blank to keep existing saved password" /></div>
+                <div class="field"><label>Password</label><input type="password" name="wiz_comparison_password" value="" /></div>
                 <div class="field"><label>Database</label><input type="text" name="wiz_comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
                 <div class="field"><label>Schema</label><input type="text" name="wiz_comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
               </div>
@@ -2220,14 +2229,18 @@
       <div class="panel">
         <h2>Run Monitor</h2>
         <p class="help">Background run status and tail of <code>results/web_ui_run.log</code>.</p>
+        <div class="monitor-toolbar">
+          <button class="btn soft small" type="button" id="monitor_refresh_btn">Refresh Output</button>
+          <span class="tiny" id="monitor_refresh_state">Auto-refresh every 3s</span>
+        </div>
         <div class="pair-grid">
-          <div class="pair"><div class="pk">Running</div><div class="pv">{{ run_status.running }}</div></div>
-          <div class="pair"><div class="pk">PID</div><div class="pv">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Last Log Update</div><div class="pv">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Report PDF</div><div class="pv">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
+          <div class="pair"><div class="pk">Running</div><div class="pv" id="monitor_running">{{ run_status.running }}</div></div>
+          <div class="pair"><div class="pk">PID</div><div class="pv" id="monitor_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
+          <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
         </div>
         <div class="line"></div>
-        <pre class="log">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
+        <pre class="log" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
       </div>
     </section>
   </main>
@@ -2485,6 +2498,65 @@
   if (comparisonHostEl) {
     comparisonHostEl.addEventListener('input', syncComparisonTargetUi);
   }
+
+  const monitorRunningEl = document.getElementById('monitor_running');
+  const monitorPidEl = document.getElementById('monitor_pid');
+  const monitorLastLogEl = document.getElementById('monitor_last_log');
+  const monitorReportEl = document.getElementById('monitor_report_ready');
+  const monitorLogOutputEl = document.getElementById('monitor_log_output');
+  const monitorRefreshBtn = document.getElementById('monitor_refresh_btn');
+  const monitorRefreshStateEl = document.getElementById('monitor_refresh_state');
+
+  function updateMonitorFromStatus(status) {
+    if (!status) {
+      return;
+    }
+
+    if (monitorRunningEl) {
+      monitorRunningEl.textContent = String(!!status.running);
+    }
+    if (monitorPidEl) {
+      monitorPidEl.textContent = status.pid ? String(status.pid) : 'n/a';
+    }
+    if (monitorLastLogEl) {
+      monitorLastLogEl.textContent = status.last_log || 'n/a';
+    }
+    if (monitorReportEl) {
+      monitorReportEl.textContent = status.report_ready ? 'Ready' : 'Not generated';
+    }
+    if (monitorLogOutputEl) {
+      const atBottom =
+        monitorLogOutputEl.scrollTop + monitorLogOutputEl.clientHeight >= monitorLogOutputEl.scrollHeight - 8;
+      monitorLogOutputEl.textContent = status.last_lines || 'No log output yet.';
+      if (atBottom) {
+        monitorLogOutputEl.scrollTop = monitorLogOutputEl.scrollHeight;
+      }
+    }
+  }
+
+  async function refreshMonitorStatus() {
+    try {
+      const resp = await fetch('/run-status', { cache: 'no-store' });
+      if (!resp.ok) {
+        throw new Error(`HTTP ${resp.status}`);
+      }
+      const data = await resp.json();
+      updateMonitorFromStatus(data);
+      if (monitorRefreshStateEl) {
+        monitorRefreshStateEl.textContent = data.running ? 'Streaming live output (auto-refresh every 3s)' : 'Auto-refresh every 3s';
+      }
+    } catch (err) {
+      if (monitorRefreshStateEl) {
+        monitorRefreshStateEl.textContent = 'Unable to refresh run output.';
+      }
+    }
+  }
+
+  if (monitorRefreshBtn) {
+    monitorRefreshBtn.addEventListener('click', refreshMonitorStatus);
+  }
+  setInterval(refreshMonitorStatus, 3000);
+  refreshMonitorStatus();
 
   const fromHash = window.location.hash ? window.location.hash.slice(1) : 'overview';
   activate(fromHash, false);

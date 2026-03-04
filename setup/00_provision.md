@@ -73,7 +73,7 @@ tidb:
   port:     4000
   user:     "root"
   password: "YOUR_PASSWORD_HERE"
-  database: "pov_test"
+  database: "test"
   ssl:      true
 ```
 
