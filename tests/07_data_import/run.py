@@ -21,7 +21,7 @@ from lib.result_store import init_db, start_module, end_module, log_import_stat
 from lib.db_utils import get_connection
 
 MODULE    = "07_data_import"
-BATCH_SZ  = 5_000   # rows per INSERT batch (Method C)
+DEFAULT_BATCH_SZ = 5_000   # rows per INSERT batch (Method C)
 
 # Target import sizes — adjust via config test.import_rows
 DEFAULT_ROWS = 1_000_000   # ~100 MB CSV with our schema
@@ -31,10 +31,29 @@ def run(cfg: dict):
     init_db()
     start_module(MODULE)
 
-    import_rows = cfg.get("test", {}).get("import_rows", DEFAULT_ROWS)
+    test_cfg = cfg.get("test", {})
+    try:
+        import_rows = int(test_cfg.get("import_rows", DEFAULT_ROWS))
+    except (TypeError, ValueError):
+        import_rows = DEFAULT_ROWS
+    import_rows = max(10_000, import_rows)
+
+    try:
+        batch_size = max(100, int(test_cfg.get("import_batch_size", DEFAULT_BATCH_SZ)))
+    except (TypeError, ValueError):
+        batch_size = DEFAULT_BATCH_SZ
+    methods = test_cfg.get("import_methods", ["batched_insert", "load_data_infile", "import_into"])
+    if not isinstance(methods, list):
+        methods = ["batched_insert", "load_data_infile", "import_into"]
+    methods = [str(m).strip().lower() for m in methods]
+    if not methods:
+        methods = ["batched_insert", "load_data_infile", "import_into"]
+
     print(f"\n{'='*60}")
     print(f"  Module 7: Data Import Speed")
     print(f"  Target rows: {import_rows:,}")
+    print(f"  Batched INSERT size: {batch_size:,}")
+    print(f"  Enabled methods: {', '.join(methods)}")
     print(f"{'='*60}")
 
     conn = get_connection(cfg["tidb"])
@@ -48,45 +67,57 @@ def run(cfg: dict):
     results = {}
 
     # ── Method C: Batched INSERT (always available, baseline) ─────────────────
-    print(f"\n  Method C — Batched INSERT (batch={BATCH_SZ:,})...")
-    _drop_and_create(cur, conn, "import_test_insert")
-    t0    = time.time()
-    rows_c = _batched_insert(cur, conn, "import_test_insert", csv_path, import_rows)
-    dur_c = time.time() - t0
-    results["batched_insert"] = _metrics(rows_c, file_size_gb, dur_c)
-    log_import_stat(rows_c, file_size_gb, dur_c,
-                    file_size_gb / dur_c * 60 if dur_c > 0 else 0)
-    _print_result("Batched INSERT", results["batched_insert"])
+    if "batched_insert" in methods:
+        print(f"\n  Method C — Batched INSERT (batch={batch_size:,})...")
+        _drop_and_create(cur, conn, "import_test_insert")
+        t0 = time.time()
+        rows_c = _batched_insert(cur, conn, "import_test_insert", csv_path, import_rows, batch_size)
+        dur_c = time.time() - t0
+        results["batched_insert"] = _metrics(rows_c, file_size_gb, dur_c)
+        log_import_stat(rows_c, file_size_gb, dur_c,
+                        file_size_gb / dur_c * 60 if dur_c > 0 else 0)
+        _print_result("Batched INSERT", results["batched_insert"])
+    else:
+        print("\n  Method C — Batched INSERT skipped by config.")
+        results["batched_insert"] = {"skipped": True, "reason": "disabled"}
 
     # ── Method B: LOAD DATA LOCAL INFILE ─────────────────────────────────────
-    print(f"\n  Method B — LOAD DATA LOCAL INFILE...")
-    _drop_and_create(cur, conn, "import_test_load")
-    try:
-        t0 = time.time()
-        rows_b = _load_data_infile(cfg["tidb"], "import_test_load", csv_path)
-        dur_b  = time.time() - t0
-        results["load_data_infile"] = _metrics(rows_b, file_size_gb, dur_b)
-        log_import_stat(rows_b, file_size_gb, dur_b,
-                        file_size_gb / dur_b * 60 if dur_b > 0 else 0)
-        _print_result("LOAD DATA INFILE", results["load_data_infile"])
-    except Exception as e:
-        print(f"    Skipped: {e}")
-        results["load_data_infile"] = {"skipped": True, "reason": str(e)}
+    if "load_data_infile" in methods:
+        print(f"\n  Method B — LOAD DATA LOCAL INFILE...")
+        _drop_and_create(cur, conn, "import_test_load")
+        try:
+            t0 = time.time()
+            rows_b = _load_data_infile(cfg["tidb"], "import_test_load", csv_path)
+            dur_b = time.time() - t0
+            results["load_data_infile"] = _metrics(rows_b, file_size_gb, dur_b)
+            log_import_stat(rows_b, file_size_gb, dur_b,
+                            file_size_gb / dur_b * 60 if dur_b > 0 else 0)
+            _print_result("LOAD DATA INFILE", results["load_data_infile"])
+        except Exception as e:
+            print(f"    Skipped: {e}")
+            results["load_data_infile"] = {"skipped": True, "reason": str(e)}
+    else:
+        print("\n  Method B — LOAD DATA LOCAL INFILE skipped by config.")
+        results["load_data_infile"] = {"skipped": True, "reason": "disabled"}
 
     # ── Method A: IMPORT INTO ─────────────────────────────────────────────────
-    print(f"\n  Method A — IMPORT INTO (TiDB native loader)...")
-    _drop_and_create(cur, conn, "import_test_native")
-    try:
-        t0 = time.time()
-        rows_a = _import_into(cur, conn, "import_test_native", csv_path)
-        dur_a  = time.time() - t0
-        results["import_into"] = _metrics(rows_a, file_size_gb, dur_a)
-        log_import_stat(rows_a, file_size_gb, dur_a,
-                        file_size_gb / dur_a * 60 if dur_a > 0 else 0)
-        _print_result("IMPORT INTO", results["import_into"])
-    except Exception as e:
-        print(f"    Skipped (requires TiDB >= 7.2 or accessible file path): {e}")
-        results["import_into"] = {"skipped": True, "reason": str(e)}
+    if "import_into" in methods:
+        print(f"\n  Method A — IMPORT INTO (TiDB native loader)...")
+        _drop_and_create(cur, conn, "import_test_native")
+        try:
+            t0 = time.time()
+            rows_a = _import_into(cur, conn, "import_test_native", csv_path)
+            dur_a = time.time() - t0
+            results["import_into"] = _metrics(rows_a, file_size_gb, dur_a)
+            log_import_stat(rows_a, file_size_gb, dur_a,
+                            file_size_gb / dur_a * 60 if dur_a > 0 else 0)
+            _print_result("IMPORT INTO", results["import_into"])
+        except Exception as e:
+            print(f"    Skipped (requires TiDB >= 7.2 or accessible file path): {e}")
+            results["import_into"] = {"skipped": True, "reason": str(e)}
+    else:
+        print("\n  Method A — IMPORT INTO skipped by config.")
+        results["import_into"] = {"skipped": True, "reason": "disabled"}
 
     # Cleanup
     for t in ["import_test_insert", "import_test_load", "import_test_native"]:
@@ -148,7 +179,7 @@ def _drop_and_create(cur, conn, table: str):
     conn.commit()
 
 
-def _batched_insert(cur, conn, table: str, csv_path: str, total: int) -> int:
+def _batched_insert(cur, conn, table: str, csv_path: str, total: int, batch_size: int) -> int:
     inserted = 0
     batch    = []
     sql = (f"INSERT INTO {table} (source, event_type, user_id, session_id) "
@@ -157,7 +188,7 @@ def _batched_insert(cur, conn, table: str, csv_path: str, total: int) -> int:
         reader = csv.reader(fh)
         for row in reader:
             batch.append(row)
-            if len(batch) >= BATCH_SZ:
+            if len(batch) >= batch_size:
                 cur.executemany(sql, batch)
                 conn.commit()
                 inserted += len(batch)

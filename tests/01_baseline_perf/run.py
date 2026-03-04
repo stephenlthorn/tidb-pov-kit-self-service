@@ -10,7 +10,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 import yaml
 from lib.result_store import init_db, start_module, end_module, get_latency_stats
 from load.load_runner import LoadRunner
-from load.workload_definitions import schema_a_workload, build_weighted_pool
+from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
 
 MODULE = "01_baseline_perf"
 
@@ -36,13 +36,24 @@ def run(cfg: dict):
         comparison_label=comparison_cfg.get("label", "comparison"),
     )
 
-    workload = schema_a_workload(counts)
+    workload = apply_workload_profile(
+        schema_a_workload(counts),
+        mix=cfg.get("test", {}).get("workload_mix", "mixed"),
+        read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
+        write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
+    )
     pool = build_weighted_pool(workload)
 
     print(f"\n{'='*60}")
     print(f"  Module 1: Baseline Performance")
     print(f"  Concurrency levels: {concurrency_levels}")
     print(f"  Duration per level: {duration}s")
+    print(
+        "  Workload profile: "
+        f"{cfg.get('test', {}).get('workload_mix', 'mixed')} "
+        f"(read x{cfg.get('test', {}).get('read_weight_multiplier', 1.0)}, "
+        f"write x{cfg.get('test', {}).get('write_weight_multiplier', 1.0)})"
+    )
     if has_comparison:
         print(f"  Comparison DB: {comparison_cfg.get('label', 'comparison')}")
     print(f"{'='*60}")

@@ -33,9 +33,16 @@ def run(cfg: dict):
     print(f"{'='*60}")
 
     from load.load_runner import LoadRunner
-    from load.workload_definitions import schema_a_workload, build_weighted_pool
+    from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
     counts = _get_counts(cfg)
-    pool = build_weighted_pool(schema_a_workload(counts))
+    pool = build_weighted_pool(
+        apply_workload_profile(
+            schema_a_workload(counts),
+            mix=cfg.get("test", {}).get("workload_mix", "mixed"),
+            read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
+            write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
+        )
+    )
 
     failure_ts = {"start": None, "end": None}
     stop_event = threading.Event()

@@ -6,6 +6,7 @@ params_fn(counts) returns a tuple of bind parameters.
 """
 import random
 import time
+from typing import Dict, List
 
 
 def _rnd(n): return random.randint(1, max(1, n))
@@ -200,6 +201,60 @@ def build_weighted_pool(workload: list) -> list:
     for w in workload:
         pool.extend([w] * w.get("weight", 10))
     return pool
+
+
+def classify_query_kind(query_type: str) -> str:
+    q = (query_type or "").lower()
+    if q.startswith("select") or q.startswith("analytics"):
+        return "read"
+    if q.startswith("insert") or q.startswith("update") or q.startswith("upsert") or q.startswith("delete"):
+        return "write"
+    return "other"
+
+
+def apply_workload_profile(
+    workload: List[Dict],
+    mix: str = "mixed",
+    read_multiplier: float = 1.0,
+    write_multiplier: float = 1.0,
+) -> List[Dict]:
+    """
+    Return a copy of workload with tuned weights.
+
+    mix:
+      - mixed: balanced defaults
+      - read_heavy: increase read weights, soften writes
+      - write_heavy: increase write weights, soften reads
+    read_multiplier / write_multiplier:
+      Extra multipliers applied after mix scaling.
+    """
+    mix = (mix or "mixed").lower()
+    read_mix = 1.0
+    write_mix = 1.0
+    if mix == "read_heavy":
+        read_mix = 1.6
+        write_mix = 0.7
+    elif mix == "write_heavy":
+        read_mix = 0.7
+        write_mix = 1.6
+
+    read_multiplier = max(0.1, float(read_multiplier or 1.0))
+    write_multiplier = max(0.1, float(write_multiplier or 1.0))
+
+    tuned = []
+    for item in workload:
+        row = dict(item)
+        kind = classify_query_kind(str(row.get("query_type", "")))
+        base_weight = float(row.get("weight", 1))
+        if kind == "read":
+            weight = base_weight * read_mix * read_multiplier
+        elif kind == "write":
+            weight = base_weight * write_mix * write_multiplier
+        else:
+            weight = base_weight
+        row["weight"] = max(1, int(round(weight)))
+        tuned.append(row)
+    return tuned
 
 
 def sample_query(pool: list):

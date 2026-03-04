@@ -29,6 +29,11 @@ test:
   concurrency_levels:    [8, 16, 32]
   ramp_duration_seconds: 300
   import_rows:           1000000
+  workload_mix:          "mixed"      # mixed | read_heavy | write_heavy
+  read_weight_multiplier: 1.0
+  write_weight_multiplier: 1.0
+  import_batch_size:      5000
+  import_methods:         ["batched_insert", "load_data_infile", "import_into"]
 
 # Your production queries — validated in M0 and replayed in M1
 # Leave empty to use only synthetic workload

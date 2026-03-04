@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import re
+import sqlite3
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,8 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS_DIR = ROOT / "results"
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 RUN_SCRIPT = ROOT / "run_all.sh"
+BASELINE_SCRIPT = ROOT / "tests" / "01_baseline_perf" / "run.py"
+IMPORT_SCRIPT = ROOT / "tests" / "07_data_import" / "run.py"
 
 REPORT_PDF = RESULTS_DIR / "tidb_pov_report.pdf"
 METRICS_JSON = RESULTS_DIR / "metrics_summary.json"
@@ -84,6 +87,10 @@ DEFAULT_CFG = {
         "ramp_duration_seconds": 300,
         "import_rows": 1000000,
         "workload_mix": "mixed",
+        "read_weight_multiplier": 1.0,
+        "write_weight_multiplier": 1.0,
+        "import_batch_size": 5000,
+        "import_methods": ["batched_insert", "load_data_infile", "import_into"],
     },
     "customer_queries": [],
     "customer_query_ratio": 0.30,
@@ -194,6 +201,23 @@ STATUS_CLASSES = {
     "not_run": "pill-na",
 }
 
+WORKLOAD_TARGETS = {
+    "baseline_perf": {
+        "label": "Baseline OLTP (M1)",
+        "script": BASELINE_SCRIPT,
+    },
+    "data_import": {
+        "label": "Data Import Benchmark (M7)",
+        "script": IMPORT_SCRIPT,
+    },
+}
+
+IMPORT_METHOD_LABELS = {
+    "batched_insert": "Batched INSERT",
+    "load_data_infile": "LOAD DATA LOCAL INFILE",
+    "import_into": "IMPORT INTO",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Launch PoC web UI")
@@ -234,6 +258,33 @@ def normalize_cfg(cfg: Dict) -> Dict:
     cl = cfg.get("test", {}).get("concurrency_levels", [8, 16, 32])
     if not isinstance(cl, list):
         cfg["test"]["concurrency_levels"] = [8, 16, 32]
+
+    mix = str(cfg.get("test", {}).get("workload_mix", "mixed")).lower()
+    if mix not in {"mixed", "read_heavy", "write_heavy"}:
+        cfg["test"]["workload_mix"] = "mixed"
+
+    try:
+        cfg["test"]["read_weight_multiplier"] = float(cfg.get("test", {}).get("read_weight_multiplier", 1.0))
+    except (TypeError, ValueError):
+        cfg["test"]["read_weight_multiplier"] = 1.0
+
+    try:
+        cfg["test"]["write_weight_multiplier"] = float(cfg.get("test", {}).get("write_weight_multiplier", 1.0))
+    except (TypeError, ValueError):
+        cfg["test"]["write_weight_multiplier"] = 1.0
+
+    try:
+        batch = int(cfg.get("test", {}).get("import_batch_size", 5000))
+    except (TypeError, ValueError):
+        batch = 5000
+    cfg["test"]["import_batch_size"] = max(100, batch)
+
+    methods = cfg.get("test", {}).get("import_methods")
+    if not isinstance(methods, list):
+        cfg["test"]["import_methods"] = list(IMPORT_METHOD_LABELS.keys())
+    else:
+        normalized = [str(m).strip().lower() for m in methods if str(m).strip().lower() in IMPORT_METHOD_LABELS]
+        cfg["test"]["import_methods"] = normalized or list(IMPORT_METHOD_LABELS.keys())
 
     return cfg
 
@@ -285,6 +336,148 @@ def parse_concurrency(raw: str, default: List[int]) -> List[int]:
         if part.isdigit() and int(part) > 0:
             vals.append(int(part))
     return vals or default
+
+
+def parse_import_methods_from_form(form, prefix: str) -> List[str]:
+    selected = []
+    for method in IMPORT_METHOD_LABELS:
+        if form.get(f"{prefix}{method}") == "on":
+            selected.append(method)
+    return selected or list(IMPORT_METHOD_LABELS.keys())
+
+
+def load_counts_for_preview(cfg: Dict) -> Dict:
+    manifest = RESULTS_DIR / "data_manifest.json"
+    if manifest.exists():
+        try:
+            raw = json.loads(manifest.read_text(encoding="utf-8"))
+            counts = raw.get("counts")
+            if isinstance(counts, dict) and counts:
+                return counts
+        except Exception:
+            pass
+
+    try:
+        from setup.generate_data import SCALE_CONFIG  # type: ignore
+
+        scale = cfg.get("test", {}).get("data_scale", "small")
+        counts = SCALE_CONFIG.get(scale, SCALE_CONFIG.get("small", {}))
+        if isinstance(counts, dict) and counts:
+            return counts
+    except Exception:
+        pass
+
+    return {"users": 100_000, "accounts": 150_000, "transactions": 5_000_000}
+
+
+def query_activity(limit: int = 25) -> List[Dict]:
+    db_path = RESULTS_DIR / "results.db"
+    if not db_path.exists():
+        return []
+
+    try:
+        conn = sqlite3.connect(str(db_path))
+        conn.row_factory = sqlite3.Row
+        rows = conn.execute(
+            """
+            SELECT
+                query_type,
+                COUNT(*) AS count_total,
+                SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) AS count_success,
+                ROUND(AVG(latency_ms), 2) AS avg_ms,
+                ROUND(MAX(latency_ms), 2) AS max_ms
+            FROM results
+            WHERE query_type IS NOT NULL
+              AND module IN ('01_baseline_perf', '02_elastic_scale', '03_high_availability', '04_htap_concurrent', '05_online_ddl')
+            GROUP BY query_type
+            ORDER BY count_total DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        return []
+
+    out = []
+    for row in rows:
+        total = parse_int(row["count_total"], 0)
+        success = parse_int(row["count_success"], 0)
+        out.append(
+            {
+                "query_type": row["query_type"],
+                "count_total": total,
+                "success_pct": pct(success, total or 1),
+                "avg_ms": parse_float(row["avg_ms"], 0.0),
+                "max_ms": parse_float(row["max_ms"], 0.0),
+            }
+        )
+    return out
+
+
+def build_workload_insights(cfg: Dict) -> Dict:
+    try:
+        from load.workload_definitions import apply_workload_profile, classify_query_kind, schema_a_workload
+    except Exception:
+        return {"ready": False, "queries": [], "activity": [], "customer_queries": []}
+
+    test_cfg = cfg.get("test", {})
+    mix = str(test_cfg.get("workload_mix", "mixed")).lower()
+    read_mult = parse_float(test_cfg.get("read_weight_multiplier", 1.0), 1.0)
+    write_mult = parse_float(test_cfg.get("write_weight_multiplier", 1.0), 1.0)
+
+    counts = load_counts_for_preview(cfg)
+    base_workload = schema_a_workload(counts)
+    tuned = apply_workload_profile(
+        base_workload,
+        mix=mix,
+        read_multiplier=max(0.1, read_mult),
+        write_multiplier=max(0.1, write_mult),
+    )
+
+    total_weight = sum(parse_float(item.get("weight"), 0.0) for item in tuned) or 1.0
+    query_rows = []
+    for item in tuned:
+        qtype = str(item.get("query_type", "unknown"))
+        weight = parse_float(item.get("weight"), 0.0)
+        kind = classify_query_kind(qtype)
+        query_rows.append(
+            {
+                "query_type": qtype,
+                "kind": kind,
+                "kind_class": "kind-read" if kind == "read" else ("kind-write" if kind == "write" else "kind-other"),
+                "weight": round(weight, 2),
+                "share_pct": round((weight / total_weight) * 100.0, 1),
+                "sql": str(item.get("sql", "")),
+            }
+        )
+
+    query_rows.sort(key=lambda r: r["weight"], reverse=True)
+    customer_queries = [q for q in cfg.get("customer_queries", []) if isinstance(q, str) and q.strip()]
+    import_methods = cfg.get("test", {}).get("import_methods", list(IMPORT_METHOD_LABELS.keys()))
+    if not isinstance(import_methods, list):
+        import_methods = list(IMPORT_METHOD_LABELS.keys())
+
+    levels = cfg.get("test", {}).get("concurrency_levels", [8])
+    if not isinstance(levels, list) or not levels:
+        levels = [8]
+
+    return {
+        "ready": True,
+        "mix": mix,
+        "read_multiplier": round(read_mult, 2),
+        "write_multiplier": round(write_mult, 2),
+        "queries": query_rows,
+        "activity": query_activity(limit=25),
+        "customer_queries": customer_queries,
+        "target": str(cfg.get("workload_lab", {}).get("target", "baseline_perf")),
+        "concurrency": parse_int(cfg.get("workload_lab", {}).get("concurrency"), parse_int(levels[0], 8)),
+        "duration_seconds": parse_int(cfg.get("workload_lab", {}).get("duration_seconds"), cfg.get("test", {}).get("duration_seconds", 120)),
+        "customer_ratio": round(parse_float(cfg.get("customer_query_ratio", 0.3), 0.3), 2),
+        "import_rows": parse_int(cfg.get("test", {}).get("import_rows"), 1_000_000),
+        "import_batch_size": parse_int(cfg.get("test", {}).get("import_batch_size"), 5000),
+        "import_methods": [m for m in import_methods if m in IMPORT_METHOD_LABELS],
+    }
 
 
 def ui_tier_label(tier: str) -> str:
@@ -746,6 +939,7 @@ def create_app(config_path: Path) -> Flask:
         st = run_status()
         report_ready = REPORT_PDF.exists()
         report_dashboard = build_report_dashboard()
+        workload_insights = build_workload_insights(cfg)
 
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
@@ -756,6 +950,7 @@ def create_app(config_path: Path) -> Flask:
             cfg=cfg,
             report_ready=report_ready,
             report_dashboard=report_dashboard,
+            workload_insights=workload_insights,
             report_path=str(REPORT_PDF),
             run_status=st,
             tiers=tiers_for_ui,
@@ -772,6 +967,8 @@ def create_app(config_path: Path) -> Flask:
             scenario_chip_class=SCENARIO_CHIP_CLASSES.get(selected_scenario, "chip-scenario-oltp"),
             report_chip_class="chip-report-ready" if report_ready else "chip-report-missing",
             status_classes=STATUS_CLASSES,
+            workload_targets=WORKLOAD_TARGETS,
+            import_method_labels=IMPORT_METHOD_LABELS,
         )
 
     @app.post("/save-config")
@@ -806,6 +1003,10 @@ def create_app(config_path: Path) -> Flask:
         test["ramp_duration_seconds"] = to_int(request.form.get("test_ramp_duration_seconds"), 300)
         test["import_rows"] = to_int(request.form.get("test_import_rows"), 1000000)
         test["workload_mix"] = request.form.get("test_workload_mix", "mixed")
+        test["read_weight_multiplier"] = to_float(request.form.get("test_read_weight_multiplier"), 1.0)
+        test["write_weight_multiplier"] = to_float(request.form.get("test_write_weight_multiplier"), 1.0)
+        test["import_batch_size"] = to_int(request.form.get("test_import_batch_size"), 5000)
+        test["import_methods"] = parse_import_methods_from_form(request.form, "test_import_method_")
 
         raw_queries = request.form.get("customer_queries", "")
         q_lines = [ln.strip() for ln in raw_queries.splitlines() if ln.strip()]
@@ -911,6 +1112,64 @@ def create_app(config_path: Path) -> Flask:
         ok, msg = start_background(cmd, "report-only")
         flash(msg, "success" if ok else "error")
         return redirect(url_for("index"))
+
+    @app.post("/run-workload")
+    def run_workload_route():
+        cfg = load_cfg(config_path)
+        action = str(request.form.get("wl_action", "run")).lower()
+        target = str(request.form.get("wl_target", "baseline_perf"))
+
+        if target not in WORKLOAD_TARGETS:
+            flash("Invalid workload target selected.", "error")
+            return redirect(url_for("index") + "#workload-lab")
+
+        test = cfg.setdefault("test", {})
+        wl = cfg.setdefault("workload_lab", {})
+
+        mix = str(request.form.get("wl_mix", "mixed")).lower()
+        if mix not in {"mixed", "read_heavy", "write_heavy"}:
+            mix = "mixed"
+
+        concurrency = max(1, to_int(request.form.get("wl_concurrency"), 16))
+        duration_sec = max(10, to_int(request.form.get("wl_duration_seconds"), 120))
+        customer_ratio = to_float(request.form.get("wl_customer_ratio"), cfg.get("customer_query_ratio", 0.30))
+        read_mult = max(0.1, to_float(request.form.get("wl_read_multiplier"), 1.0))
+        write_mult = max(0.1, to_float(request.form.get("wl_write_multiplier"), 1.0))
+        import_rows = max(10_000, to_int(request.form.get("wl_import_rows"), test.get("import_rows", 1_000_000)))
+        import_batch_size = max(100, to_int(request.form.get("wl_import_batch_size"), test.get("import_batch_size", 5000)))
+        import_methods = parse_import_methods_from_form(request.form, "wl_method_")
+
+        test["workload_mix"] = mix
+        test["read_weight_multiplier"] = read_mult
+        test["write_weight_multiplier"] = write_mult
+        test["import_rows"] = import_rows
+        test["import_batch_size"] = import_batch_size
+        test["import_methods"] = import_methods
+        cfg["customer_query_ratio"] = customer_ratio
+
+        if target == "baseline_perf":
+            test["duration_seconds"] = duration_sec
+            test["concurrency_levels"] = [concurrency]
+
+        wl["target"] = target
+        wl["concurrency"] = concurrency
+        wl["duration_seconds"] = duration_sec
+
+        save_cfg(config_path, cfg)
+
+        if action == "save":
+            flash("Workload tuning saved.", "success")
+            return redirect(url_for("index") + "#workload-lab")
+
+        script = WORKLOAD_TARGETS[target]["script"]
+        if not Path(script).exists():
+            flash(f"Workload runner not found: {script}", "error")
+            return redirect(url_for("index") + "#workload-lab")
+
+        cmd = [sys.executable, str(script), str(config_path)]
+        ok, msg = start_background(cmd, f"workload-{target}")
+        flash(msg, "success" if ok else "error")
+        return redirect(url_for("index") + "#workload-lab")
 
     @app.post("/clear-data")
     def clear_data_route():

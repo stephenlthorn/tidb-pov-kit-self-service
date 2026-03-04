@@ -17,7 +17,7 @@ import yaml
 from lib.result_store import init_db, start_module, end_module, get_latency_stats, log_result
 from lib.db_utils import get_connection, execute_timed
 from load.load_runner import LoadRunner
-from load.workload_definitions import schema_a_workload, analytical_workload, build_weighted_pool
+from load.workload_definitions import apply_workload_profile, schema_a_workload, analytical_workload, build_weighted_pool
 
 MODULE      = "04_htap_concurrent"
 OLTP_CONC   = 32
@@ -43,7 +43,14 @@ def run(cfg: dict):
     _ensure_tiflash_replicas(cur)
     conn.close()
 
-    oltp_pool = build_weighted_pool(schema_a_workload(counts))
+    oltp_pool = build_weighted_pool(
+        apply_workload_profile(
+            schema_a_workload(counts),
+            mix=cfg.get("test", {}).get("workload_mix", "mixed"),
+            read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
+            write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
+        )
+    )
     anal_pool = build_weighted_pool(analytical_workload(counts))
     runner    = LoadRunner(tidb_cfg=cfg["tidb"], counts=counts, module=MODULE)
 
