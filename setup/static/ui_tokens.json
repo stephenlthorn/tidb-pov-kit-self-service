@@ -1,0 +1,126 @@
+{
+  "meta": {
+    "name": "TiDB PoV Copilot UI Tokens",
+    "version": "1.0.0",
+    "defaultTheme": "dark"
+  },
+  "spacing": {
+    "0": "0px",
+    "1": "2px",
+    "2": "4px",
+    "3": "8px",
+    "4": "12px",
+    "5": "16px",
+    "6": "20px",
+    "7": "24px",
+    "8": "32px",
+    "9": "40px",
+    "10": "48px"
+  },
+  "radius": {
+    "none": "0px",
+    "sm": "6px",
+    "md": "8px",
+    "lg": "12px",
+    "xl": "16px",
+    "pill": "999px"
+  },
+  "borderWidth": {
+    "none": "0px",
+    "thin": "1px",
+    "thick": "2px"
+  },
+  "typography": {
+    "fontFamily": {
+      "ui": "\"IBM Plex Sans\", \"Source Sans 3\", \"Helvetica Neue\", sans-serif",
+      "mono": "\"IBM Plex Mono\", \"JetBrains Mono\", \"Fira Code\", monospace"
+    },
+    "size": {
+      "xs": "12px",
+      "sm": "13px",
+      "md": "14px",
+      "lg": "16px",
+      "xl": "18px",
+      "2xl": "24px"
+    },
+    "lineHeight": {
+      "tight": "1.3",
+      "normal": "1.5",
+      "relaxed": "1.65"
+    },
+    "weight": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600,
+      "bold": 700
+    }
+  },
+  "color": {
+    "dark": {
+      "bg": "#0d1117",
+      "surface": "#131922",
+      "surfaceSubtle": "#161d27",
+      "surfaceMuted": "#0f141b",
+      "border": "#2a3342",
+      "borderStrong": "#384457",
+      "text": "#e6ebf3",
+      "textMuted": "#a9b4c4",
+      "textSubtle": "#8a95a6",
+      "accent": "#8ea2c8",
+      "accentStrong": "#a9b9d8",
+      "focus": "#9bb4e7",
+      "success": "#4fa37b",
+      "warning": "#c79a52",
+      "danger": "#c16565",
+      "info": "#6f95cf",
+      "overlay": "rgba(7, 10, 14, 0.68)"
+    },
+    "light": {
+      "bg": "#f7f8fb",
+      "surface": "#ffffff",
+      "surfaceSubtle": "#f2f4f8",
+      "surfaceMuted": "#eef1f6",
+      "border": "#d7dde8",
+      "borderStrong": "#c2cbd9",
+      "text": "#182031",
+      "textMuted": "#4f5d73",
+      "textSubtle": "#6b788f",
+      "accent": "#49679d",
+      "accentStrong": "#3d5a8f",
+      "focus": "#5677b2",
+      "success": "#2f7a57",
+      "warning": "#8c6938",
+      "danger": "#964646",
+      "info": "#3f6298",
+      "overlay": "rgba(19, 25, 36, 0.28)"
+    }
+  },
+  "shadow": {
+    "none": "none",
+    "xs": "0 1px 2px rgba(10, 14, 20, 0.18)",
+    "sm": "0 2px 8px rgba(10, 14, 20, 0.18)",
+    "md": "0 6px 18px rgba(10, 14, 20, 0.22)"
+  },
+  "zIndex": {
+    "base": 0,
+    "nav": 10,
+    "sticky": 20,
+    "drawer": 30,
+    "commandBar": 40,
+    "modal": 50,
+    "toast": 60
+  },
+  "motion": {
+    "duration": {
+      "instant": "0ms",
+      "fast": "120ms",
+      "normal": "180ms",
+      "slow": "240ms"
+    },
+    "easing": {
+      "standard": "cubic-bezier(0.2, 0, 0, 1)",
+      "decelerate": "cubic-bezier(0.05, 0.7, 0.1, 1)",
+      "accelerate": "cubic-bezier(0.3, 0, 1, 1)"
+    }
+  }
+}

@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TiDB PoV Copilot - UI Skeleton</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='ui_foundation.css') }}" />
+</head>
+<body>
+  <div id="app_shell" class="app-shell" data-nav-collapsed="false">
+    <nav class="left-nav" aria-label="Primary">
+      <div class="brand-block">
+        <div class="brand-row">
+          <div>
+            <div class="brand-title">TiDB PoV Copilot</div>
+            <div class="brand-subtitle">UI Foundation Preview</div>
+          </div>
+          <button id="nav_collapse_btn" class="button small ghost" type="button" aria-label="Collapse navigation">☰</button>
+        </div>
+        <span class="badge"><span class="nav-dot"></span> Workspace: Demo</span>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-label">Workspace</p>
+        <button class="nav-item" aria-current="page" type="button"><span class="nav-dot"></span><span>Workbench</span></button>
+        <button class="nav-item" type="button"><span class="nav-dot"></span><span>Runs</span></button>
+        <button class="nav-item" type="button"><span class="nav-dot"></span><span>Reports</span></button>
+      </div>
+
+      <div class="nav-group">
+        <p class="nav-label">Configuration</p>
+        <button class="nav-item" type="button"><span class="nav-dot"></span><span>Targets</span></button>
+        <button class="nav-item" type="button"><span class="nav-dot"></span><span>Security</span></button>
+        <button class="nav-item" type="button"><span class="nav-dot"></span><span>History</span></button>
+      </div>
+    </nav>
+
+    <div class="main-shell">
+      <header class="topbar">
+        <div>
+          <div class="topbar-title">Developer Workbench</div>
+          <div class="topbar-subtitle">Conversation, workflow control, and run diagnostics in one view.</div>
+        </div>
+        <div class="topbar-actions">
+          <button id="run_scenario_btn" class="button primary" type="button">Run Scenario</button>
+          <button class="button" type="button" id="command_open_btn" aria-label="Open command bar">
+            Quick Actions <span class="kbd">⌘K</span>
+          </button>
+          <button id="theme_toggle_btn" class="button ghost" type="button" aria-label="Switch to light theme">Light</button>
+        </div>
+      </header>
+
+      <div id="workspace_grid" class="workspace-grid" data-context-collapsed="false">
+        <main class="workspace-main" aria-label="Main workspace">
+          <div class="workspace-stack">
+            <section class="surface">
+              <div class="surface-header">
+                <div>
+                  <h1 class="surface-title">Active Session</h1>
+                  <p class="surface-copy">Keep the center focused on high-signal workflow context.</p>
+                </div>
+                <div class="row">
+                  <span id="run_state" class="badge">Idle</span>
+                  <span class="badge success">Connected</span>
+                  <span class="badge warning">Security Review Required</span>
+                </div>
+              </div>
+
+              <div id="run_loading" class="loading-strip" role="status" aria-live="polite" aria-label="Scenario run in progress"></div>
+
+              <div class="tabs" role="tablist" aria-label="Workbench views">
+                <button id="tab_chat" class="tab" role="tab" aria-selected="true" aria-controls="panel_chat" type="button">Chat</button>
+                <button id="tab_plan" class="tab" role="tab" aria-selected="false" aria-controls="panel_plan" type="button">Plan</button>
+                <button id="tab_diff" class="tab" role="tab" aria-selected="false" aria-controls="panel_diff" type="button">Diff</button>
+                <button id="tab_results" class="tab" role="tab" aria-selected="false" aria-controls="panel_results" type="button">Results</button>
+              </div>
+
+              <div id="panel_chat" class="tabpanel is-active" role="tabpanel" data-tab-panel="tab_chat">
+                <div class="message-list">
+                  <article class="message">
+                    <div class="message-header">
+                      <div class="message-role">System</div>
+                      <div class="meta">9:41 AM</div>
+                    </div>
+                    <div>Run profile loaded. Baseline + import tests are enabled.</div>
+                  </article>
+
+                  <article class="message">
+                    <div class="message-header">
+                      <div class="message-role">You</div>
+                      <div class="meta">9:42 AM</div>
+                    </div>
+                    <div>Use manual mode, tune concurrency to 32, and run with report output.</div>
+                  </article>
+                </div>
+
+                <form class="composer" aria-label="Prompt composer">
+                  <label class="label" for="prompt_input">Prompt</label>
+                  <textarea id="prompt_input" class="textarea" placeholder="Describe what to run or change..."></textarea>
+                  <div class="row">
+                    <label class="check"><input type="checkbox" /> Include security screener in run</label>
+                    <label class="check"><input type="checkbox" checked /> Build report after run</label>
+                  </div>
+                  <div class="row">
+                    <button class="button primary" type="button">Send</button>
+                    <button class="button ghost" type="button">Attach Config</button>
+                  </div>
+                </form>
+              </div>
+
+              <div id="panel_plan" class="tabpanel" role="tabpanel" data-tab-panel="tab_plan" hidden>
+                <div class="grid cols-2">
+                  <section class="card" style="padding: 12px;">
+                    <p class="label">Execution Plan</p>
+                    <ol>
+                      <li>Validate connectivity and credentials</li>
+                      <li>Apply selected module suite</li>
+                      <li>Execute benchmark workloads</li>
+                      <li>Generate report artifacts and dashboard state</li>
+                    </ol>
+                  </section>
+                  <section class="card" style="padding: 12px;">
+                    <p class="label">Helpful Empty State</p>
+                    <div class="empty-state">
+                      <strong>No custom plan yet.</strong>
+                      <span>Create one from Quick Actions or apply a saved scenario template.</span>
+                      <button class="button small" type="button">Apply Default Plan</button>
+                    </div>
+                  </section>
+                </div>
+              </div>
+
+              <div id="panel_diff" class="tabpanel" role="tabpanel" data-tab-panel="tab_diff" hidden>
+                <p class="label">Configuration Diff</p>
+                <pre class="code-block">test:
+  duration_seconds: 120 -> 180
+  concurrency_levels: [8,16,32] -> [16,32,48]
+modules:
+  htap: false -> true
+comparison_db:
+  enabled: false -> true</pre>
+              </div>
+
+              <div id="panel_results" class="tabpanel" role="tabpanel" data-tab-panel="tab_results" hidden>
+                <p class="label">Recent Queries</p>
+                <div class="table-wrap" role="region" aria-label="Recent query summary">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Query Type</th>
+                        <th>Count</th>
+                        <th>Success</th>
+                        <th>Avg (ms)</th>
+                        <th>P99 (ms)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr>
+                        <td>point_select</td>
+                        <td>82,140</td>
+                        <td><span class="badge success">99.98%</span></td>
+                        <td>4.1</td>
+                        <td>18.3</td>
+                      </tr>
+                      <tr>
+                        <td>range_scan</td>
+                        <td>14,902</td>
+                        <td><span class="badge success">99.91%</span></td>
+                        <td>9.7</td>
+                        <td>42.6</td>
+                      </tr>
+                      <tr>
+                        <td>import_batch</td>
+                        <td>944</td>
+                        <td><span class="badge warning">98.72%</span></td>
+                        <td>32.9</td>
+                        <td>111.4</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </section>
+
+            <section class="surface">
+              <div class="surface-header">
+                <div>
+                  <h2 class="surface-title">Reusable Controls</h2>
+                  <p class="surface-copy">Reference set for consistent controls, states, and table/code readability.</p>
+                </div>
+              </div>
+              <div class="grid cols-3">
+                <div>
+                  <label class="label" for="target_select">Target</label>
+                  <select id="target_select" class="select">
+                    <option>TiDB Cloud Starter</option>
+                    <option>TiDB Cloud Essential</option>
+                    <option>TiDB Cloud Premium</option>
+                    <option>TiDB Cloud Dedicated</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="label" for="thread_input">Threads</label>
+                  <input id="thread_input" class="input" type="number" value="32" />
+                </div>
+                <div>
+                  <label class="label" for="profile_input">Profile Name</label>
+                  <input id="profile_input" class="input" type="text" placeholder="balanced-poc" />
+                </div>
+              </div>
+              <div class="inline-alert">N/A in security controls should trigger <strong>review required</strong>, not auto-pass.</div>
+              <hr class="divider" />
+              <div class="row">
+                <button class="button" type="button">Secondary</button>
+                <button class="button primary" type="button">Primary</button>
+                <button class="button ghost" type="button">Ghost</button>
+                <button id="clear_data_btn" class="button danger" type="button">Clear Data</button>
+              </div>
+            </section>
+          </div>
+        </main>
+
+        <aside id="context_panel" class="context-panel" aria-label="Context and tools" data-collapsed="false">
+          <button id="context_collapse_btn" class="button small ghost context-collapse" type="button">Collapse</button>
+
+          <section class="surface" style="padding: 12px;">
+            <h3 class="surface-title" style="font-size: 16px;">Quick Actions</h3>
+            <div class="row">
+              <button class="button small" type="button">Validate Config</button>
+              <button class="button small" type="button">Ping TiDB</button>
+              <button class="button small" type="button">Build Report</button>
+            </div>
+          </section>
+
+          <section class="surface" style="padding: 12px;">
+            <h3 class="surface-title" style="font-size: 16px;">Active Context</h3>
+            <div class="grid">
+              <div>
+                <div class="label">Tier</div>
+                <div>Essential</div>
+              </div>
+              <div>
+                <div class="label">Scenario</div>
+                <div>OLTP + Migration</div>
+              </div>
+              <div>
+                <div class="label">Report</div>
+                <div class="badge success">Ready</div>
+              </div>
+            </div>
+          </section>
+
+          <section class="surface" style="padding: 12px;">
+            <h3 class="surface-title" style="font-size: 16px;">CLI Snapshot</h3>
+            <pre class="code-block">[1/10] connectivity ... ok
+[2/10] schema setup ... ok
+[3/10] workload run ... in progress
+[4/10] report build ... queued</pre>
+          </section>
+        </aside>
+      </div>
+    </div>
+  </div>
+
+  <div id="command_backdrop" class="command-backdrop" aria-hidden="true"></div>
+  <section id="command_bar" class="command-bar" aria-hidden="true" role="dialog" aria-modal="true" aria-label="Quick actions">
+    <div class="command-input-wrap">
+      <label class="sr-only" for="command_input">Search actions</label>
+      <input id="command_input" class="input" type="text" placeholder="Type a command or action..." />
+    </div>
+    <div class="command-results">
+      <button class="command-item" type="button" data-command-item="Run full scenario" data-command-action="run">
+        <span>Run full scenario</span>
+        <span class="kbd">↵</span>
+      </button>
+      <button class="command-item" type="button" data-command-item="Toggle theme" data-command-action="toggle-theme">
+        <span>Toggle theme</span>
+        <span class="kbd">⌘T</span>
+      </button>
+      <button class="command-item" type="button" data-command-item="Open reset confirmation" data-command-action="open-modal">
+        <span>Open reset confirmation</span>
+        <span class="kbd">⌘D</span>
+      </button>
+      <button class="command-item" type="button" data-command-item="Go to reports" data-command-action="noop">
+        <span>Go to reports</span>
+        <span class="kbd">⌘R</span>
+      </button>
+    </div>
+  </section>
+
+  <div id="modal_backdrop" class="modal-backdrop" aria-hidden="true"></div>
+  <section id="confirm_modal" class="modal" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="modal_title">
+    <div class="modal-card">
+      <h2 id="modal_title" class="surface-title">Confirm Data Reset</h2>
+      <p class="surface-copy">This action clears local artifacts and can drop the configured database if enabled.</p>
+      <div class="row">
+        <button id="modal_cancel_btn" class="button" type="button">Cancel</button>
+        <button id="modal_confirm_btn" class="button danger" type="button">Confirm Reset</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="toast_region" class="toast-region" aria-live="polite" aria-label="Notifications"></section>
+
+  <script src="{{ url_for('static', filename='ui_foundation.js') }}"></script>
+  <script>
+    document.getElementById("command_open_btn").addEventListener("click", function () {
+      const evt = new KeyboardEvent("keydown", { key: "k", ctrlKey: true });
+      document.dispatchEvent(evt);
+    });
+  </script>
+</body>
+</html>

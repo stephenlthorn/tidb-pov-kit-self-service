@@ -1229,6 +1229,10 @@ def create_app(config_path: Path) -> Flask:
             comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
         )
 
+    @app.get("/ui-skeleton")
+    def ui_skeleton_route():
+        return render_template("ui_skeleton.html")
+
     @app.post("/save-config")
     def save_config_route():
         cfg = load_cfg(config_path)
