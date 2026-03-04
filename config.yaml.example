@@ -9,15 +9,24 @@ tidb:
   database: "pov_test"
   ssl:      true
 
-# Optional: run the same workload against Aurora/MySQL simultaneously
+# Optional: configure a comparison target for side-by-side benchmarking.
+# Current automated runner support: Aurora MySQL, MySQL, RDS MySQL, SingleStore.
+# Other targets below can be captured for planning and future runner support.
 comparison_db:
   enabled:  false
+  target:   "aurora_mysql"  # aurora_mysql | mysql | rds_mysql | postgres | rds_postgres | aurora_postgres | microsoft_sql_server | singlestore
+  label:    "Aurora MySQL"
   host:     "aurora-cluster.us-west-2.rds.amazonaws.com"
   port:     3306
   user:     "admin"
   password: "YOUR_PASSWORD"
   database: "pov_test"
+  schema:   "public"        # postgres: public, sql server: dbo
   ssl:      false
+  ssl_mode: "require"       # postgres: disable | require | verify-ca | verify-full
+  sqlserver_driver: "ODBC Driver 18 for SQL Server"
+  sqlserver_encrypt: true
+  sqlserver_trust_server_certificate: false
 
 # Tier metadata (wizard can update this automatically)
 tier:

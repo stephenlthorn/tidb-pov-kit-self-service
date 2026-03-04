@@ -56,6 +56,13 @@ from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
     build_tier_modules,
     tier_test_profile,
 )
+from lib.comparison_targets import (  # type: ignore  # noqa: E402
+    TARGET_DEFINITIONS,
+    comparison_can_run,
+    comparison_reason,
+    normalize_comparison_cfg,
+    target_label,
+)
 
 
 DEFAULT_CFG = {
@@ -69,13 +76,19 @@ DEFAULT_CFG = {
     },
     "comparison_db": {
         "enabled": False,
+        "target": "aurora_mysql",
         "host": "",
         "port": 3306,
         "user": "",
         "password": "",
         "database": "",
+        "schema": "public",
         "label": "Aurora MySQL",
         "ssl": False,
+        "ssl_mode": "require",
+        "sqlserver_driver": "ODBC Driver 18 for SQL Server",
+        "sqlserver_encrypt": True,
+        "sqlserver_trust_server_certificate": False,
     },
     "tier": {
         "selected": "serverless",
@@ -243,6 +256,7 @@ def deep_merge(dst: Dict, src: Dict) -> Dict:
 
 def normalize_cfg(cfg: Dict) -> Dict:
     cfg = deep_merge(cfg or {}, DEFAULT_CFG)
+    cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
 
     scenario = cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration")
     if scenario not in SCENARIOS:
@@ -935,6 +949,7 @@ def create_app(config_path: Path) -> Flask:
     @app.get("/")
     def index():
         cfg = load_cfg(config_path)
+        cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         sec = security_from_cfg(cfg)
         st = run_status()
         report_ready = REPORT_PDF.exists()
@@ -969,6 +984,10 @@ def create_app(config_path: Path) -> Flask:
             status_classes=STATUS_CLASSES,
             workload_targets=WORKLOAD_TARGETS,
             import_method_labels=IMPORT_METHOD_LABELS,
+            comparison_targets=TARGET_DEFINITIONS,
+            comparison_target_label=target_label(cfg["comparison_db"]["target"]),
+            comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
+            comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
         )
 
     @app.post("/save-config")
@@ -985,13 +1004,26 @@ def create_app(config_path: Path) -> Flask:
 
         comp = cfg.setdefault("comparison_db", {})
         comp["enabled"] = to_bool(request.form.get("comparison_enabled"), False)
+        comp["target"] = request.form.get("comparison_target", "aurora_mysql").strip().lower() or "aurora_mysql"
         comp["host"] = request.form.get("comparison_host", "").strip()
-        comp["port"] = to_int(request.form.get("comparison_port"), 3306)
+        default_port = int(TARGET_DEFINITIONS.get(comp["target"], TARGET_DEFINITIONS["aurora_mysql"])["default_port"])
+        comp["port"] = to_int(request.form.get("comparison_port"), default_port)
         comp["user"] = request.form.get("comparison_user", "").strip()
         comp["password"] = request.form.get("comparison_password", "")
         comp["database"] = request.form.get("comparison_database", "").strip()
-        comp["label"] = request.form.get("comparison_label", "Aurora MySQL").strip() or "Aurora MySQL"
+        comp["schema"] = request.form.get("comparison_schema", "public").strip() or "public"
+        comp["label"] = request.form.get("comparison_label", "").strip()
         comp["ssl"] = to_bool(request.form.get("comparison_ssl"), False)
+        comp["ssl_mode"] = request.form.get("comparison_ssl_mode", "require").strip().lower() or "require"
+        comp["sqlserver_driver"] = (
+            request.form.get("comparison_sqlserver_driver", "ODBC Driver 18 for SQL Server").strip()
+            or "ODBC Driver 18 for SQL Server"
+        )
+        comp["sqlserver_encrypt"] = to_bool(request.form.get("comparison_sqlserver_encrypt"), True)
+        comp["sqlserver_trust_server_certificate"] = to_bool(
+            request.form.get("comparison_sqlserver_trust_server_certificate"), False
+        )
+        cfg["comparison_db"] = normalize_comparison_cfg(comp)
 
         chosen_tier = request.form.get("tier_selected", "serverless")
         cfg.setdefault("tier", {})["selected"] = chosen_tier if chosen_tier in TIERS else "serverless"

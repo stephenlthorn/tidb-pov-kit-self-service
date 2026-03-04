@@ -115,14 +115,23 @@ tidb:
   database: "pov_test"
   ssl:      true
 
-# Optional: side-by-side comparison against Aurora / MySQL
+# Optional: side-by-side comparison target (multi-engine config).
+# Current automated runner support: Aurora MySQL, MySQL, RDS MySQL, SingleStore.
 comparison_db:
   enabled:  false
+  target:   "aurora_mysql"  # aurora_mysql | mysql | rds_mysql | postgres | rds_postgres | aurora_postgres | microsoft_sql_server | singlestore
+  label:    "Aurora MySQL"
   host:     "aurora-cluster.us-west-2.rds.amazonaws.com"
   port:     3306
   user:     "admin"
   password: "your-password"
   database: "pov_test"
+  schema:   "public"        # postgres: public, sql server: dbo
+  ssl:      false
+  ssl_mode: "require"       # postgres: disable | require | verify-ca | verify-full
+  sqlserver_driver: "ODBC Driver 18 for SQL Server"
+  sqlserver_encrypt: true
+  sqlserver_trust_server_certificate: false
 
 # Tier metadata (wizard updates this)
 tier:
@@ -204,11 +213,22 @@ python report/generate_report.py config.yaml
 
 ---
 
-## Side-by-Side Aurora Comparison
+## Side-by-Side Comparison Targets
 
-Enable `comparison_db` in `config.yaml` with your Aurora/MySQL connection.
-Modules 1, 2, and 3b will run identical workloads against both databases
-simultaneously and plot them on the same charts in the PDF report.
+Set `comparison_db.target` to one of:
+- `aurora_mysql`
+- `mysql`
+- `rds_mysql`
+- `postgres`
+- `rds_postgres`
+- `aurora_postgres`
+- `microsoft_sql_server`
+- `singlestore`
+
+Automated side-by-side execution is currently supported for:
+- `aurora_mysql`, `mysql`, `rds_mysql`, `singlestore`
+
+PostgreSQL and Microsoft SQL Server targets are fully configurable in the UI and config, and are retained in project configuration for comparison planning. The current workload runner remains MySQL-dialect, so these targets are not yet executed automatically.
 
 ---
 

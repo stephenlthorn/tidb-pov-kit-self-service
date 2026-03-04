@@ -36,6 +36,7 @@ def collect() -> dict:
         "summary":      {},
         "data_manifest": _load_manifest(),
         "comparison_enabled": False,
+        "comparison_label": "Comparison DB",
     }
 
     with _conn() as c:
@@ -56,12 +57,16 @@ def collect() -> dict:
             "FROM import_stats ORDER BY ts"
         ).fetchall()
 
-        # Detect if comparison DB results exist
-        dbs = c.execute(
-            "SELECT DISTINCT db_label FROM results"
+        # Detect if comparison DB results exist and keep the dominant label.
+        comp_rows = c.execute(
+            "SELECT db_label, COUNT(*) AS n "
+            "FROM results "
+            "WHERE db_label IS NOT NULL AND db_label <> 'tidb' "
+            "GROUP BY db_label ORDER BY n DESC"
         ).fetchall()
-        db_labels = [r["db_label"] for r in dbs]
-        payload["comparison_enabled"] = "comparison" in db_labels
+        if comp_rows:
+            payload["comparison_enabled"] = True
+            payload["comparison_label"] = comp_rows[0]["db_label"] or "Comparison DB"
 
     for mod in MODULES:
         meta   = module_meta.get(mod, {})
@@ -93,8 +98,9 @@ def collect() -> dict:
         # Comparison DB stats
         if payload["comparison_enabled"]:
             entry["comparison"] = {}
+            comp_label = payload["comparison_label"]
             for phase in phases:
-                stats = get_latency_stats(mod, phase=phase, db_label="comparison")
+                stats = get_latency_stats(mod, phase=phase, db_label=comp_label)
                 if stats:
                     entry["comparison"][phase] = stats
 

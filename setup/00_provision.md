@@ -77,7 +77,7 @@ tidb:
   ssl:      true
 ```
 
-Optional: fill `comparison_db` for side-by-side MySQL/Aurora benchmarking.
+Optional: fill `comparison_db` for side-by-side benchmarking against MySQL-family targets (Aurora MySQL, MySQL, RDS MySQL, SingleStore) or to capture PostgreSQL/SQL Server comparison plans.
 
 ---
 

@@ -172,6 +172,7 @@ class PoVReport(FPDF):
 def _chart_baseline(metrics) -> plt.Figure:
     mod  = metrics["modules"].get("01_baseline_perf", {})
     tidb = mod.get("tidb", {})
+    comp_label = metrics.get("comparison_label") or "Comparison DB"
     phases = sorted(tidb.keys())
     concs  = []
     p99s   = []
@@ -200,7 +201,7 @@ def _chart_baseline(metrics) -> plt.Figure:
     ax1.plot(concs, p99s, "o-", color=_rgb(BLUE), lw=2, markersize=7, label="TiDB Cloud")
     if comp_p99s:
         ax1.plot(concs, comp_p99s, "s--", color=_rgb(ORANGE), lw=2, markersize=7,
-                 label="Comparison DB")
+                 label=comp_label)
     ax1.set_xlabel("Concurrency")
     ax1.set_ylabel("p99 Latency (ms)")
     ax1.set_title("p99 Latency vs Concurrency")
@@ -209,7 +210,7 @@ def _chart_baseline(metrics) -> plt.Figure:
 
     ax2.bar(x - 0.2, tpss, 0.35, label="TiDB Cloud", color=_rgb(BLUE))
     if comp_tpss:
-        ax2.bar(x + 0.2, comp_tpss, 0.35, label="Comparison DB", color=_rgb(ORANGE))
+        ax2.bar(x + 0.2, comp_tpss, 0.35, label=comp_label, color=_rgb(ORANGE))
     ax2.set_xticks(x)
     ax2.set_xticklabels([str(c) for c in concs])
     ax2.set_xlabel("Concurrency")

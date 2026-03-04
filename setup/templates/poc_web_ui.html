@@ -855,6 +855,40 @@
     .pill.pass { border-color: #2f7e5f; color: #d7ffe7; }
     .pill.fail { border-color: #8f3d55; color: #ffd8e3; }
 
+    .target-note {
+      border: 1px solid #364151;
+      border-radius: 8px;
+      padding: 9px 10px;
+      background: linear-gradient(180deg, #11161d, #0d1218);
+      color: #cfd8e5;
+      font-size: 0.78rem;
+      margin: 10px 0;
+    }
+
+    .target-note.ok {
+      border-color: #327657;
+      color: #d7ffe7;
+      background: linear-gradient(180deg, #12251d, #0f1d17);
+    }
+
+    .target-note.warn {
+      border-color: #8f6f3b;
+      color: #ffe8c0;
+      background: linear-gradient(180deg, #2e2415, #241c12);
+    }
+
+    [data-target-family] {
+      display: none;
+    }
+
+    .field[data-target-family].show {
+      display: flex;
+    }
+
+    .grid[data-target-family].show {
+      display: grid;
+    }
+
     .report-grid-two {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1189,7 +1223,7 @@
           <img class="logo-img" src="{{ url_for('static', filename='img/aws-aurora.svg') }}" alt="Amazon Aurora" />
           <img class="logo-img" src="{{ url_for('static', filename='img/mysql.svg') }}" alt="MySQL" />
         </div>
-        <div class="tiny">Aurora MySQL</div>
+        <div class="tiny">{{ comparison_target_label }}</div>
       </div>
     </div>
 
@@ -1648,7 +1682,7 @@
     <section class="tab-pane" data-tab-pane="configuration">
       <div class="panel">
         <h2>Configuration</h2>
-        <p class="help">All runtime settings including TiDB/Aurora connection details, modules, and report controls.</p>
+        <p class="help">All runtime settings including TiDB/comparison-target connection details, modules, and report controls.</p>
 
         <form method="post" action="/save-config">
           <div class="config-section">
@@ -1671,24 +1705,90 @@
           </div>
 
           <div class="config-section">
-            <h3>Comparison DB (Aurora MySQL)</h3>
-            <div class="check-wrap"><label class="check"><input type="checkbox" name="comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison DB</label></div>
+            <h3>Comparison Target Database</h3>
+            <div class="grid cols-4">
+              <div class="field">
+                <label>Enable Comparison</label>
+                <label class="check"><input type="checkbox" name="comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> enabled</label>
+              </div>
+              <div class="field">
+                <label>Target Engine</label>
+                <select name="comparison_target" id="comparison_target">
+                  {% for key, meta in comparison_targets.items() %}
+                    <option
+                      value="{{ key }}"
+                      data-default-port="{{ meta.default_port }}"
+                      data-family="{{ meta.family }}"
+                      data-supported="{{ 'true' if meta.runner_supported else 'false' }}"
+                      {% if cfg.comparison_db.target == key %}selected{% endif %}
+                    >{{ meta.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field">
+                <label>Display Label</label>
+                <input type="text" name="comparison_label" value="{{ cfg.comparison_db.label }}" placeholder="Comparison DB label for charts" />
+              </div>
+              <div class="field">
+                <label>Runner Status</label>
+                <div
+                  id="comparison_runner_note"
+                  class="target-note {% if comparison_runner_supported %}ok{% else %}warn{% endif %}"
+                  data-message-supported="Automated side-by-side runner is available for this target family."
+                  data-message-unsupported="This target is configurable now, but automated side-by-side execution is not yet available in the current runner."
+                >
+                  {{ comparison_runner_reason }}
+                </div>
+              </div>
+            </div>
             <div class="grid cols-4">
               <div class="field"><label>Host</label><input type="text" name="comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
               <div class="field"><label>Port</label><input type="number" name="comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
               <div class="field"><label>User</label><input type="text" name="comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
               <div class="field"><label>Password</label><input type="password" name="comparison_password" value="{{ cfg.comparison_db.password }}" /></div>
             </div>
-            <div class="grid cols-3">
+            <div class="grid cols-4">
               <div class="field"><label>Database</label><input type="text" name="comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
-              <div class="field"><label>Label</label><input type="text" name="comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
+              <div class="field"><label>Schema</label><input type="text" name="comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
               <div class="field"><label>SSL</label>
                 <select name="comparison_ssl">
                   <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
                   <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
                 </select>
               </div>
+              <div class="field" data-target-family="postgres">
+                <label>PostgreSQL SSL Mode</label>
+                <select name="comparison_ssl_mode">
+                  <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
+                  <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
+                  <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
+                  <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
+                </select>
+              </div>
+              <div class="field" data-target-family="mysql">
+                <label>SSL Mode</label>
+                <select disabled>
+                  <option>managed via SSL true/false above</option>
+                </select>
+              </div>
+              <div class="field" data-target-family="mssql">
+                <label>SQL Server Encrypt</label>
+                <select name="comparison_sqlserver_encrypt">
+                  <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
+                </select>
+              </div>
             </div>
+            <div class="grid cols-2" data-target-family="mssql">
+              <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
+              <div class="field"><label>Trust Server Certificate</label>
+                <select name="comparison_sqlserver_trust_server_certificate">
+                  <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
+                </select>
+              </div>
+            </div>
+            <div class="tiny">Targets available: Starter support now for MySQL family (Aurora/MySQL/RDS MySQL/SingleStore). Postgres and SQL Server targets are captured for planning and future runner support.</div>
           </div>
 
           <div class="config-section">
@@ -1872,6 +1972,113 @@
         });
     });
   });
+
+  const comparisonTargetEl = document.getElementById('comparison_target');
+  const comparisonPortEl = document.querySelector('input[name="comparison_port"]');
+  const comparisonSchemaEl = document.querySelector('input[name="comparison_schema"]');
+  const comparisonRunnerNoteEl = document.getElementById('comparison_runner_note');
+  const comparisonEnabledEl = document.querySelector('input[name="comparison_enabled"]');
+  const comparisonHostEl = document.querySelector('input[name="comparison_host"]');
+  let previousDefaultPort = null;
+  let previousDefaultSchema = null;
+
+  function getSelectedComparisonOption() {
+    if (!comparisonTargetEl) {
+      return null;
+    }
+    return comparisonTargetEl.options[comparisonTargetEl.selectedIndex] || null;
+  }
+
+  function updateComparisonRunnerNote(targetSupported) {
+    if (!comparisonRunnerNoteEl) {
+      return;
+    }
+
+    const enabled = !!(comparisonEnabledEl && comparisonEnabledEl.checked);
+    const hasHost = !!(comparisonHostEl && comparisonHostEl.value.trim());
+    const supportedMessage = comparisonRunnerNoteEl.dataset.messageSupported || '';
+    const unsupportedMessage = comparisonRunnerNoteEl.dataset.messageUnsupported || '';
+
+    let nextText = 'Comparison target is disabled.';
+    let isOk = false;
+
+    if (!enabled) {
+      nextText = 'Comparison target is disabled.';
+    } else if (!hasHost) {
+      nextText = 'Comparison target host is missing.';
+    } else if (!targetSupported) {
+      nextText = unsupportedMessage;
+    } else {
+      nextText = supportedMessage;
+      isOk = true;
+    }
+
+    comparisonRunnerNoteEl.textContent = nextText;
+    comparisonRunnerNoteEl.classList.toggle('ok', isOk);
+    comparisonRunnerNoteEl.classList.toggle('warn', !isOk);
+  }
+
+  function syncComparisonTargetUi() {
+    const option = getSelectedComparisonOption();
+    if (!option) {
+      return;
+    }
+
+    const family = (option.dataset.family || 'mysql').toLowerCase();
+    const defaultPort = parseInt(option.dataset.defaultPort || '3306', 10);
+    const targetSupported = option.dataset.supported === 'true';
+    const defaultSchema = family === 'mssql' ? 'dbo' : 'public';
+
+    if (comparisonPortEl) {
+      const currentPort = (comparisonPortEl.value || '').trim();
+      if (!currentPort || (previousDefaultPort !== null && currentPort === String(previousDefaultPort))) {
+        comparisonPortEl.value = String(defaultPort);
+      }
+    }
+
+    if (comparisonSchemaEl) {
+      const currentSchema = (comparisonSchemaEl.value || '').trim().toLowerCase();
+      if (!currentSchema || (previousDefaultSchema && currentSchema === previousDefaultSchema)) {
+        comparisonSchemaEl.value = defaultSchema;
+      }
+      comparisonSchemaEl.placeholder = defaultSchema;
+    }
+
+    document.querySelectorAll('[data-target-family]').forEach((el) => {
+      const accepted = (el.dataset.targetFamily || '')
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+      const show = accepted.includes(family);
+      el.classList.toggle('show', show);
+      el.querySelectorAll('input, select, textarea').forEach((control) => {
+        if (control.name) {
+          control.disabled = !show;
+        }
+      });
+    });
+
+    updateComparisonRunnerNote(targetSupported);
+    previousDefaultPort = defaultPort;
+    previousDefaultSchema = defaultSchema;
+  }
+
+  if (comparisonTargetEl) {
+    const option = getSelectedComparisonOption();
+    if (option) {
+      previousDefaultPort = parseInt(option.dataset.defaultPort || '3306', 10);
+      previousDefaultSchema = (option.dataset.family || 'mysql').toLowerCase() === 'mssql' ? 'dbo' : 'public';
+    }
+    syncComparisonTargetUi();
+    comparisonTargetEl.addEventListener('change', syncComparisonTargetUi);
+  }
+
+  if (comparisonEnabledEl) {
+    comparisonEnabledEl.addEventListener('change', syncComparisonTargetUi);
+  }
+  if (comparisonHostEl) {
+    comparisonHostEl.addEventListener('input', syncComparisonTargetUi);
+  }
 
   const fromHash = window.location.hash ? window.location.hash.slice(1) : 'overview';
   activate(fromHash, false);

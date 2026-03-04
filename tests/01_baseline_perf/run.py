@@ -8,6 +8,7 @@ import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.comparison_targets import comparison_can_run, comparison_reason, normalize_comparison_cfg, target_label
 from lib.result_store import init_db, start_module, end_module, get_latency_stats
 from load.load_runner import LoadRunner
 from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
@@ -25,15 +26,16 @@ def run(cfg: dict):
     customer_queries = cfg.get("customer_queries", [])
     customer_ratio = cfg.get("customer_query_ratio", 0.3)
 
-    comparison_cfg = cfg.get("comparison_db") or {}
-    has_comparison = bool(comparison_cfg.get("host"))
+    comparison_cfg = normalize_comparison_cfg(cfg.get("comparison_db") or {})
+    has_comparison = comparison_can_run(comparison_cfg)
+    comparison_label = comparison_cfg.get("label") or target_label(comparison_cfg.get("target", "aurora_mysql"))
 
     runner = LoadRunner(
         tidb_cfg=cfg["tidb"],
         counts=counts,
         module=MODULE,
         comparison_cfg=comparison_cfg if has_comparison else None,
-        comparison_label=comparison_cfg.get("label", "comparison"),
+        comparison_label=comparison_label,
     )
 
     workload = apply_workload_profile(
@@ -55,7 +57,9 @@ def run(cfg: dict):
         f"write x{cfg.get('test', {}).get('write_weight_multiplier', 1.0)})"
     )
     if has_comparison:
-        print(f"  Comparison DB: {comparison_cfg.get('label', 'comparison')}")
+        print(f"  Comparison DB: {comparison_label}")
+    elif comparison_cfg.get("enabled"):
+        print(f"  Comparison DB disabled for run: {comparison_reason(comparison_cfg)}")
     print(f"{'='*60}")
 
     summary = {}
@@ -69,7 +73,7 @@ def run(cfg: dict):
         }
         if has_comparison:
             summary[phase]["comparison"] = get_latency_stats(
-                MODULE, phase=phase, db_label=comparison_cfg.get("label", "comparison"))
+                MODULE, phase=phase, db_label=comparison_label)
 
     _print_summary(summary)
     end_module(MODULE, "passed")
