@@ -701,6 +701,27 @@ pre.log,
   padding: 10px;
 }
 
+.review-pair {
+  border-width: 1px !important;
+  background: color-mix(in srgb, var(--surface) 84%, var(--primary-soft) 16%) !important;
+}
+
+.review-pair.tone-blue {
+  border-color: color-mix(in srgb, #5f9ce6 50%, var(--line) 50%) !important;
+}
+
+.review-pair.tone-indigo {
+  border-color: color-mix(in srgb, #6781d8 50%, var(--line) 50%) !important;
+}
+
+.review-pair.tone-violet {
+  border-color: color-mix(in srgb, #7f72d5 50%, var(--line) 50%) !important;
+}
+
+.review-pair.tone-cyan {
+  border-color: color-mix(in srgb, #5faec8 50%, var(--line) 50%) !important;
+}
+
 #wizard_selected_tests {
   font-weight: 600;
 }

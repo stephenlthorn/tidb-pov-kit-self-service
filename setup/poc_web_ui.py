@@ -241,6 +241,59 @@ MODULE_INSIGHTS = {
     },
 }
 
+MODULE_DETAIL_NOTES = {
+    "customer_queries": {
+        "validates": "Validates query parsing/planning in TiDB using EXPLAIN on customer-provided SQL.",
+        "pass_signal": "No planner errors on required queries; failures are listed with SQL and error text.",
+        "artifacts": "results/metrics_summary.json (module status) and query-level logs in results DB/logs.",
+    },
+    "baseline_perf": {
+        "validates": "Validates baseline OLTP throughput/latency at configured concurrency levels.",
+        "pass_signal": "Stable TPS with acceptable p99 against baseline target envelope.",
+        "artifacts": "TPS/p99 tables + time-series in metrics_summary.json.",
+    },
+    "elastic_scale": {
+        "validates": "Validates behavior during ramp-up/ramp-down load transitions.",
+        "pass_signal": "Throughput scales with load and latency remains within expected range.",
+        "artifacts": "Ramp phase time-series and module status in metrics_summary.json.",
+    },
+    "high_availability": {
+        "validates": "Validates recovery characteristics during simulated interruption windows.",
+        "pass_signal": "Workload resumes and stabilizes after disruption with bounded recovery time.",
+        "artifacts": "Recovery timing markers and module summary status.",
+    },
+    "write_contention": {
+        "validates": "Validates hotspot behavior by comparing key strategies under concurrent write load.",
+        "pass_signal": "AUTO_RANDOM strategy improves p99 and/or TPS versus sequential hotspot mode.",
+        "artifacts": "Mode-level TPS/p99 and contention comparison metrics.",
+    },
+    "htap": {
+        "validates": "Validates OLTP + analytical concurrency isolation (TiKV transactional + TiFlash analytics).",
+        "pass_signal": "OLTP degradation stays within acceptable threshold under concurrent analytics.",
+        "artifacts": "OLTP-only vs concurrent HTAP performance deltas.",
+    },
+    "online_ddl": {
+        "validates": "Validates schema changes under load (add/modify/index operations).",
+        "pass_signal": "DDL completes while workload continues without severe latency regressions.",
+        "artifacts": "DDL durations and concurrent latency impact metrics.",
+    },
+    "mysql_compat": {
+        "validates": "Validates MySQL syntax/behavior compatibility across feature groups.",
+        "pass_signal": "Required compatibility checks pass at target threshold.",
+        "artifacts": "compat_checks summary + failing check list in metrics_summary.json.",
+    },
+    "data_import": {
+        "validates": "Validates ingestion throughput across configured import methods.",
+        "pass_signal": "Chosen method reaches expected rows/s and GB/min for dataset scale.",
+        "artifacts": "Import method throughput bars and per-run duration metrics.",
+    },
+    "vector_search": {
+        "validates": "Validates vector index + ANN query behavior for AI/vector workloads.",
+        "pass_signal": "Vector queries execute successfully with acceptable latency/QPS profile.",
+        "artifacts": "Vector workload latency/QPS module metrics and status.",
+    },
+}
+
 MODULE_SUITE_KEYS = {
     "tier_recommended": [],
     "all": list(MODULE_ORDER),
@@ -588,15 +641,11 @@ def apply_comparison_advanced_from_form(comp: Dict, form, prefix: str = "") -> N
     )
     comp["max_pool_size"] = max(1, to_int(g("comparison_max_pool_size"), int(comp.get("max_pool_size", 8))))
     comp["session_init_sql"] = g("comparison_session_init_sql", str(comp.get("session_init_sql", ""))).strip()
-    comp["read_only_mode"] = to_bool(
-        form.get(f"{prefix}comparison_read_only_mode"), bool(comp.get("read_only_mode", True))
-    )
+    comp["read_only_mode"] = to_bool(form.get(f"{prefix}comparison_read_only_mode"), False)
     comp["parity_sample_size"] = max(
         1, to_int(g("comparison_parity_sample_size"), int(comp.get("parity_sample_size", 250)))
     )
-    comp["capture_explain_plans"] = to_bool(
-        form.get(f"{prefix}comparison_capture_explain_plans"), bool(comp.get("capture_explain_plans", True))
-    )
+    comp["capture_explain_plans"] = to_bool(form.get(f"{prefix}comparison_capture_explain_plans"), False)
     comp["include_tables"] = g("comparison_include_tables", str(comp.get("include_tables", ""))).strip()
     comp["exclude_tables"] = g("comparison_exclude_tables", str(comp.get("exclude_tables", ""))).strip()
     comp["tls_ca_path"] = g("comparison_tls_ca_path", str(comp.get("tls_ca_path", ""))).strip()
@@ -1344,6 +1393,7 @@ def create_app(config_path: Path) -> Flask:
             quickstart_test_categories=QUICKSTART_TEST_CATEGORIES,
             quickstart_security_modes=QUICKSTART_SECURITY_MODES,
             module_insights=MODULE_INSIGHTS,
+            module_detail_notes=MODULE_DETAIL_NOTES,
             module_suites=MODULE_SUITES,
             enabled_module_count=sum(1 for key in MODULE_ORDER if cfg.get("modules", {}).get(key)),
             comparison_targets=TARGET_DEFINITIONS,
@@ -1460,7 +1510,7 @@ def create_app(config_path: Path) -> Flask:
         if selected_tier not in TIERS:
             selected_tier = "serverless"
 
-        apply_profile = to_bool(request.form.get("wiz_apply_profile"), False)
+        apply_profile = True
         workload_preset = request.form.get("wiz_workload_preset", "balanced_poc").strip().lower()
         if workload_preset not in QUICKSTART_WORKLOAD_PRESETS:
             workload_preset = "balanced_poc"

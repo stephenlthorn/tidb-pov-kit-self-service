@@ -1394,7 +1394,9 @@
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
       <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Deployment Wizard</button>
+      <button class="tab-btn" data-tab-btn="test-details"><span class="ico">[T]</span>Test Details</button>
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
+      <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
       <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
@@ -1566,21 +1568,6 @@
                     </label>
                   {% endfor %}
                 </div>
-                <div class="wizard-tests-toolbar">
-                  <div class="wizard-tests-count">
-                    <span class="k">Selected Tests</span>
-                    <input type="text" id="wizard_selected_tests" value="{{ enabled_module_count }} / {{ module_order|length }}" readonly />
-                  </div>
-                  <div class="wizard-tests-actions">
-                    <button class="btn soft small" type="button" data-tests-action="preset">Apply preset defaults</button>
-                    <button class="btn soft small" type="button" data-tests-action="all">Select all</button>
-                    <button class="btn soft small" type="button" data-tests-action="none">Clear all</button>
-                  </div>
-                </div>
-              </div>
-
-              <div class="check-wrap">
-                <label class="check"><input type="checkbox" name="wiz_apply_profile" checked /> Apply tier test profile defaults (duration, concurrency, scale)</label>
               </div>
               <div class="line"></div>
               <div class="tiny">Scenario and module suite are inferred from selected tests. Presets are starting points and you can tune each test directly.</div>
@@ -1635,39 +1622,13 @@
                 <div class="field"><label>Database</label><input id="wiz_comparison_database" type="text" name="wiz_comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
                 <div class="field"><label>Schema</label><input type="text" name="wiz_comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
               </div>
-              <div class="grid cols-4">
+              <div class="grid cols-2">
                 <div class="field"><label>SSL</label>
                   <select name="wiz_comparison_ssl">
                     <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
                     <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
                   </select>
                 </div>
-                <div class="field" data-wiz-target-family="postgres">
-                  <label>PostgreSQL SSL Mode</label>
-                  <select name="wiz_comparison_ssl_mode">
-                    <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
-                    <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
-                    <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
-                    <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
-                  </select>
-                </div>
-                <div class="field" data-wiz-target-family="mssql">
-                  <label>SQL Server Encrypt</label>
-                  <select name="wiz_comparison_sqlserver_encrypt">
-                    <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
-                    <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
-                  </select>
-                </div>
-                <div class="field" data-wiz-target-family="mssql">
-                  <label>Trust Server Certificate</label>
-                  <select name="wiz_comparison_sqlserver_trust_server_certificate">
-                    <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
-                    <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
-                  </select>
-                </div>
-              </div>
-              <div class="grid cols-2" data-wiz-target-family="mssql">
-                <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="wiz_comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
                 <div class="field"></div>
               </div>
               <details class="advanced-details">
@@ -1713,12 +1674,36 @@
                       </select>
                     </div>
                   </div>
-                  <div class="grid cols-3" data-wiz-target-family="postgres">
+                  <div class="grid cols-4" data-wiz-target-family="postgres">
+                    <div class="field">
+                      <label>PostgreSQL SSL Mode</label>
+                      <select name="wiz_comparison_ssl_mode">
+                        <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
+                        <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
+                        <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
+                        <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
+                      </select>
+                    </div>
                     <div class="field"><label>PG Application Name</label><input type="text" name="wiz_comparison_pg_application_name" value="{{ cfg.comparison_db.pg_application_name }}" /></div>
                     <div class="field"><label>PG Search Path</label><input type="text" name="wiz_comparison_pg_search_path" value="{{ cfg.comparison_db.pg_search_path }}" /></div>
                     <div class="field"><label>PG Lock Timeout (ms)</label><input type="number" min="0" name="wiz_comparison_pg_lock_timeout_ms" value="{{ cfg.comparison_db.pg_lock_timeout_ms }}" /></div>
                   </div>
                   <div class="grid cols-4" data-wiz-target-family="mssql">
+                    <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="wiz_comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
+                    <div class="field">
+                      <label>SQL Server Encrypt</label>
+                      <select name="wiz_comparison_sqlserver_encrypt">
+                        <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
+                        <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
+                      </select>
+                    </div>
+                    <div class="field">
+                      <label>Trust Server Certificate</label>
+                      <select name="wiz_comparison_sqlserver_trust_server_certificate">
+                        <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
+                        <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
+                      </select>
+                    </div>
                     <div class="field"><label>SQL Server Command Timeout (sec)</label><input type="number" min="1" name="wiz_comparison_sqlserver_command_timeout_sec" value="{{ cfg.comparison_db.sqlserver_command_timeout_sec }}" /></div>
                     <div class="field">
                       <label>SQL Server Application Intent</label>
@@ -1740,14 +1725,14 @@
               <h3 class="wizard-step-title">Run Review</h3>
               <div class="tiny">Final check before execution. Review scope, connection targets, and selected tests.</div>
               <div class="pair-grid">
-                <div class="pair"><div class="pk">Company</div><div class="pv" id="wiz_summary_company">n/a</div></div>
-                <div class="pair"><div class="pk">Tier</div><div class="pv" id="wiz_summary_tier">n/a</div></div>
-                <div class="pair"><div class="pk">Preset</div><div class="pv" id="wiz_summary_preset">n/a</div></div>
-                <div class="pair"><div class="pk">Selected Tests</div><div class="pv" id="wiz_summary_tests_count">0</div></div>
-                <div class="pair"><div class="pk">TiDB Target</div><div class="pv" id="wiz_summary_tidb">n/a</div></div>
-                <div class="pair"><div class="pk">Comparison</div><div class="pv" id="wiz_summary_comparison">Disabled</div></div>
-                <div class="pair"><div class="pk">Test List</div><div class="pv" id="wiz_summary_tests_list">n/a</div></div>
-                <div class="pair"><div class="pk">Run Safety</div><div class="pv">No destructive actions are performed by this wizard</div></div>
+                <div class="pair review-pair tone-blue"><div class="pk">Company</div><div class="pv" id="wiz_summary_company">n/a</div></div>
+                <div class="pair review-pair tone-indigo"><div class="pk">Tier</div><div class="pv" id="wiz_summary_tier">n/a</div></div>
+                <div class="pair review-pair tone-violet"><div class="pk">Preset</div><div class="pv" id="wiz_summary_preset">n/a</div></div>
+                <div class="pair review-pair tone-cyan"><div class="pk">Selected Tests</div><div class="pv" id="wiz_summary_tests_count">0</div></div>
+                <div class="pair review-pair tone-blue"><div class="pk">TiDB Target</div><div class="pv" id="wiz_summary_tidb">n/a</div></div>
+                <div class="pair review-pair tone-indigo"><div class="pk">Comparison</div><div class="pv" id="wiz_summary_comparison">Disabled</div></div>
+                <div class="pair review-pair tone-violet"><div class="pk">Test List</div><div class="pv" id="wiz_summary_tests_list">n/a</div></div>
+                <div class="pair review-pair tone-cyan"><div class="pk">Run Safety</div><div class="pv">No destructive actions are performed by this wizard</div></div>
               </div>
               <div class="check-wrap">
                 <label class="check"><input type="checkbox" name="wiz_allow_blocked" /> Allow blocked run (dry-run only)</label>
@@ -1770,9 +1755,8 @@
     <section class="tab-pane" data-tab-pane="dashboards">
       <div class="panel">
         <h2>Dashboards and Execution</h2>
-        <p class="help">Run scenarios, watch live CLI output, and open detailed dashboards.</p>
+        <p class="help">Watch live CLI output, build report artifacts, and open detailed dashboards.</p>
         <div class="actions-grid">
-          <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run Full PoC</button></form>
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
           {% if report_ready %}
             <a class="btn ok" href="/report" target="_blank">Open Report PDF</a>
@@ -1894,11 +1878,6 @@
         <div class="line"></div>
         <div class="path-grid">
           <div class="path-card">
-            <div class="title">Workload Lab</div>
-            <div class="desc">Tune thread count, duration, mix, and import settings. Run targeted workload tests directly on the cluster.</div>
-            <button class="btn soft" type="button" data-tab-jump="workload-lab">Open Workload Lab</button>
-          </div>
-          <div class="path-card">
             <div class="title">Report Dashboard</div>
             <div class="desc">View charted module outcomes, TPS/latency trends, import throughput, and compatibility status.</div>
             <button class="btn soft" type="button" data-tab-jump="report-dashboard">Open Report Dashboard</button>
@@ -1907,68 +1886,31 @@
       </div>
     </section>
 
-    <section class="tab-pane" data-tab-pane="test-planner">
+    <section class="tab-pane" data-tab-pane="test-details">
       <div class="panel">
-        <h2>Test Planner</h2>
-        <p class="help">Understand what each module runs, then select all tests or only the suites you want before execution.</p>
+        <h2>Test Details</h2>
+        <p class="help">Detailed breakdown of what each test validates, pass signals, and where evidence is captured.</p>
         <div class="actions-grid">
           <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
         </div>
 
         <div class="planner-summary">
-          Active modules: <strong>{{ enabled_module_count }}</strong> / {{ module_order|length }} from current configuration.
-        </div>
-
-        <div class="pair-grid">
-          <div class="pair">
-            <div class="pk">OLTP + Migration Suite</div>
-            <div class="pv">M0 customer query validation, M1 baseline OLTP, M2 scaling, M3b contention, M5 online DDL, M6 compatibility, M7 import throughput.</div>
-          </div>
-          <div class="pair">
-            <div class="pk">HTAP Analytics Suite</div>
-            <div class="pv">All core OLTP checks plus M4 HTAP concurrency (TiKV+TiFlash isolation); AI suite extends this with M8 vector search.</div>
-          </div>
+          Active modules in current configuration: <strong>{{ enabled_module_count }}</strong> / {{ module_order|length }}.
         </div>
 
         <div class="line"></div>
-        <div class="planner-actions">
-          <form method="post" action="/apply-module-suite" class="config-section">
-            <h3>Apply Suite</h3>
-            <div class="module-grid">
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="oltp_migration" checked /> OLTP + Migration</label>
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" /> HTAP Analytics</label>
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" /> AI / Vector</label>
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="all" /> All Modules</label>
-              <label class="check"><input type="checkbox" name="module_suite_pick" value="tier_recommended" /> Tier Recommended</label>
-            </div>
-            <div class="tiny">Multiple selections are combined (union) so you can quickly compose custom coverage.</div>
-            <div class="check-wrap">
-              <label class="check"><input type="checkbox" name="suite_apply_profile" /> Also apply current tier workload profile</label>
-            </div>
-            <button class="btn" type="submit">Apply Suite Selection</button>
-          </form>
-
-          <form method="post" action="/save-module-selection" class="config-section">
-            <h3>Manual Module Selection</h3>
-            <div class="module-grid">
-              {% for key in module_order %}
-                <label class="check"><input type="checkbox" name="plan_mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
-              {% endfor %}
-            </div>
-            <button class="btn primary" type="submit">Save Selected Modules</button>
-          </form>
-        </div>
-
-        <div class="line"></div>
-        <h3 class="subhead">Module Insights</h3>
+        <h3 class="subhead">Detailed Module Notes</h3>
         <div class="insight-grid">
           {% for key in module_order %}
             {% set insight = module_insights.get(key, {}) %}
+            {% set detail = module_detail_notes.get(key, {}) %}
             <div class="insight-card">
               <div class="title">{{ module_labels.get(key, key) }}</div>
               <div class="tag">{{ insight.focus if insight.focus else 'Module' }}</div>
               <div class="kv"><strong>Runs:</strong> {{ insight.runs if insight.runs else 'No details available.' }}</div>
+              <div class="kv"><strong>Validates:</strong> {{ detail.validates if detail.validates else 'Validation behavior documented in module run output.' }}</div>
+              <div class="kv"><strong>Pass Signal:</strong> {{ detail.pass_signal if detail.pass_signal else 'Reviewed from module status and artifacts.' }}</div>
+              <div class="kv"><strong>Artifacts:</strong> {{ detail.artifacts if detail.artifacts else 'Module artifacts in results/ and metrics summary.' }}</div>
               <div class="kv"><strong>Value:</strong> {{ insight.value if insight.value else 'No value statement available.' }}</div>
             </div>
           {% endfor %}
@@ -1984,7 +1926,6 @@
           <div><button class="btn soft small" type="button" data-tab-jump="dashboards">Back to Dashboards</button></div>
         </div>
         <div class="actions-grid">
-          <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run PoC with Defaults</button></form>
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
           {% if report_ready %}
             <a class="btn ok" href="/report" target="_blank">Open or Download Report PDF</a>
@@ -2000,7 +1941,7 @@
         <h2>Workload Lab</h2>
         <p class="help">Tune workload generation, run targeted workload modules on-cluster, and inspect active query templates.</p>
         <div class="actions-grid">
-          <div><button class="btn soft small" type="button" data-tab-jump="dashboards">Back to Dashboards</button></div>
+          <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
         </div>
 
         <form method="post" action="/run-workload">
@@ -2412,6 +2353,14 @@
           Full-control mode: configure everything, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
         </div>
 
+        <div class="path-grid">
+          <div class="path-card">
+            <div class="title">Workload Lab</div>
+            <div class="desc">Tune workload threads, mix, and import options as part of manual configuration workflow.</div>
+            <button class="btn soft" type="button" data-tab-jump="workload-lab">Open Workload Lab</button>
+          </div>
+        </div>
+
         <form method="post" action="/apply-module-suite" class="config-section">
           <h3>Module Suite Helper</h3>
           <div class="tiny">Select one or more suites. If multiple are checked, the helper combines them and enables the union of module coverage.</div>
@@ -2420,8 +2369,6 @@
             <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" {% if cfg.pre_poc.scenario_template == 'htap_analytics' %}checked{% endif %} /> HTAP Analytics</label>
             <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" {% if cfg.pre_poc.scenario_template == 'ai_vector' %}checked{% endif %} /> AI / Vector</label>
             <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="all" /> All Modules</label>
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="tier_recommended" /> Tier Recommended</label>
           </div>
           <div class="check-wrap">
             <label class="check"><input type="checkbox" name="suite_apply_profile" /> Also apply current tier workload profile</label>
@@ -2492,44 +2439,13 @@
               <div class="field"><label>User</label><input type="text" name="comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
               <div class="field"><label>Password</label><input type="password" name="comparison_password" value="{{ cfg.comparison_db.password }}" /></div>
             </div>
-            <div class="grid cols-4">
+            <div class="grid cols-3">
               <div class="field"><label>Database</label><input type="text" name="comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
               <div class="field"><label>Schema</label><input type="text" name="comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
               <div class="field"><label>SSL</label>
                 <select name="comparison_ssl">
                   <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
                   <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
-                </select>
-              </div>
-              <div class="field" data-target-family="postgres">
-                <label>PostgreSQL SSL Mode</label>
-                <select name="comparison_ssl_mode">
-                  <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
-                  <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
-                  <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
-                  <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
-                </select>
-              </div>
-              <div class="field" data-target-family="mysql">
-                <label>SSL Mode</label>
-                <select disabled>
-                  <option>managed via SSL true/false above</option>
-                </select>
-              </div>
-              <div class="field" data-target-family="mssql">
-                <label>SQL Server Encrypt</label>
-                <select name="comparison_sqlserver_encrypt">
-                  <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
-                  <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
-                </select>
-              </div>
-            </div>
-            <div class="grid cols-2" data-target-family="mssql">
-              <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
-              <div class="field"><label>Trust Server Certificate</label>
-                <select name="comparison_sqlserver_trust_server_certificate">
-                  <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
-                  <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
                 </select>
               </div>
             </div>
@@ -2576,12 +2492,35 @@
                     </select>
                   </div>
                 </div>
-                <div class="grid cols-3" data-target-family="postgres">
+                <div class="grid cols-4" data-target-family="postgres">
+                  <div class="field">
+                    <label>PostgreSQL SSL Mode</label>
+                    <select name="comparison_ssl_mode">
+                      <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
+                      <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
+                      <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
+                      <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
+                    </select>
+                  </div>
                   <div class="field"><label>PG Application Name</label><input type="text" name="comparison_pg_application_name" value="{{ cfg.comparison_db.pg_application_name }}" /></div>
                   <div class="field"><label>PG Search Path</label><input type="text" name="comparison_pg_search_path" value="{{ cfg.comparison_db.pg_search_path }}" /></div>
                   <div class="field"><label>PG Lock Timeout (ms)</label><input type="number" min="0" name="comparison_pg_lock_timeout_ms" value="{{ cfg.comparison_db.pg_lock_timeout_ms }}" /></div>
                 </div>
                 <div class="grid cols-4" data-target-family="mssql">
+                  <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
+                  <div class="field">
+                    <label>SQL Server Encrypt</label>
+                    <select name="comparison_sqlserver_encrypt">
+                      <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
+                      <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
+                    </select>
+                  </div>
+                  <div class="field"><label>Trust Server Certificate</label>
+                    <select name="comparison_sqlserver_trust_server_certificate">
+                      <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
+                      <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
+                    </select>
+                  </div>
                   <div class="field"><label>SQL Server Command Timeout (sec)</label><input type="number" min="1" name="comparison_sqlserver_command_timeout_sec" value="{{ cfg.comparison_db.sqlserver_command_timeout_sec }}" /></div>
                   <div class="field">
                     <label>SQL Server Application Intent</label>
@@ -2740,12 +2679,11 @@
   const legacyTabMap = {
     configuration: 'manual-config',
     monitor: 'dashboards',
+    'test-planner': 'test-details',
   };
   const buttonFallback = {
-    'test-planner': 'manual-config',
     'cloud-tier': 'manual-config',
     'run-report': 'dashboards',
-    'workload-lab': 'dashboards',
     'report-dashboard': 'dashboards',
   };
 
@@ -2786,6 +2724,27 @@
         .forEach((radio) => {
           radio.checked = true;
         });
+    });
+  });
+
+  document.querySelectorAll('form[action="/apply-module-suite"]').forEach((formEl) => {
+    const checks = Array.from(formEl.querySelectorAll('input[type="checkbox"][name="module_suite_pick"]'));
+    const smokeCheck = checks.find((check) => check.value === 'smoke');
+    if (!smokeCheck) {
+      return;
+    }
+    checks.forEach((check) => {
+      check.addEventListener('change', () => {
+        if (check.value === 'smoke' && check.checked) {
+          checks.forEach((other) => {
+            if (other !== check) {
+              other.checked = false;
+            }
+          });
+        } else if (check.value !== 'smoke' && check.checked) {
+          smokeCheck.checked = false;
+        }
+      });
     });
   });
 
