@@ -1399,6 +1399,9 @@
       <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
     </nav>
+    <div class="sidebar-footer">
+      <button class="btn soft" type="button" id="theme_toggle_btn">Light</button>
+    </div>
   </aside>
 
   <main class="main">
@@ -1406,10 +1409,6 @@
       <div>
         <h1>TiDB PoV Copilot</h1>
         <p>Structured workflow for fast setup, controlled execution, and report-driven outcomes.</p>
-      </div>
-      <div class="header-actions">
-        <button class="btn soft" type="button" id="command_palette_btn">Quick Actions <span class="kbd">⌘K</span></button>
-        <button class="btn soft" type="button" id="theme_toggle_btn">Light</button>
       </div>
     </div>
 
@@ -1451,18 +1450,24 @@
           <div class="path-card">
             <div class="title">Deployment Wizard</div>
             <div class="desc">Guided step-by-step setup with recommended defaults and connection checks.</div>
-            <button class="btn primary" type="button" data-tab-jump="quickstart">Open Deployment Wizard</button>
+            <button class="btn option-deploy" type="button" data-tab-jump="quickstart">Open Deployment Wizard</button>
           </div>
           <div class="path-card">
             <div class="title">Manual Configuration</div>
             <div class="desc">Full control over tiering, modules, workload tuning, and target connection details.</div>
-            <button class="btn" type="button" data-tab-jump="manual-config">Open Manual Config</button>
+            <button class="btn option-manual" type="button" data-tab-jump="manual-config">Open Manual Config</button>
           </div>
         </div>
 
         <div class="line"></div>
         <h3 class="subhead">Status</h3>
         <div class="overview-status">
+          <div class="status-row">
+            <span class="label">Run In Progress</span>
+            <span class="status-pill {% if run_status.running %}warning{% else %}muted{% endif %}" id="overview_run_in_progress">
+              {{ run_status.running }}
+            </span>
+          </div>
           <div class="status-row">
             <span class="label">Report</span>
             <span class="status-pill {% if report_ready %}success{% else %}danger{% endif %}">
@@ -1481,14 +1486,6 @@
             <span class="label">Last Update</span>
             <span class="status-pill muted">{{ run_status.last_log if run_status.last_log else 'n/a' }}</span>
           </div>
-        </div>
-
-        <div class="line"></div>
-        <div class="pair-grid">
-          <div class="pair"><div class="pk">Run In Progress</div><div class="pv">{{ run_status.running }}{% if run_status.pid %} (pid {{ run_status.pid }}){% endif %}</div></div>
-          <div class="pair"><div class="pk">Security Recommendation</div><div class="pv">{{ security_result.recommendation }}</div></div>
-          <div class="pair"><div class="pk">Blocking Security Failures</div><div class="pv">{{ security_result.blocking_failures|length }}</div></div>
-          <div class="pair"><div class="pk">Proceed Flag</div><div class="pv">{{ security_result.proceed }}</div></div>
         </div>
       </div>
     </section>
@@ -2527,57 +2524,7 @@
     </section>
 
   </main>
-
-  <aside class="context-rail">
-    <section class="context-block">
-      <h3 class="context-title">Session Status</h3>
-      <div class="context-grid">
-        <div class="context-row"><span class="k">Tier</span><span class="v">{{ selected_tier_label }}</span></div>
-        <div class="context-row"><span class="k">Scenario</span><span class="v">{{ selected_scenario_label }}</span></div>
-        <div class="context-row"><span class="k">Run</span><span class="v" id="context_running">{{ run_status.running }}</span></div>
-        <div class="context-row"><span class="k">PID</span><span class="v" id="context_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</span></div>
-        <div class="context-row"><span class="k">Report</span><span class="v" id="context_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</span></div>
-      </div>
-    </section>
-
-    <section class="context-block">
-      <h3 class="context-title">Quick Actions</h3>
-      <form method="post" action="/run-defaults"><button class="btn primary" type="submit">Run Full PoC</button></form>
-      <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
-      {% if report_ready %}
-        <a class="btn ok context-link" href="/report" target="_blank">Open Report PDF</a>
-      {% else %}
-        <button class="btn" type="button" disabled>Report Not Ready</button>
-      {% endif %}
-      <button class="btn soft" type="button" data-tab-jump="manual-config">Open Manual Config</button>
-      <button class="btn soft" type="button" data-tab-jump="security">Open Security</button>
-    </section>
-
-    <section class="context-block">
-      <h3 class="context-title">CLI Snapshot</h3>
-      <pre class="context-log" id="context_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
-    </section>
-  </aside>
 </div>
-
-<div class="command-backdrop" id="command_backdrop"></div>
-<section class="command-palette" id="command_palette" role="dialog" aria-modal="true" aria-label="Quick actions">
-  <div class="command-top">
-    <label class="tiny" for="command_palette_input">Command</label>
-    <input class="command-input" id="command_palette_input" type="text" placeholder="Type to filter actions..." />
-  </div>
-  <div class="command-list" id="command_palette_list">
-    <button class="command-item" data-command-tab="quickstart" type="button"><span>Open Quickstart Wizard</span><span class="kbd">Q</span></button>
-    <button class="command-item" data-command-tab="manual-config" type="button"><span>Open Manual Config</span><span class="kbd">M</span></button>
-    <button class="command-item" data-command-tab="dashboards" type="button"><span>Open Dashboards</span><span class="kbd">D</span></button>
-    <button class="command-item" data-command-tab="security" type="button"><span>Open Security Screener</span><span class="kbd">S</span></button>
-    <button class="command-item" data-command-submit="run-defaults" type="button"><span>Run Full PoC</span><span class="kbd">R</span></button>
-    <button class="command-item" data-command-submit="build-report" type="button"><span>Build Report Only</span><span class="kbd">B</span></button>
-  </div>
-</section>
-
-<form id="command_run_defaults_form" method="post" action="/run-defaults" style="display:none;"></form>
-<form id="command_build_report_form" method="post" action="/build-report" style="display:none;"></form>
 
 <script>
 (function () {
@@ -2854,10 +2801,7 @@
   const monitorLogOutputEl = document.getElementById('monitor_log_output');
   const monitorRefreshBtn = document.getElementById('monitor_refresh_btn');
   const monitorRefreshStateEl = document.getElementById('monitor_refresh_state');
-  const contextRunningEl = document.getElementById('context_running');
-  const contextPidEl = document.getElementById('context_pid');
-  const contextReportEl = document.getElementById('context_report_ready');
-  const contextLogOutputEl = document.getElementById('context_log_output');
+  const overviewRunInProgressEl = document.getElementById('overview_run_in_progress');
 
   function updateMonitorFromStatus(status) {
     if (!status) {
@@ -2876,14 +2820,10 @@
     if (monitorReportEl) {
       monitorReportEl.textContent = status.report_ready ? 'Ready' : 'Not generated';
     }
-    if (contextRunningEl) {
-      contextRunningEl.textContent = String(!!status.running);
-    }
-    if (contextPidEl) {
-      contextPidEl.textContent = status.pid ? String(status.pid) : 'n/a';
-    }
-    if (contextReportEl) {
-      contextReportEl.textContent = status.report_ready ? 'Ready' : 'Not generated';
+    if (overviewRunInProgressEl) {
+      overviewRunInProgressEl.textContent = String(!!status.running);
+      overviewRunInProgressEl.classList.remove('warning', 'muted');
+      overviewRunInProgressEl.classList.add(status.running ? 'warning' : 'muted');
     }
     if (monitorLogOutputEl) {
       const atBottom =
@@ -2891,14 +2831,6 @@
       monitorLogOutputEl.textContent = status.last_lines || 'No log output yet.';
       if (atBottom) {
         monitorLogOutputEl.scrollTop = monitorLogOutputEl.scrollHeight;
-      }
-    }
-    if (contextLogOutputEl) {
-      const atBottom =
-        contextLogOutputEl.scrollTop + contextLogOutputEl.clientHeight >= contextLogOutputEl.scrollHeight - 8;
-      contextLogOutputEl.textContent = status.last_lines || 'No log output yet.';
-      if (atBottom) {
-        contextLogOutputEl.scrollTop = contextLogOutputEl.scrollHeight;
       }
     }
   }
@@ -2928,13 +2860,6 @@
   refreshMonitorStatus();
 
   const themeToggleBtn = document.getElementById('theme_toggle_btn');
-  const commandPaletteBtn = document.getElementById('command_palette_btn');
-  const commandBackdrop = document.getElementById('command_backdrop');
-  const commandPalette = document.getElementById('command_palette');
-  const commandPaletteInput = document.getElementById('command_palette_input');
-  const commandItems = Array.from(document.querySelectorAll('.command-item'));
-  const commandRunDefaultsForm = document.getElementById('command_run_defaults_form');
-  const commandBuildReportForm = document.getElementById('command_build_report_form');
 
   function setTheme(nextTheme) {
     document.documentElement.setAttribute('data-theme', nextTheme);
@@ -2948,87 +2873,12 @@
     }
   }
 
-  function openCommandPalette() {
-    if (!commandPalette || !commandBackdrop) {
-      return;
-    }
-    commandBackdrop.style.display = 'block';
-    commandPalette.style.display = 'block';
-    if (commandPaletteInput) {
-      commandPaletteInput.value = '';
-      commandItems.forEach((item) => {
-        item.style.display = 'flex';
-      });
-      commandPaletteInput.focus();
-    }
-  }
-
-  function closeCommandPalette() {
-    if (!commandPalette || !commandBackdrop) {
-      return;
-    }
-    commandBackdrop.style.display = 'none';
-    commandPalette.style.display = 'none';
-  }
-
-  function executeCommandItem(item) {
-    const nextTab = item.getAttribute('data-command-tab');
-    const submitKey = item.getAttribute('data-command-submit');
-    if (nextTab) {
-      activate(nextTab);
-      closeCommandPalette();
-      return;
-    }
-    if (submitKey === 'run-defaults' && commandRunDefaultsForm) {
-      commandRunDefaultsForm.submit();
-      return;
-    }
-    if (submitKey === 'build-report' && commandBuildReportForm) {
-      commandBuildReportForm.submit();
-      return;
-    }
-  }
-
   if (themeToggleBtn) {
     themeToggleBtn.addEventListener('click', () => {
       const current = document.documentElement.getAttribute('data-theme') || 'dark';
       setTheme(current === 'dark' ? 'light' : 'dark');
     });
   }
-
-  if (commandPaletteBtn) {
-    commandPaletteBtn.addEventListener('click', openCommandPalette);
-  }
-
-  if (commandBackdrop) {
-    commandBackdrop.addEventListener('click', closeCommandPalette);
-  }
-
-  commandItems.forEach((item) => {
-    item.addEventListener('click', () => executeCommandItem(item));
-  });
-
-  if (commandPaletteInput) {
-    commandPaletteInput.addEventListener('input', () => {
-      const q = commandPaletteInput.value.trim().toLowerCase();
-      commandItems.forEach((item) => {
-        const label = (item.textContent || '').toLowerCase();
-        item.style.display = !q || label.includes(q) ? 'flex' : 'none';
-      });
-    });
-  }
-
-  document.addEventListener('keydown', (evt) => {
-    const metaK = (evt.metaKey || evt.ctrlKey) && evt.key.toLowerCase() === 'k';
-    if (metaK) {
-      evt.preventDefault();
-      openCommandPalette();
-      return;
-    }
-    if (evt.key === 'Escape') {
-      closeCommandPalette();
-    }
-  });
 
   try {
     const savedTheme = window.localStorage.getItem('poc_ui_theme');
