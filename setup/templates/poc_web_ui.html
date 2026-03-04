@@ -499,9 +499,101 @@
       font-size: 0.78rem;
     }
 
+    .btn.xl {
+      min-height: 50px;
+      font-size: 0.92rem;
+      letter-spacing: 0.12px;
+      font-weight: 760;
+    }
+
     .btn[disabled] {
       opacity: 0.45;
       cursor: not-allowed;
+    }
+
+    .quickstart-cta {
+      border: 1px solid #6a4327;
+      border-radius: 9px;
+      background:
+        linear-gradient(180deg, rgba(255, 122, 26, 0.15), rgba(255, 122, 26, 0.08)),
+        #11161d;
+      padding: 14px;
+      margin-bottom: 12px;
+      display: grid;
+      gap: 10px;
+    }
+
+    .quickstart-cta .headline {
+      font-size: 0.9rem;
+      color: #ffe1cb;
+      font-weight: 700;
+      letter-spacing: 0.14px;
+      text-transform: uppercase;
+    }
+
+    .quickstart-cta .text {
+      color: #d2dbe8;
+      font-size: 0.84rem;
+    }
+
+    .wizard-shell {
+      border: 1px solid #2b323d;
+      border-radius: 9px;
+      background: linear-gradient(180deg, #0f141a, #0b1015);
+      padding: 12px;
+    }
+
+    .wizard-steps {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+
+    .wizard-step-chip {
+      border: 1px solid #333c49;
+      border-radius: 999px;
+      padding: 7px 10px;
+      font-size: 0.73rem;
+      color: #b7c2d4;
+      text-transform: uppercase;
+      letter-spacing: 0.14px;
+      text-align: center;
+      background: #11161c;
+    }
+
+    .wizard-step-chip.active {
+      border-color: #6a4327;
+      color: #ffd8bc;
+      background: linear-gradient(180deg, rgba(255, 122, 26, 0.2), rgba(255, 122, 26, 0.08));
+      box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.22);
+    }
+
+    .wizard-step-pane {
+      display: none;
+      border: 1px solid #2b323d;
+      border-radius: 8px;
+      background: #10151b;
+      padding: 11px;
+      margin-bottom: 10px;
+    }
+
+    .wizard-step-pane.active {
+      display: block;
+    }
+
+    .wizard-step-title {
+      margin: 0 0 5px;
+      font-size: 0.92rem;
+      color: #eef3fb;
+      letter-spacing: 0.12px;
+    }
+
+    .wizard-nav {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin-top: 8px;
     }
 
     .grid {
@@ -889,6 +981,18 @@
       display: grid;
     }
 
+    [data-wiz-target-family] {
+      display: none;
+    }
+
+    .field[data-wiz-target-family].show {
+      display: flex;
+    }
+
+    .grid[data-wiz-target-family].show {
+      display: grid;
+    }
+
     .report-grid-two {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1162,7 +1266,9 @@
       .report-grid-two,
       .line-grid,
       .module-grid,
-      .module-status-list {
+      .module-status-list,
+      .wizard-steps,
+      .wizard-nav {
         grid-template-columns: 1fr;
       }
 
@@ -1192,6 +1298,7 @@
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
+      <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Quickstart Wizard</button>
       <button class="tab-btn" data-tab-btn="run-report"><span class="ico">[>]</span>Run and Report</button>
       <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
       <button class="tab-btn" data-tab-btn="report-dashboard"><span class="ico">[#]</span>Report Dashboard</button>
@@ -1241,6 +1348,11 @@
       <div class="panel">
         <h2>Environment Snapshot</h2>
         <p class="help">Current project state and high-level readiness summary.</p>
+        <div class="quickstart-cta">
+          <div class="headline">New Deployment Path</div>
+          <div class="text">Use the guided quickstart wizard for step-by-step setup, one-click save, and automatic PoC run. Advanced tuning remains available in Configuration and Workload Lab.</div>
+          <button class="btn primary xl" type="button" data-tab-jump="quickstart">Launch Guided Setup Wizard</button>
+        </div>
         <div class="stats-grid">
           <div class="stat"><div class="k">Config Path</div><div class="v">{{ config_path }}</div></div>
           <div class="stat"><div class="k">Tier</div><div class="v">{{ selected_tier_label }}</div></div>
@@ -1253,6 +1365,191 @@
           <div class="pair"><div class="pk">Security Recommendation</div><div class="pv">{{ security_result.recommendation }}</div></div>
           <div class="pair"><div class="pk">Blocking Security Failures</div><div class="pv">{{ security_result.blocking_failures|length }}</div></div>
           <div class="pair"><div class="pk">Proceed Flag</div><div class="pv">{{ security_result.proceed }}</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="tab-pane" data-tab-pane="quickstart">
+      <div class="panel">
+        <h2>Guided Quickstart Wizard</h2>
+        <p class="help">Step-by-step setup for first-time users. This flow applies recommended defaults, saves config, and can immediately run the PoC automatically.</p>
+
+        <div class="wizard-shell">
+          <div class="wizard-steps">
+            <div class="wizard-step-chip active" data-wizard-step-indicator="1">1. Scope</div>
+            <div class="wizard-step-chip" data-wizard-step-indicator="2">2. TiDB</div>
+            <div class="wizard-step-chip" data-wizard-step-indicator="3">3. Comparison</div>
+            <div class="wizard-step-chip" data-wizard-step-indicator="4">4. Security</div>
+            <div class="wizard-step-chip" data-wizard-step-indicator="5">5. Run</div>
+          </div>
+
+          <form method="post" action="/quickstart-deploy" id="quickstart_form">
+            <div class="wizard-step-pane active" data-wizard-step="1">
+              <h3 class="wizard-step-title">Scope and Performance Profile</h3>
+              <div class="grid cols-4">
+                <div class="field">
+                  <label>Company Name (for report)</label>
+                  <input type="text" name="wiz_company_name" value="{{ cfg.report.company_name }}" placeholder="Acme Corp" />
+                </div>
+                <div class="field">
+                  <label>Cloud Tier</label>
+                  <select name="wiz_tier">
+                    {% for t in tiers %}
+                      <option value="{{ t }}" {% if cfg.tier.selected == t %}selected{% endif %}>{{ tier_labels.get(t, t) }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Scenario Template</label>
+                  <select name="wiz_scenario">
+                    {% for key, label in scenarios.items() %}
+                      <option value="{{ key }}" {% if cfg.pre_poc.scenario_template == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Workload Preset</label>
+                  <select name="wiz_workload_preset">
+                    {% for key, meta in quickstart_workload_presets.items() %}
+                      <option value="{{ key }}" {% if key == 'balanced_poc' %}selected{% endif %}>{{ meta.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+              <div class="check-wrap">
+                <label class="check"><input type="checkbox" name="wiz_apply_profile" checked /> Apply tier test profile defaults</label>
+                <label class="check"><input type="checkbox" name="wiz_enable_optional_advanced" /> Enable optional advanced modules</label>
+                <label class="check"><input type="checkbox" name="wiz_run_ha_sim" /> Enable simulated HA test where applicable</label>
+              </div>
+              <div class="line"></div>
+              <div class="tiny">The wizard sets practical defaults. Full module-by-module tuning is always available in Configuration and Workload Lab.</div>
+            </div>
+
+            <div class="wizard-step-pane" data-wizard-step="2">
+              <h3 class="wizard-step-title">TiDB Cluster Connection</h3>
+              <div class="grid cols-4">
+                <div class="field"><label>Host</label><input type="text" name="wiz_tidb_host" value="{{ cfg.tidb.host }}" placeholder="gateway01.xxxxx.tidbcloud.com" /></div>
+                <div class="field"><label>Port</label><input type="number" name="wiz_tidb_port" value="{{ cfg.tidb.port }}" /></div>
+                <div class="field"><label>User</label><input type="text" name="wiz_tidb_user" value="{{ cfg.tidb.user }}" placeholder="clusterPrefix.root" /></div>
+                <div class="field"><label>Password</label><input type="password" name="wiz_tidb_password" value="" placeholder="Leave blank to keep existing saved password" /></div>
+              </div>
+              <div class="grid cols-2">
+                <div class="field"><label>Database</label><input type="text" name="wiz_tidb_database" value="{{ cfg.tidb.database }}" /></div>
+                <div class="field"><label>SSL</label>
+                  <select name="wiz_tidb_ssl">
+                    <option value="true" {% if cfg.tidb.ssl %}selected{% endif %}>true</option>
+                    <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
+                  </select>
+                </div>
+              </div>
+              <div class="tiny">Tip: TiDB Cloud usernames usually include a cluster/user prefix, e.g. <code>abc123.root</code>.</div>
+            </div>
+
+            <div class="wizard-step-pane" data-wizard-step="3">
+              <h3 class="wizard-step-title">Optional Comparison Target</h3>
+              <div class="check-wrap">
+                <label class="check"><input type="checkbox" name="wiz_comparison_enabled" {% if cfg.comparison_db.enabled %}checked{% endif %} /> Enable comparison run</label>
+              </div>
+              <div class="grid cols-4">
+                <div class="field">
+                  <label>Target Engine</label>
+                  <select name="wiz_comparison_target" id="wiz_comparison_target">
+                    {% for key, meta in comparison_targets.items() %}
+                      <option
+                        value="{{ key }}"
+                        data-default-port="{{ meta.default_port }}"
+                        data-family="{{ meta.family }}"
+                        {% if cfg.comparison_db.target == key %}selected{% endif %}
+                      >{{ meta.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="field"><label>Label</label><input type="text" name="wiz_comparison_label" value="{{ cfg.comparison_db.label }}" /></div>
+                <div class="field"><label>Host</label><input type="text" name="wiz_comparison_host" value="{{ cfg.comparison_db.host }}" /></div>
+                <div class="field"><label>Port</label><input type="number" name="wiz_comparison_port" value="{{ cfg.comparison_db.port }}" /></div>
+              </div>
+              <div class="grid cols-4">
+                <div class="field"><label>User</label><input type="text" name="wiz_comparison_user" value="{{ cfg.comparison_db.user }}" /></div>
+                <div class="field"><label>Password</label><input type="password" name="wiz_comparison_password" value="" placeholder="Leave blank to keep existing saved password" /></div>
+                <div class="field"><label>Database</label><input type="text" name="wiz_comparison_database" value="{{ cfg.comparison_db.database }}" /></div>
+                <div class="field"><label>Schema</label><input type="text" name="wiz_comparison_schema" value="{{ cfg.comparison_db.schema }}" /></div>
+              </div>
+              <div class="grid cols-4">
+                <div class="field"><label>SSL</label>
+                  <select name="wiz_comparison_ssl">
+                    <option value="true" {% if cfg.comparison_db.ssl %}selected{% endif %}>true</option>
+                    <option value="false" {% if not cfg.comparison_db.ssl %}selected{% endif %}>false</option>
+                  </select>
+                </div>
+                <div class="field" data-wiz-target-family="postgres">
+                  <label>PostgreSQL SSL Mode</label>
+                  <select name="wiz_comparison_ssl_mode">
+                    <option value="disable" {% if cfg.comparison_db.ssl_mode == 'disable' %}selected{% endif %}>disable</option>
+                    <option value="require" {% if cfg.comparison_db.ssl_mode == 'require' %}selected{% endif %}>require</option>
+                    <option value="verify-ca" {% if cfg.comparison_db.ssl_mode == 'verify-ca' %}selected{% endif %}>verify-ca</option>
+                    <option value="verify-full" {% if cfg.comparison_db.ssl_mode == 'verify-full' %}selected{% endif %}>verify-full</option>
+                  </select>
+                </div>
+                <div class="field" data-wiz-target-family="mssql">
+                  <label>SQL Server Encrypt</label>
+                  <select name="wiz_comparison_sqlserver_encrypt">
+                    <option value="true" {% if cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>true</option>
+                    <option value="false" {% if not cfg.comparison_db.sqlserver_encrypt %}selected{% endif %}>false</option>
+                  </select>
+                </div>
+                <div class="field" data-wiz-target-family="mssql">
+                  <label>Trust Server Certificate</label>
+                  <select name="wiz_comparison_sqlserver_trust_server_certificate">
+                    <option value="true" {% if cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>true</option>
+                    <option value="false" {% if not cfg.comparison_db.sqlserver_trust_server_certificate %}selected{% endif %}>false</option>
+                  </select>
+                </div>
+              </div>
+              <div class="grid cols-2" data-wiz-target-family="mssql">
+                <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="wiz_comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
+                <div class="field"></div>
+              </div>
+              <div class="tiny">Automated side-by-side workload execution currently supports MySQL family targets. Postgres and SQL Server targets are captured for planning/config parity.</div>
+            </div>
+
+            <div class="wizard-step-pane" data-wizard-step="4">
+              <h3 class="wizard-step-title">Security and Governance Handling</h3>
+              <div class="grid cols-2">
+                <div class="field">
+                  <label>Security Screener Behavior</label>
+                  <select name="wiz_security_mode">
+                    {% for key, label in quickstart_security_modes.items() %}
+                      <option value="{{ key }}" {% if key == 'keep_existing' %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
+                <div class="field">
+                  <label>Run Mode</label>
+                  <label class="check"><input type="checkbox" name="wiz_allow_blocked" /> Allow blocked run (dry-run only)</label>
+                </div>
+              </div>
+              <div class="tiny">`N/A` is intentionally treated as review-required hold. Keep that mode for production-like validation; use allow-blocked only for dry-runs.</div>
+            </div>
+
+            <div class="wizard-step-pane" data-wizard-step="5">
+              <h3 class="wizard-step-title">Review and Execute</h3>
+              <div class="pair-grid">
+                <div class="pair"><div class="pk">Flow</div><div class="pv">Save configuration -> Apply tier/module defaults -> Optionally run full PoC</div></div>
+                <div class="pair"><div class="pk">Artifacts</div><div class="pv">Logs + metrics + report data under results/ and PDF when report is generated</div></div>
+                <div class="pair"><div class="pk">Advanced Tuning</div><div class="pv">Configuration and Workload Lab tabs remain available after wizard run</div></div>
+                <div class="pair"><div class="pk">Safety</div><div class="pv">No destructive actions are performed in this wizard</div></div>
+              </div>
+              <div class="check-wrap">
+                <label class="check"><input type="checkbox" name="wiz_run_now" checked /> Run PoC now after saving</label>
+              </div>
+            </div>
+
+            <div class="wizard-nav">
+              <button class="btn soft" type="button" data-wizard-prev disabled>Back</button>
+              <button class="btn" type="button" data-wizard-next>Next</button>
+              <button class="btn primary" type="submit" data-wizard-submit style="display:none;">Save and Continue</button>
+            </div>
+          </form>
         </div>
       </div>
     </section>
@@ -1962,6 +2259,10 @@
     btn.addEventListener('click', () => activate(btn.dataset.tabBtn));
   });
 
+  document.querySelectorAll('[data-tab-jump]').forEach((btn) => {
+    btn.addEventListener('click', () => activate(btn.dataset.tabJump));
+  });
+
   document.querySelectorAll('[data-sec-set]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const next = btn.dataset.secSet;
@@ -1972,6 +2273,111 @@
         });
     });
   });
+
+  const wizardForm = document.getElementById('quickstart_form');
+  const wizardStepPanes = Array.from(document.querySelectorAll('[data-wizard-step]'));
+  const wizardStepIndicators = Array.from(document.querySelectorAll('[data-wizard-step-indicator]'));
+  const wizardPrevBtn = document.querySelector('[data-wizard-prev]');
+  const wizardNextBtn = document.querySelector('[data-wizard-next]');
+  const wizardSubmitBtn = document.querySelector('[data-wizard-submit]');
+  let wizardStep = 1;
+
+  function setWizardStep(nextStep) {
+    const total = wizardStepPanes.length;
+    wizardStep = Math.max(1, Math.min(total, nextStep));
+
+    wizardStepPanes.forEach((pane) => {
+      pane.classList.toggle('active', Number(pane.dataset.wizardStep) === wizardStep);
+    });
+
+    wizardStepIndicators.forEach((chip) => {
+      chip.classList.toggle('active', Number(chip.dataset.wizardStepIndicator) === wizardStep);
+    });
+
+    if (wizardPrevBtn) {
+      wizardPrevBtn.disabled = wizardStep === 1;
+    }
+    if (wizardNextBtn) {
+      wizardNextBtn.style.display = wizardStep === total ? 'none' : 'inline-flex';
+    }
+    if (wizardSubmitBtn) {
+      wizardSubmitBtn.style.display = wizardStep === total ? 'inline-flex' : 'none';
+      wizardSubmitBtn.textContent = 'Save and Continue';
+    }
+  }
+
+  if (wizardForm) {
+    if (wizardPrevBtn) {
+      wizardPrevBtn.addEventListener('click', () => setWizardStep(wizardStep - 1));
+    }
+    if (wizardNextBtn) {
+      wizardNextBtn.addEventListener('click', () => setWizardStep(wizardStep + 1));
+    }
+    setWizardStep(1);
+  }
+
+  const wizComparisonTargetEl = document.getElementById('wiz_comparison_target');
+  const wizComparisonPortEl = document.querySelector('input[name="wiz_comparison_port"]');
+  const wizComparisonSchemaEl = document.querySelector('input[name="wiz_comparison_schema"]');
+  let wizPreviousDefaultPort = null;
+  let wizPreviousDefaultSchema = null;
+
+  function syncWizardComparisonTargetUi() {
+    if (!wizComparisonTargetEl) {
+      return;
+    }
+
+    const option = wizComparisonTargetEl.options[wizComparisonTargetEl.selectedIndex];
+    if (!option) {
+      return;
+    }
+
+    const family = (option.dataset.family || 'mysql').toLowerCase();
+    const defaultPort = parseInt(option.dataset.defaultPort || '3306', 10);
+    const defaultSchema = family === 'mssql' ? 'dbo' : 'public';
+
+    if (wizComparisonPortEl) {
+      const currentPort = (wizComparisonPortEl.value || '').trim();
+      if (!currentPort || (wizPreviousDefaultPort !== null && currentPort === String(wizPreviousDefaultPort))) {
+        wizComparisonPortEl.value = String(defaultPort);
+      }
+    }
+
+    if (wizComparisonSchemaEl) {
+      const currentSchema = (wizComparisonSchemaEl.value || '').trim().toLowerCase();
+      if (!currentSchema || (wizPreviousDefaultSchema && currentSchema === wizPreviousDefaultSchema)) {
+        wizComparisonSchemaEl.value = defaultSchema;
+      }
+      wizComparisonSchemaEl.placeholder = defaultSchema;
+    }
+
+    document.querySelectorAll('[data-wiz-target-family]').forEach((el) => {
+      const accepted = (el.dataset.wizTargetFamily || '')
+        .split(',')
+        .map((part) => part.trim().toLowerCase())
+        .filter(Boolean);
+      const show = accepted.includes(family);
+      el.classList.toggle('show', show);
+      el.querySelectorAll('input, select, textarea').forEach((control) => {
+        if (control.name) {
+          control.disabled = !show;
+        }
+      });
+    });
+
+    wizPreviousDefaultPort = defaultPort;
+    wizPreviousDefaultSchema = defaultSchema;
+  }
+
+  if (wizComparisonTargetEl) {
+    const first = wizComparisonTargetEl.options[wizComparisonTargetEl.selectedIndex];
+    if (first) {
+      wizPreviousDefaultPort = parseInt(first.dataset.defaultPort || '3306', 10);
+      wizPreviousDefaultSchema = (first.dataset.family || 'mysql').toLowerCase() === 'mssql' ? 'dbo' : 'public';
+    }
+    syncWizardComparisonTargetUi();
+    wizComparisonTargetEl.addEventListener('change', syncWizardComparisonTargetUi);
+  }
 
   const comparisonTargetEl = document.getElementById('comparison_target');
   const comparisonPortEl = document.querySelector('input[name="comparison_port"]');

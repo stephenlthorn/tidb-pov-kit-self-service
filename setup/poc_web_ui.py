@@ -231,6 +231,50 @@ IMPORT_METHOD_LABELS = {
     "import_into": "IMPORT INTO",
 }
 
+QUICKSTART_WORKLOAD_PRESETS = {
+    "fast_validation": {
+        "label": "Fast Validation",
+        "description": "Fast connectivity and smoke validation with lighter runtime.",
+        "overrides": {
+            "data_scale": "small",
+            "duration_seconds": 60,
+            "concurrency_levels": [4, 8, 16],
+            "ramp_duration_seconds": 120,
+            "import_rows": 250000,
+            "workload_mix": "mixed",
+            "read_weight_multiplier": 1.0,
+            "write_weight_multiplier": 1.0,
+            "import_batch_size": 2500,
+        },
+    },
+    "balanced_poc": {
+        "label": "Balanced PoC",
+        "description": "Recommended default profile for most PoV runs.",
+        "overrides": {},
+    },
+    "stress_run": {
+        "label": "Stress Run",
+        "description": "Higher load profile for deeper performance characterization.",
+        "overrides": {
+            "data_scale": "medium",
+            "duration_seconds": 240,
+            "concurrency_levels": [16, 32, 64],
+            "ramp_duration_seconds": 480,
+            "import_rows": 3000000,
+            "workload_mix": "mixed",
+            "read_weight_multiplier": 1.2,
+            "write_weight_multiplier": 1.1,
+            "import_batch_size": 7500,
+        },
+    },
+}
+
+QUICKSTART_SECURITY_MODES = {
+    "keep_existing": "Keep existing screener state",
+    "all_pass": "Mark all controls PASS (for controlled test envs)",
+    "all_na": "Mark all controls N/A (forces review-required hold)",
+}
+
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Launch PoC web UI")
@@ -942,6 +986,41 @@ def build_security_result(form) -> Dict:
     }
 
 
+def build_security_profile(profile: str) -> Dict | None:
+    profile = str(profile or "").strip().lower()
+    if profile not in {"all_pass", "all_na"}:
+        return None
+
+    status = "pass" if profile == "all_pass" else "na"
+    items = [
+        {
+            "id": item["id"],
+            "prompt": item["prompt"],
+            "status": status,
+            "blocking": item["blocking"],
+            "owner": item["owner"],
+        }
+        for item in SECURITY_ITEMS
+    ]
+
+    if profile == "all_pass":
+        return {
+            "items": items,
+            "blocking_failures": [],
+            "non_blocking_failures": [],
+            "recommendation": "proceed",
+            "proceed": True,
+        }
+
+    return {
+        "items": items,
+        "blocking_failures": [],
+        "non_blocking_failures": [],
+        "recommendation": "review_required",
+        "proceed": False,
+    }
+
+
 def create_app(config_path: Path) -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
     app.secret_key = "tidb-pov-local-ui"
@@ -984,6 +1063,8 @@ def create_app(config_path: Path) -> Flask:
             status_classes=STATUS_CLASSES,
             workload_targets=WORKLOAD_TARGETS,
             import_method_labels=IMPORT_METHOD_LABELS,
+            quickstart_workload_presets=QUICKSTART_WORKLOAD_PRESETS,
+            quickstart_security_modes=QUICKSTART_SECURITY_MODES,
             comparison_targets=TARGET_DEFINITIONS,
             comparison_target_label=target_label(cfg["comparison_db"]["target"]),
             comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
@@ -1069,6 +1150,121 @@ def create_app(config_path: Path) -> Flask:
         save_cfg(config_path, cfg)
         flash("Configuration saved.", "success")
         return redirect(url_for("index"))
+
+    @app.post("/quickstart-deploy")
+    def quickstart_deploy_route():
+        cfg = load_cfg(config_path)
+
+        selected_tier = request.form.get("wiz_tier", "serverless").strip().lower()
+        if selected_tier not in TIERS:
+            selected_tier = "serverless"
+
+        scenario = request.form.get("wiz_scenario", "oltp_migration").strip()
+        if scenario not in SCENARIOS:
+            scenario = "oltp_migration"
+
+        run_ha_sim = to_bool(request.form.get("wiz_run_ha_sim"), False)
+        enable_optional_advanced = to_bool(request.form.get("wiz_enable_optional_advanced"), False)
+        apply_profile = to_bool(request.form.get("wiz_apply_profile"), False)
+        workload_preset = request.form.get("wiz_workload_preset", "balanced_poc").strip().lower()
+        if workload_preset not in QUICKSTART_WORKLOAD_PRESETS:
+            workload_preset = "balanced_poc"
+
+        cfg.setdefault("modules", {})
+        cfg.setdefault("test", {})
+        cfg.setdefault("tier", {})
+        cfg.setdefault("pre_poc", {})
+
+        cfg["modules"] = build_tier_modules(
+            tier=selected_tier,
+            scenario=scenario,
+            run_ha_sim=run_ha_sim,
+            enable_optional_advanced=enable_optional_advanced,
+            existing=cfg.get("modules", {}),
+        )
+
+        if apply_profile:
+            cfg["test"].update(tier_test_profile(selected_tier))
+
+        preset_overrides = QUICKSTART_WORKLOAD_PRESETS[workload_preset]["overrides"]
+        if preset_overrides:
+            cfg["test"].update(preset_overrides)
+
+        cfg["tier"].update(
+            {
+                "selected": selected_tier,
+                "recommended": selected_tier,
+                "decision_tree_version": "quickstart-wizard",
+                "decision_notes": [f"Quickstart wizard profile: {workload_preset}"],
+            }
+        )
+        cfg["pre_poc"]["scenario_template"] = scenario
+
+        tidb = cfg.setdefault("tidb", {})
+        tidb["host"] = request.form.get("wiz_tidb_host", "").strip()
+        tidb["port"] = to_int(request.form.get("wiz_tidb_port"), tidb.get("port", 4000))
+        tidb["user"] = request.form.get("wiz_tidb_user", "").strip()
+        new_tidb_password = request.form.get("wiz_tidb_password", "")
+        if new_tidb_password:
+            tidb["password"] = new_tidb_password
+        tidb["database"] = request.form.get("wiz_tidb_database", "pov_test").strip() or "pov_test"
+        tidb["ssl"] = to_bool(request.form.get("wiz_tidb_ssl"), True)
+
+        comp = cfg.setdefault("comparison_db", {})
+        comp["enabled"] = to_bool(request.form.get("wiz_comparison_enabled"), False)
+        comp["target"] = request.form.get("wiz_comparison_target", "aurora_mysql").strip().lower() or "aurora_mysql"
+        comp["host"] = request.form.get("wiz_comparison_host", "").strip()
+        default_port = int(TARGET_DEFINITIONS.get(comp["target"], TARGET_DEFINITIONS["aurora_mysql"])["default_port"])
+        comp["port"] = to_int(request.form.get("wiz_comparison_port"), default_port)
+        comp["user"] = request.form.get("wiz_comparison_user", "").strip()
+        new_comp_password = request.form.get("wiz_comparison_password", "")
+        if new_comp_password:
+            comp["password"] = new_comp_password
+        comp["database"] = request.form.get("wiz_comparison_database", "").strip()
+        comp["schema"] = request.form.get("wiz_comparison_schema", "public").strip() or "public"
+        comp["label"] = request.form.get("wiz_comparison_label", "").strip()
+        comp["ssl"] = to_bool(request.form.get("wiz_comparison_ssl"), False)
+        comp["ssl_mode"] = request.form.get("wiz_comparison_ssl_mode", "require").strip().lower() or "require"
+        comp["sqlserver_driver"] = (
+            request.form.get("wiz_comparison_sqlserver_driver", "ODBC Driver 18 for SQL Server").strip()
+            or "ODBC Driver 18 for SQL Server"
+        )
+        comp["sqlserver_encrypt"] = to_bool(request.form.get("wiz_comparison_sqlserver_encrypt"), True)
+        comp["sqlserver_trust_server_certificate"] = to_bool(
+            request.form.get("wiz_comparison_sqlserver_trust_server_certificate"), False
+        )
+        cfg["comparison_db"] = normalize_comparison_cfg(comp)
+
+        report = cfg.setdefault("report", {})
+        company_name = request.form.get("wiz_company_name", "").strip()
+        if company_name:
+            report["company_name"] = company_name
+
+        security_mode = request.form.get("wiz_security_mode", "keep_existing")
+        sec_profile = build_security_profile(security_mode)
+        if sec_profile is not None:
+            cfg["pre_poc"]["security"] = sec_profile
+            cfg["pre_poc"]["go_no_go"] = "proceed" if sec_profile["proceed"] else "hold"
+
+        save_cfg(config_path, cfg)
+
+        run_now = to_bool(request.form.get("wiz_run_now"), False)
+        allow_blocked = to_bool(request.form.get("wiz_allow_blocked"), False)
+
+        if run_now and not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
+            flash("Quickstart saved, but run skipped: TiDB host/user/password are required.", "warning")
+            return redirect(url_for("index") + "#quickstart")
+
+        if run_now:
+            cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
+            if allow_blocked:
+                cmd.append("--allow-blocked")
+            ok, msg = start_background(cmd, "quickstart-run")
+            flash(msg, "success" if ok else "error")
+            return redirect(url_for("index") + "#monitor")
+
+        flash("Quickstart configuration saved. Use Run and Report when ready.", "success")
+        return redirect(url_for("index") + "#run-report")
 
     @app.post("/apply-tier")
     def apply_tier_route():

@@ -81,7 +81,7 @@ Direct-run shortcuts:
 
 Dark web UI:
 1. Open with `./run_all.sh --web-ui` (or `python setup/poc_web_ui.py`)
-2. Configure cluster details, tier, modules, test profile, report and TCO in one place
+2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
 3. Run security screener, run defaults, build report-only, and clear/reset data
 
 That's it. The kit will:
