@@ -711,15 +711,16 @@ def build_security_result(form) -> Dict:
 
     blocking_failures = [r["id"] for r in items if r["status"] == "fail" and r["blocking"]]
     non_blocking_failures = [r["id"] for r in items if r["status"] == "fail" and not r["blocking"]]
+    has_review_required = any(r["status"] in {"na", "not_assessed"} for r in items)
 
     if blocking_failures:
         recommendation = "hold"
         proceed = False
+    elif has_review_required:
+        recommendation = "review_required"
+        proceed = False
     elif non_blocking_failures:
         recommendation = "proceed_with_risks"
-        proceed = True
-    elif any(r["status"] == "not_assessed" for r in items):
-        recommendation = "review_required"
         proceed = True
     else:
         recommendation = "proceed"
