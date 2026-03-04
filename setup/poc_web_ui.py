@@ -41,11 +41,13 @@ TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 RUN_SCRIPT = ROOT / "run_all.sh"
 BASELINE_SCRIPT = ROOT / "tests" / "01_baseline_perf" / "run.py"
 IMPORT_SCRIPT = ROOT / "tests" / "07_data_import" / "run.py"
+BLASTER_RUNNER_SCRIPT = ROOT / "load" / "tidb_blaster_runner.py"
 
 REPORT_PDF = RESULTS_DIR / "tidb_pov_report.pdf"
 METRICS_JSON = RESULTS_DIR / "metrics_summary.json"
 RUN_LOG = RESULTS_DIR / "web_ui_run.log"
 RUN_PID = RESULTS_DIR / "web_ui_run.pid"
+RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -62,6 +64,11 @@ from lib.comparison_targets import (  # type: ignore  # noqa: E402
     comparison_reason,
     normalize_comparison_cfg,
     target_label,
+)
+from load.tidb_blaster import (  # type: ignore  # noqa: E402
+    latest_run_dir,
+    list_recent_runs,
+    normalize_blaster_config,
 )
 
 
@@ -159,6 +166,12 @@ DEFAULT_CFG = {
         "engineers_managing_shards": 2,
         "engineer_annual_cost": 180000,
         "sharding_eng_fraction": 0.25,
+    },
+    "workload_lab": {
+        "target": "baseline_perf",
+        "concurrency": 8,
+        "duration_seconds": 120,
+        "blaster": {},
     },
 }
 
@@ -567,7 +580,24 @@ def normalize_cfg(cfg: Dict) -> Dict:
         normalized = [str(m).strip().lower() for m in methods if str(m).strip().lower() in IMPORT_METHOD_LABELS]
         cfg["test"]["import_methods"] = normalized or list(IMPORT_METHOD_LABELS.keys())
 
+    cfg.setdefault("workload_lab", {})
+    cfg["workload_lab"]["target"] = str(cfg.get("workload_lab", {}).get("target", "baseline_perf"))
+    cfg["workload_lab"]["concurrency"] = _to_int_safe(cfg.get("workload_lab", {}).get("concurrency"), 8, 1)
+    cfg["workload_lab"]["duration_seconds"] = _to_int_safe(cfg.get("workload_lab", {}).get("duration_seconds"), 120, 10)
+    cfg["workload_lab"]["blaster"] = normalize_blaster_config(
+        cfg.get("workload_lab", {}).get("blaster") or {},
+        cfg.get("tidb", {}) or {},
+    )
+
     return cfg
+
+
+def _to_int_safe(value, default: int, minimum: int = 0) -> int:
+    try:
+        out = int(value)
+    except (TypeError, ValueError):
+        out = int(default)
+    return max(minimum, out)
 
 
 def load_cfg(config_path: Path) -> Dict:
@@ -859,6 +889,42 @@ def build_workload_insights(cfg: Dict) -> Dict:
         "import_rows": parse_int(cfg.get("test", {}).get("import_rows"), 1_000_000),
         "import_batch_size": parse_int(cfg.get("test", {}).get("import_batch_size"), 5000),
         "import_methods": [m for m in import_methods if m in IMPORT_METHOD_LABELS],
+    }
+
+
+def build_blaster_insights(cfg: Dict) -> Dict:
+    wl = cfg.setdefault("workload_lab", {})
+    blaster_cfg = normalize_blaster_config(wl.get("blaster") or {}, cfg.get("tidb", {}) or {})
+    wl["blaster"] = blaster_cfg
+
+    recent_runs = list_recent_runs(limit=12)
+    latest = latest_run_dir()
+    latest_summary = {}
+    latest_commands = []
+
+    if latest:
+        summary_path = latest / "summary.json"
+        if summary_path.exists():
+            try:
+                latest_summary = json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                latest_summary = {}
+
+        commands_path = latest / "commands.json"
+        if commands_path.exists():
+            try:
+                loaded = json.loads(commands_path.read_text(encoding="utf-8"))
+                if isinstance(loaded, list):
+                    latest_commands = loaded[:8]
+            except Exception:
+                latest_commands = []
+
+    return {
+        "config": blaster_cfg,
+        "recent_runs": recent_runs,
+        "latest_run_dir": str(latest) if latest else "",
+        "latest_summary": latest_summary,
+        "latest_commands": latest_commands,
     }
 
 
@@ -1167,12 +1233,39 @@ def run_status() -> Dict:
         try:
             pid = int(RUN_PID.read_text().strip())
             if pid_alive(pid):
-                status["running"] = True
-                status["pid"] = pid
+                expected_cmd = ""
+                if RUN_META.exists():
+                    try:
+                        meta = json.loads(RUN_META.read_text(encoding="utf-8"))
+                        expected_cmd = str(meta.get("command") or "")
+                    except Exception:
+                        expected_cmd = ""
+
+                cmdline = ""
+                try:
+                    ps = subprocess.run(
+                        ["ps", "-p", str(pid), "-o", "command="],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        timeout=2,
+                    )
+                    cmdline = (ps.stdout or "").strip()
+                except Exception:
+                    cmdline = ""
+
+                if expected_cmd and cmdline and expected_cmd not in cmdline:
+                    RUN_PID.unlink(missing_ok=True)
+                    RUN_META.unlink(missing_ok=True)
+                else:
+                    status["running"] = True
+                    status["pid"] = pid
             else:
                 RUN_PID.unlink(missing_ok=True)
+                RUN_META.unlink(missing_ok=True)
         except Exception:
             RUN_PID.unlink(missing_ok=True)
+            RUN_META.unlink(missing_ok=True)
 
     return status
 
@@ -1196,6 +1289,18 @@ def start_background(command: List[str], label: str) -> Tuple[bool, str]:
         )
 
     RUN_PID.write_text(str(proc.pid), encoding="utf-8")
+    RUN_META.write_text(
+        json.dumps(
+            {
+                "pid": proc.pid,
+                "label": label,
+                "command": str(command[0]) if command else "",
+                "args": [str(x) for x in command],
+                "started_at": dt.datetime.now().isoformat(),
+            }
+        ),
+        encoding="utf-8",
+    )
     return True, f"Started {label} (pid {proc.pid})."
 
 
@@ -1358,6 +1463,7 @@ def create_app(config_path: Path) -> Flask:
         report_ready = REPORT_PDF.exists()
         report_dashboard = build_report_dashboard()
         workload_insights = build_workload_insights(cfg)
+        blaster_insights = build_blaster_insights(cfg)
 
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
@@ -1400,6 +1506,7 @@ def create_app(config_path: Path) -> Flask:
             comparison_target_label=target_label(cfg["comparison_db"]["target"]),
             comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
             comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
+            blaster_insights=blaster_insights,
         )
 
     @app.get("/ui-skeleton")
@@ -1668,10 +1775,6 @@ def create_app(config_path: Path) -> Flask:
         cfg.setdefault("pre_poc", {})
         cfg["pre_poc"]["scenario_template"] = infer_scenario_from_modules(cfg["modules"])
 
-        if to_bool(request.form.get("suite_apply_profile"), False):
-            cfg.setdefault("test", {})
-            cfg["test"].update(tier_test_profile(selected_tier))
-
         save_cfg(config_path, cfg)
         suite_labels = [MODULE_SUITES.get(suite_id, {}).get("label", suite_id) for suite_id in selected_suites]
         enabled_count = sum(1 for key in MODULE_ORDER if cfg["modules"].get(key))
@@ -1822,6 +1925,147 @@ def create_app(config_path: Path) -> Flask:
 
         cmd = [sys.executable, str(script), str(config_path)]
         ok, msg = start_background(cmd, f"workload-{target}")
+        flash(msg, "success" if ok else "error")
+        return redirect(url_for("index") + "#workload-lab")
+
+    @app.post("/workload-blaster")
+    def workload_blaster_route():
+        cfg = load_cfg(config_path)
+        wl = cfg.setdefault("workload_lab", {})
+        bl = normalize_blaster_config(wl.get("blaster") or {}, cfg.get("tidb", {}) or {})
+
+        bl["mode"] = str(request.form.get("bl_mode", bl.get("mode", "rawsql"))).strip().lower()
+        if bl["mode"] not in {"rawsql", "tpcc", "ycsb"}:
+            bl["mode"] = "rawsql"
+        bl["tag"] = str(request.form.get("bl_tag", bl.get("tag", "poc"))).strip() or "poc"
+        bl.setdefault("cluster", {})
+        dsn_from_form = str(request.form.get("bl_tidb_dsn", bl["cluster"].get("tidb_dsn", ""))).strip()
+        bl["cluster"]["tidb_dsn"] = dsn_from_form
+
+        bl.setdefault("loadgen", {})
+        host_csv = str(request.form.get("bl_loadgen_hosts", "")).strip()
+        if host_csv:
+            bl["loadgen"]["hosts"] = [part.strip() for part in re.split(r"[\n,]+", host_csv) if part.strip()]
+        elif not bl["loadgen"].get("hosts"):
+            bl["loadgen"]["hosts"] = ["localhost"]
+        bl["loadgen"]["ssh_user"] = str(request.form.get("bl_ssh_user", bl["loadgen"].get("ssh_user", ""))).strip()
+        bl["loadgen"]["ssh_key_path"] = str(
+            request.form.get("bl_ssh_key_path", bl["loadgen"].get("ssh_key_path", ""))
+        ).strip()
+        bl["loadgen"]["max_domains_concurrent"] = _to_int_safe(
+            request.form.get("bl_max_domains_concurrent", bl["loadgen"].get("max_domains_concurrent", 8)),
+            8,
+            1,
+        )
+
+        bl.setdefault("rawsql", {})
+        bl["rawsql"]["sql_file"] = str(request.form.get("bl_rawsql_sql_file", bl["rawsql"].get("sql_file", ""))).strip()
+        bl["rawsql"]["duration_sec"] = _to_int_safe(
+            request.form.get("bl_rawsql_duration_sec", bl["rawsql"].get("duration_sec", 120)),
+            120,
+            10,
+        )
+        bl["rawsql"]["warmup_sec"] = _to_int_safe(
+            request.form.get("bl_rawsql_warmup_sec", bl["rawsql"].get("warmup_sec", 15)),
+            15,
+            0,
+        )
+        bl["rawsql"]["cooldown_sec"] = _to_int_safe(
+            request.form.get("bl_rawsql_cooldown_sec", bl["rawsql"].get("cooldown_sec", 10)),
+            10,
+            0,
+        )
+        bl["rawsql"]["threads_total"] = _to_int_safe(
+            request.form.get("bl_rawsql_threads_total", bl["rawsql"].get("threads_total", 64)),
+            64,
+            1,
+        )
+        bl["rawsql"]["connections_total"] = _to_int_safe(
+            request.form.get("bl_rawsql_connections_total", bl["rawsql"].get("connections_total", 128)),
+            128,
+            1,
+        )
+        bl["rawsql"]["qps_target"] = _to_int_safe(
+            request.form.get("bl_rawsql_qps_target", bl["rawsql"].get("qps_target", 0)),
+            0,
+            0,
+        )
+        bl["rawsql"]["statement_mix"] = str(
+            request.form.get("bl_rawsql_statement_mix", bl["rawsql"].get("statement_mix", ""))
+        ).strip()
+        bl["rawsql"]["txn_mode"] = str(
+            request.form.get("bl_rawsql_txn_mode", bl["rawsql"].get("txn_mode", "autocommit"))
+        ).strip().lower()
+        if bl["rawsql"]["txn_mode"] not in {"autocommit", "explicit_txn"}:
+            bl["rawsql"]["txn_mode"] = "autocommit"
+
+        bl.setdefault("tpcc", {})
+        bl["tpcc"]["warehouses"] = _to_int_safe(
+            request.form.get("bl_tpcc_warehouses", bl["tpcc"].get("warehouses", 100)),
+            100,
+            1,
+        )
+        bl["tpcc"]["threads_total"] = _to_int_safe(
+            request.form.get("bl_tpcc_threads_total", bl["tpcc"].get("threads_total", 128)),
+            128,
+            1,
+        )
+        bl["tpcc"]["duration_sec"] = _to_int_safe(
+            request.form.get("bl_tpcc_duration_sec", bl["tpcc"].get("duration_sec", 180)),
+            180,
+            10,
+        )
+
+        bl.setdefault("ycsb", {})
+        bl["ycsb"]["workload"] = str(request.form.get("bl_ycsb_workload", bl["ycsb"].get("workload", "A"))).strip().upper()
+        if bl["ycsb"]["workload"] not in {"A", "B", "C", "D", "F"}:
+            bl["ycsb"]["workload"] = "A"
+        bl["ycsb"]["recordcount"] = _to_int_safe(
+            request.form.get("bl_ycsb_recordcount", bl["ycsb"].get("recordcount", 1000000)),
+            1000000,
+            1,
+        )
+        bl["ycsb"]["operationcount"] = _to_int_safe(
+            request.form.get("bl_ycsb_operationcount", bl["ycsb"].get("operationcount", 5000000)),
+            5000000,
+            1,
+        )
+        bl["ycsb"]["threads_total"] = _to_int_safe(
+            request.form.get("bl_ycsb_threads_total", bl["ycsb"].get("threads_total", 128)),
+            128,
+            1,
+        )
+
+        wl["blaster"] = normalize_blaster_config(bl, cfg.get("tidb", {}) or {})
+        save_cfg(config_path, cfg)
+
+        action = str(request.form.get("bl_action", "save")).strip().lower()
+        if action == "save":
+            flash("TiDB Blaster settings saved.", "success")
+            return redirect(url_for("index") + "#workload-lab")
+
+        if action not in {"validate", "dry_run", "run", "report"}:
+            flash("Invalid TiDB Blaster action selected.", "error")
+            return redirect(url_for("index") + "#workload-lab")
+
+        cmd = [
+            sys.executable,
+            str(BLASTER_RUNNER_SCRIPT),
+            "--config",
+            str(config_path),
+            "--action",
+            action,
+            "--mode",
+            wl["blaster"]["mode"],
+            "--tag",
+            wl["blaster"]["tag"],
+        ]
+
+        run_dir = str(request.form.get("bl_run_dir", "")).strip()
+        if action == "report" and run_dir:
+            cmd.extend(["--run", run_dir])
+
+        ok, msg = start_background(cmd, f"tidb-blaster-{action}-{wl['blaster']['mode']}")
         flash(msg, "success" if ok else "error")
         return redirect(url_for("index") + "#workload-lab")
 

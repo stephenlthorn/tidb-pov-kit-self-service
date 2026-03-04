@@ -85,6 +85,23 @@ Dark web UI:
 3. Use Test Planner to view per-module test insights and choose all/some suites before execution
 4. Run security screener, run defaults, build report-only, and clear/reset data
 
+Workload Lab (TiUP Bench / tidb-blaster flow):
+1. Open the `Workload Lab` tab.
+2. Set mode: `rawsql`, `tpcc`, or `ycsb`.
+3. Configure DSN, load generator hosts, SSH details, and mode-specific settings.
+4. Use `Validate`, `Dry Run`, then `Run`.
+5. Run outputs are written to `runs/<timestamp>_<mode>_<tag>/` with:
+   - `resolved_config.yaml`
+   - `commands.json`
+   - `loadgens/*.log`
+   - `summary.json`
+   - `summary.md`
+   - `chart_data.json`
+
+Sample rawsql assets:
+- `load/sql/rawsql_mix.sql` (high-frequency point reads + simple updates)
+- `load/sql/rawsql_sample_schema.sql` (schema scaffold for quick prep)
+
 That's it. The kit will:
 1. Install Python dependencies
 2. Generate synthetic data (3 schema archetypes, configurable scale)

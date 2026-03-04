@@ -1,0 +1,27 @@
+CREATE TABLE IF NOT EXISTS users (
+  id BIGINT PRIMARY KEY AUTO_RANDOM,
+  email VARCHAR(255) NOT NULL,
+  name VARCHAR(255) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  UNIQUE KEY uk_users_email (email)
+);
+
+CREATE TABLE IF NOT EXISTS accounts (
+  id BIGINT PRIMARY KEY AUTO_RANDOM,
+  user_id BIGINT NOT NULL,
+  type VARCHAR(32) NOT NULL,
+  balance DECIMAL(18,2) NOT NULL DEFAULT 0,
+  status VARCHAR(32) NOT NULL DEFAULT 'active',
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_accounts_user (user_id)
+);
+
+CREATE TABLE IF NOT EXISTS transactions (
+  id BIGINT PRIMARY KEY AUTO_RANDOM,
+  account_id BIGINT NOT NULL,
+  amount DECIMAL(18,4) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  KEY idx_txn_account_created (account_id, created_at)
+);

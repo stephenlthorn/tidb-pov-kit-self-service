@@ -1755,7 +1755,26 @@
     <section class="tab-pane" data-tab-pane="dashboards">
       <div class="panel">
         <h2>Dashboards and Execution</h2>
-        <p class="help">Watch live CLI output, build report artifacts, and open detailed dashboards.</p>
+        <p class="help">CLI output is shown first, followed by report and metrics dashboards.</p>
+
+        <div class="cli-shell">
+          <div class="cli-head">
+            <div class="cli-title">CLI Session</div>
+            <div class="monitor-toolbar">
+              <button class="btn soft small" type="button" id="monitor_refresh_btn">Refresh Output</button>
+              <span class="tiny" id="monitor_refresh_state">Auto-refresh every 3s</span>
+            </div>
+          </div>
+          <div class="pair-grid cli-meta-grid">
+            <div class="pair"><div class="pk">Running</div><div class="pv" id="monitor_running">{{ run_status.running }}</div></div>
+            <div class="pair"><div class="pk">PID</div><div class="pv" id="monitor_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
+            <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
+            <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
+          </div>
+          <pre class="log cli-terminal" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
+        </div>
+
+        <div class="line"></div>
         <div class="actions-grid">
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
           {% if report_ready %}
@@ -1764,18 +1783,6 @@
             <div><button class="btn" type="button" disabled title="Run PoC first">Open Report PDF</button></div>
           {% endif %}
         </div>
-        <div class="line"></div>
-        <div class="pair-grid">
-          <div class="pair"><div class="pk">Running</div><div class="pv" id="monitor_running">{{ run_status.running }}</div></div>
-          <div class="pair"><div class="pk">PID</div><div class="pv" id="monitor_pid">{{ run_status.pid if run_status.pid else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
-          <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
-        </div>
-        <div class="monitor-toolbar">
-          <button class="btn soft small" type="button" id="monitor_refresh_btn">Refresh Output</button>
-          <span class="tiny" id="monitor_refresh_state">Auto-refresh every 3s</span>
-        </div>
-        <pre class="log" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
 
         <div class="line"></div>
         <h3 class="subhead">PoC Metrics Snapshot</h3>
@@ -1939,11 +1946,161 @@
     <section class="tab-pane" data-tab-pane="workload-lab">
       <div class="panel">
         <h2>Workload Lab</h2>
-        <p class="help">Tune workload generation, run targeted workload modules on-cluster, and inspect active query templates.</p>
+        <p class="help">Tune and run workloads from UI using TiUP Bench orchestration plus module-level tuning.</p>
         <div class="actions-grid">
           <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
         </div>
 
+        {% set bl = blaster_insights.config %}
+        <div class="config-section">
+          <h3>TiUP Bench Blaster</h3>
+          <div class="tiny">High-throughput controller for <code>rawsql</code>, <code>tpcc</code>, and <code>ycsb</code> with multi-loadgen fanout over SSH.</div>
+          <form method="post" action="/workload-blaster" id="blaster_form">
+            <div class="grid cols-4">
+              <div class="field">
+                <label>Mode</label>
+                <select name="bl_mode" id="bl_mode">
+                  <option value="rawsql" {% if bl.mode == 'rawsql' %}selected{% endif %}>rawsql</option>
+                  <option value="tpcc" {% if bl.mode == 'tpcc' %}selected{% endif %}>tpcc</option>
+                  <option value="ycsb" {% if bl.mode == 'ycsb' %}selected{% endif %}>ycsb</option>
+                </select>
+              </div>
+              <div class="field"><label>Run Tag</label><input type="text" name="bl_tag" value="{{ bl.tag }}" placeholder="hotreads_200kqps" /></div>
+              <div class="field"><label>TiDB DSN</label><input type="text" name="bl_tidb_dsn" value="{{ bl.cluster.tidb_dsn }}" placeholder="mysql://user:pass@host:4000/test" /></div>
+              <div class="field"><label>Loadgen Hosts (comma/newline)</label><textarea name="bl_loadgen_hosts" rows="3">{{ bl.loadgen.hosts | join(', ') }}</textarea></div>
+            </div>
+
+            <div class="grid cols-4">
+              <div class="field"><label>SSH User</label><input type="text" name="bl_ssh_user" value="{{ bl.loadgen.ssh_user }}" placeholder="ec2-user" /></div>
+              <div class="field"><label>SSH Key Path</label><input type="text" name="bl_ssh_key_path" value="{{ bl.loadgen.ssh_key_path }}" placeholder="~/.ssh/id_rsa" /></div>
+              <div class="field"><label>SSH Fanout</label><input type="number" min="1" name="bl_max_domains_concurrent" value="{{ bl.loadgen.max_domains_concurrent }}" /></div>
+              <div class="field">
+                <label>Report Run Directory (optional)</label>
+                <select name="bl_run_dir">
+                  <option value="">Latest Run</option>
+                  {% for row in blaster_insights.recent_runs %}
+                    <option value="{{ row.run_dir }}">{{ row.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+
+            <details class="advanced-details bl-mode-wrap {% if bl.mode == 'rawsql' %}show{% endif %}" data-bl-mode-pane="rawsql" {% if bl.mode == 'rawsql' %}open{% endif %}>
+              <summary>RawSQL Settings</summary>
+              <div class="advanced-content">
+                <div class="grid cols-4">
+                  <div class="field"><label>SQL File</label><input type="text" name="bl_rawsql_sql_file" value="{{ bl.rawsql.sql_file }}" /></div>
+                  <div class="field"><label>Duration (sec)</label><input type="number" min="10" name="bl_rawsql_duration_sec" value="{{ bl.rawsql.duration_sec }}" /></div>
+                  <div class="field"><label>Warmup (sec)</label><input type="number" min="0" name="bl_rawsql_warmup_sec" value="{{ bl.rawsql.warmup_sec }}" /></div>
+                  <div class="field"><label>Cooldown (sec)</label><input type="number" min="0" name="bl_rawsql_cooldown_sec" value="{{ bl.rawsql.cooldown_sec }}" /></div>
+                </div>
+                <div class="grid cols-4">
+                  <div class="field"><label>Threads Total</label><input type="number" min="1" name="bl_rawsql_threads_total" value="{{ bl.rawsql.threads_total }}" /></div>
+                  <div class="field"><label>Connections Total</label><input type="number" min="1" name="bl_rawsql_connections_total" value="{{ bl.rawsql.connections_total }}" /></div>
+                  <div class="field"><label>QPS Target (optional)</label><input type="number" min="0" name="bl_rawsql_qps_target" value="{{ bl.rawsql.qps_target }}" /></div>
+                  <div class="field">
+                    <label>Txn Mode</label>
+                    <select name="bl_rawsql_txn_mode">
+                      <option value="autocommit" {% if bl.rawsql.txn_mode == 'autocommit' %}selected{% endif %}>autocommit</option>
+                      <option value="explicit_txn" {% if bl.rawsql.txn_mode == 'explicit_txn' %}selected{% endif %}>explicit_txn</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="field"><label>Statement Mix Notes (optional)</label><input type="text" name="bl_rawsql_statement_mix" value="{{ bl.rawsql.statement_mix }}" placeholder="read=80,write=20" /></div>
+              </div>
+            </details>
+
+            <details class="advanced-details bl-mode-wrap {% if bl.mode == 'tpcc' %}show{% endif %}" data-bl-mode-pane="tpcc" {% if bl.mode == 'tpcc' %}open{% endif %}>
+              <summary>TPCC Settings</summary>
+              <div class="advanced-content">
+                <div class="grid cols-3">
+                  <div class="field"><label>Warehouses</label><input type="number" min="1" name="bl_tpcc_warehouses" value="{{ bl.tpcc.warehouses }}" /></div>
+                  <div class="field"><label>Threads Total</label><input type="number" min="1" name="bl_tpcc_threads_total" value="{{ bl.tpcc.threads_total }}" /></div>
+                  <div class="field"><label>Duration (sec)</label><input type="number" min="10" name="bl_tpcc_duration_sec" value="{{ bl.tpcc.duration_sec }}" /></div>
+                </div>
+              </div>
+            </details>
+
+            <details class="advanced-details bl-mode-wrap {% if bl.mode == 'ycsb' %}show{% endif %}" data-bl-mode-pane="ycsb" {% if bl.mode == 'ycsb' %}open{% endif %}>
+              <summary>YCSB Settings</summary>
+              <div class="advanced-content">
+                <div class="grid cols-4">
+                  <div class="field">
+                    <label>Workload</label>
+                    <select name="bl_ycsb_workload">
+                      <option value="A" {% if bl.ycsb.workload == 'A' %}selected{% endif %}>A (50/50)</option>
+                      <option value="B" {% if bl.ycsb.workload == 'B' %}selected{% endif %}>B (read-heavy)</option>
+                      <option value="C" {% if bl.ycsb.workload == 'C' %}selected{% endif %}>C (read-only)</option>
+                      <option value="D" {% if bl.ycsb.workload == 'D' %}selected{% endif %}>D (read-latest)</option>
+                      <option value="F" {% if bl.ycsb.workload == 'F' %}selected{% endif %}>F (read-modify-write)</option>
+                    </select>
+                  </div>
+                  <div class="field"><label>Record Count</label><input type="number" min="1" name="bl_ycsb_recordcount" value="{{ bl.ycsb.recordcount }}" /></div>
+                  <div class="field"><label>Operation Count</label><input type="number" min="1" name="bl_ycsb_operationcount" value="{{ bl.ycsb.operationcount }}" /></div>
+                  <div class="field"><label>Threads Total</label><input type="number" min="1" name="bl_ycsb_threads_total" value="{{ bl.ycsb.threads_total }}" /></div>
+                </div>
+              </div>
+            </details>
+
+            <div class="actions-grid blaster-actions">
+              <button class="btn soft" type="submit" name="bl_action" value="save">Save</button>
+              <button class="btn" type="submit" name="bl_action" value="validate">Validate</button>
+              <button class="btn" type="submit" name="bl_action" value="dry_run">Dry Run</button>
+              <button class="btn primary" type="submit" name="bl_action" value="run">Run</button>
+              <button class="btn ok" type="submit" name="bl_action" value="report">Build Report</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="workload-grid">
+          <div class="workload-card">
+            <h3 class="subhead">Latest Blaster Summary</h3>
+            {% if blaster_insights.latest_summary %}
+              <div class="workload-kv">
+                <div class="item"><div class="k">Status</div><div class="v">{{ blaster_insights.latest_summary.status }}</div></div>
+                <div class="item"><div class="k">Mode</div><div class="v">{{ blaster_insights.latest_summary.mode }}</div></div>
+                <div class="item"><div class="k">QPS</div><div class="v">{{ blaster_insights.latest_summary.achieved_qps }}</div></div>
+                <div class="item"><div class="k">TPS</div><div class="v">{{ blaster_insights.latest_summary.achieved_tps }}</div></div>
+                <div class="item"><div class="k">P99 (ms)</div><div class="v">{{ blaster_insights.latest_summary.p99_ms }}</div></div>
+                <div class="item"><div class="k">Error Rate</div><div class="v">{{ blaster_insights.latest_summary.error_rate }}</div></div>
+              </div>
+              <div class="line"></div>
+              <div class="tiny">Run directory: <code>{{ blaster_insights.latest_run_dir }}</code></div>
+            {% else %}
+              <div class="empty-state">No TiDB Blaster summary yet. Save settings and run <code>validate</code>, <code>dry_run</code>, or <code>run</code>.</div>
+            {% endif %}
+          </div>
+
+          <div class="workload-card">
+            <h3 class="subhead">Recent Blaster Runs</h3>
+            {% if blaster_insights.recent_runs %}
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Run</th><th>Mode</th><th>Status</th><th>QPS</th><th>TPS</th><th>P99</th></tr>
+                  </thead>
+                  <tbody>
+                    {% for row in blaster_insights.recent_runs[:8] %}
+                      <tr>
+                        <td class="sql-cell" title="{{ row.run_dir }}">{{ row.name }}</td>
+                        <td>{{ row.mode }}</td>
+                        <td>{{ row.status }}</td>
+                        <td>{{ row.qps }}</td>
+                        <td>{{ row.tps }}</td>
+                        <td>{{ row.p99_ms }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% else %}
+              <div class="empty-state">No blaster runs found under <code>runs/</code>.</div>
+            {% endif %}
+          </div>
+        </div>
+
+        <div class="line"></div>
+        <h3 class="subhead">Legacy Module Workload Tuning</h3>
         <form method="post" action="/run-workload">
           <div class="grid cols-4">
             <div class="field">
@@ -2013,46 +2170,6 @@
             </div>
           </div>
         </form>
-
-        <div class="workload-grid">
-          <div class="workload-card">
-            <h3 class="subhead">Current Mix Summary</h3>
-            <div class="workload-kv">
-              <div class="item"><div class="k">Mix</div><div class="v">{{ workload_insights.mix }}</div></div>
-              <div class="item"><div class="k">Read Mult</div><div class="v">{{ workload_insights.read_multiplier }}</div></div>
-              <div class="item"><div class="k">Write Mult</div><div class="v">{{ workload_insights.write_multiplier }}</div></div>
-              <div class="item"><div class="k">Customer SQL Count</div><div class="v">{{ workload_insights.customer_queries|length }}</div></div>
-            </div>
-            <div class="line"></div>
-            <div class="tiny">This profile drives OLTP modules (M1, M2, M3, M4, M5) and can be run directly against your cluster from this page.</div>
-          </div>
-
-          <div class="workload-card">
-            <h3 class="subhead">Recent Query Activity (TiDB)</h3>
-            {% if workload_insights.activity %}
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr><th>Query Type</th><th>Count</th><th>Success %</th><th>Avg ms</th><th>Max ms</th></tr>
-                  </thead>
-                  <tbody>
-                    {% for row in workload_insights.activity %}
-                      <tr>
-                        <td>{{ row.query_type }}</td>
-                        <td>{{ row.count_total }}</td>
-                        <td>{{ row.success_pct }}</td>
-                        <td>{{ row.avg_ms }}</td>
-                        <td>{{ row.max_ms }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% else %}
-              <div class="empty-state">No query activity found yet in <code>results/results.db</code>.</div>
-            {% endif %}
-          </div>
-        </div>
 
         <div class="line"></div>
         <h3 class="subhead">Workload Query Templates</h3>
@@ -2272,9 +2389,6 @@
             </div>
             <div class="field"></div>
           </div>
-          <div class="check-wrap">
-            <label class="check"><input type="checkbox" name="apply_profile" checked /> Apply recommended test profile</label>
-          </div>
           <div class="actions-grid"><button class="btn" type="submit">Apply Tier Profile</button></div>
         </form>
 
@@ -2369,9 +2483,6 @@
             <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" {% if cfg.pre_poc.scenario_template == 'htap_analytics' %}checked{% endif %} /> HTAP Analytics</label>
             <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" {% if cfg.pre_poc.scenario_template == 'ai_vector' %}checked{% endif %} /> AI / Vector</label>
             <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
-          </div>
-          <div class="check-wrap">
-            <label class="check"><input type="checkbox" name="suite_apply_profile" /> Also apply current tier workload profile</label>
           </div>
           <button class="btn" type="submit">Apply Module Suite Selection</button>
         </form>
@@ -3114,6 +3225,29 @@
   }
   if (comparisonHostEl) {
     comparisonHostEl.addEventListener('input', syncComparisonTargetUi);
+  }
+
+  const blModeEl = document.getElementById('bl_mode');
+  function syncBlasterModePanels() {
+    if (!blModeEl) {
+      return;
+    }
+    const mode = (blModeEl.value || 'rawsql').toLowerCase();
+    document.querySelectorAll('[data-bl-mode-pane]').forEach((pane) => {
+      const paneMode = (pane.dataset.blModePane || '').toLowerCase();
+      const show = paneMode === mode;
+      pane.classList.toggle('show', show);
+      pane.open = show;
+      pane.querySelectorAll('input, select, textarea').forEach((control) => {
+        if (control.name) {
+          control.disabled = !show;
+        }
+      });
+    });
+  }
+  if (blModeEl) {
+    syncBlasterModePanels();
+    blModeEl.addEventListener('change', syncBlasterModePanels);
   }
 
   const monitorRunningEl = document.getElementById('monitor_running');
