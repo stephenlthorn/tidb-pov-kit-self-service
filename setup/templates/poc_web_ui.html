@@ -1386,20 +1386,14 @@
       <div class="brand-row">
         <img class="brand-logo" src="{{ url_for('static', filename='img/tidb-logo.svg') }}" alt="TiDB" />
         <div>
-          <div class="title">TiDB PoV Copilot</div>
-          <div class="sub">Self-Service GTM Workflow Console</div>
+          <div class="title">TiDB PoV</div>
         </div>
-      </div>
-      <div class="status-chips">
-        <span class="chip {{ tier_chip_class }}">Tier: {{ selected_tier_label }}</span>
-        <span class="chip {{ scenario_chip_class }}">Scenario: {{ selected_scenario_label }}</span>
-        <span class="chip {{ report_chip_class }}">Report: {% if report_ready %}Ready{% else %}Not Ready{% endif %}</span>
       </div>
     </div>
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab-btn="overview"><span class="ico">[O]</span>Overview</button>
-      <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Quickstart Wizard</button>
+      <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Deployment Wizard</button>
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
       <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
@@ -1414,27 +1408,8 @@
         <p>Structured workflow for fast setup, controlled execution, and report-driven outcomes.</p>
       </div>
       <div class="header-actions">
-        <form method="post" action="/run-defaults">
-          <button class="btn primary" type="submit">Run Scenario</button>
-        </form>
         <button class="btn soft" type="button" id="command_palette_btn">Quick Actions <span class="kbd">⌘K</span></button>
         <button class="btn soft" type="button" id="theme_toggle_btn">Light</button>
-      </div>
-    </div>
-
-    <div class="logo-ribbon">
-      <div class="logo-card">
-        <div class="lk">Primary Target</div>
-        <img class="logo-img" src="{{ url_for('static', filename='img/tidb-logo.svg') }}" alt="TiDB" />
-      </div>
-      <div class="logo-vs">vs</div>
-      <div class="logo-card">
-        <div class="lk">Comparison Target</div>
-        <div class="logo-stack">
-          <img class="logo-img" src="{{ url_for('static', filename='img/aws-aurora.svg') }}" alt="Amazon Aurora" />
-          <img class="logo-img" src="{{ url_for('static', filename='img/mysql.svg') }}" alt="MySQL" />
-        </div>
-        <div class="tiny">{{ comparison_target_label }}</div>
       </div>
     </div>
 
@@ -1450,43 +1425,64 @@
 
     <section class="tab-pane active" data-tab-pane="overview">
       <div class="panel">
-        <h2>Environment Snapshot</h2>
-        <p class="help">Choose one setup path, then execute from Dashboards.</p>
+        {% set log_tail = run_status.last_lines|default('', true) %}
+        {% set log_upper = log_tail|upper %}
+        {% if run_status.running %}
+          {% set test_status = 'Currently Running' %}
+          {% set test_status_class = 'warning' %}
+        {% elif 'FAIL' in log_upper or 'ERROR' in log_upper %}
+          {% set test_status = 'Failed' %}
+          {% set test_status_class = 'danger' %}
+        {% elif report_ready %}
+          {% set test_status = 'Completed' %}
+          {% set test_status_class = 'success' %}
+        {% else %}
+          {% set test_status = 'Not Started' %}
+          {% set test_status_class = 'muted' %}
+        {% endif %}
+
+        <h2>Start a PoV</h2>
+        <p class="help">Choose one path to configure your deployment.</p>
         <div class="quickstart-cta">
-          <div class="headline">Two Setup Paths</div>
-          <div class="text">Quickstart for fastest deployment, or Manual Config for complete control. Both paths end in the same execution and reporting flow.</div>
+          <div class="headline">Configuration Paths</div>
+          <div class="text">Use the Deployment Wizard for guided setup, or Manual Configuration for full control.</div>
         </div>
         <div class="path-grid">
           <div class="path-card">
-            <div class="title">Quick Start</div>
-            <div class="desc">Guided multi-step wizard with recommended defaults and optional one-click run.</div>
-            <button class="btn primary" type="button" data-tab-jump="quickstart">Open Quickstart Wizard</button>
+            <div class="title">Deployment Wizard</div>
+            <div class="desc">Guided step-by-step setup with recommended defaults and connection checks.</div>
+            <button class="btn primary" type="button" data-tab-jump="quickstart">Open Deployment Wizard</button>
           </div>
           <div class="path-card">
             <div class="title">Manual Configuration</div>
             <div class="desc">Full control over tiering, modules, workload tuning, and target connection details.</div>
             <button class="btn" type="button" data-tab-jump="manual-config">Open Manual Config</button>
           </div>
-          <div class="path-card">
-            <div class="title">Run and Observe</div>
-            <div class="desc">Launch runs, view live CLI output, inspect workload behavior, and build report artifacts.</div>
-            <button class="btn" type="button" data-tab-jump="dashboards">Open Dashboards</button>
+        </div>
+
+        <div class="line"></div>
+        <h3 class="subhead">Status</h3>
+        <div class="overview-status">
+          <div class="status-row">
+            <span class="label">Report</span>
+            <span class="status-pill {% if report_ready %}success{% else %}danger{% endif %}">
+              {% if report_ready %}Ready{% else %}Not Ready{% endif %}
+            </span>
           </div>
-          <div class="path-card">
-            <div class="title">Security and Reset</div>
-            <div class="desc">Screen controls with go/no-go logic and safely clear PoC artifacts when needed.</div>
-            <div class="actions-grid">
-              <div><button class="btn soft" type="button" data-tab-jump="security">Open Security</button></div>
-              <div><button class="btn soft" type="button" data-tab-jump="data-reset">Open Data Reset</button></div>
-            </div>
+          <div class="status-row">
+            <span class="label">Test Status</span>
+            <span class="status-pill {{ test_status_class }}">{{ test_status }}</span>
+          </div>
+          <div class="status-row">
+            <span class="label">Run PID</span>
+            <span class="status-pill muted">{{ run_status.pid if run_status.pid else 'n/a' }}</span>
+          </div>
+          <div class="status-row">
+            <span class="label">Last Update</span>
+            <span class="status-pill muted">{{ run_status.last_log if run_status.last_log else 'n/a' }}</span>
           </div>
         </div>
-        <div class="stats-grid">
-          <div class="stat"><div class="k">Config Path</div><div class="v">{{ config_path }}</div></div>
-          <div class="stat"><div class="k">Tier</div><div class="v">{{ selected_tier_label }}</div></div>
-          <div class="stat"><div class="k">Scenario</div><div class="v">{{ selected_scenario_label }}</div></div>
-          <div class="stat"><div class="k">Report PDF</div><div class="v">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
-        </div>
+
         <div class="line"></div>
         <div class="pair-grid">
           <div class="pair"><div class="pk">Run In Progress</div><div class="pv">{{ run_status.running }}{% if run_status.pid %} (pid {{ run_status.pid }}){% endif %}</div></div>
