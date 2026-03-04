@@ -1670,6 +1670,68 @@
                 <div class="field"><label>SQL Server ODBC Driver</label><input type="text" name="wiz_comparison_sqlserver_driver" value="{{ cfg.comparison_db.sqlserver_driver }}" /></div>
                 <div class="field"></div>
               </div>
+              <details class="advanced-details">
+                <summary>Advanced Comparison Settings</summary>
+                <div class="advanced-content">
+                  <div class="grid cols-4">
+                    <div class="field"><label>Connect Timeout (sec)</label><input type="number" min="1" name="wiz_comparison_connect_timeout_sec" value="{{ cfg.comparison_db.connect_timeout_sec }}" /></div>
+                    <div class="field"><label>Statement Timeout (sec)</label><input type="number" min="1" name="wiz_comparison_statement_timeout_sec" value="{{ cfg.comparison_db.statement_timeout_sec }}" /></div>
+                    <div class="field"><label>Retry Count</label><input type="number" min="0" name="wiz_comparison_retry_count" value="{{ cfg.comparison_db.retry_count }}" /></div>
+                    <div class="field"><label>Retry Backoff (ms)</label><input type="number" min="0" name="wiz_comparison_retry_backoff_ms" value="{{ cfg.comparison_db.retry_backoff_ms }}" /></div>
+                  </div>
+                  <div class="grid cols-4">
+                    <div class="field"><label>Max Pool Size</label><input type="number" min="1" name="wiz_comparison_max_pool_size" value="{{ cfg.comparison_db.max_pool_size }}" /></div>
+                    <div class="field"><label>Parity Sample Size</label><input type="number" min="1" name="wiz_comparison_parity_sample_size" value="{{ cfg.comparison_db.parity_sample_size }}" /></div>
+                    <div class="field"><label>Read-only Mode</label><label class="check"><input type="checkbox" name="wiz_comparison_read_only_mode" {% if cfg.comparison_db.read_only_mode %}checked{% endif %} /> enabled</label></div>
+                    <div class="field"><label>Capture EXPLAIN Plans</label><label class="check"><input type="checkbox" name="wiz_comparison_capture_explain_plans" {% if cfg.comparison_db.capture_explain_plans %}checked{% endif %} /> enabled</label></div>
+                  </div>
+                  <div class="grid cols-2">
+                    <div class="field"><label>Session Init SQL</label><input type="text" name="wiz_comparison_session_init_sql" value="{{ cfg.comparison_db.session_init_sql }}" placeholder="SET time_zone = '+00:00';" /></div>
+                    <div class="field"><label>Include Tables (comma-separated)</label><input type="text" name="wiz_comparison_include_tables" value="{{ cfg.comparison_db.include_tables }}" placeholder="orders, customers" /></div>
+                  </div>
+                  <div class="grid cols-2">
+                    <div class="field"><label>Exclude Tables (comma-separated)</label><input type="text" name="wiz_comparison_exclude_tables" value="{{ cfg.comparison_db.exclude_tables }}" placeholder="audit_log, temp_*" /></div>
+                    <div class="field"></div>
+                  </div>
+                  <div class="grid cols-3">
+                    <div class="field"><label>TLS CA Path</label><input type="text" name="wiz_comparison_tls_ca_path" value="{{ cfg.comparison_db.tls_ca_path }}" placeholder="/path/to/ca.pem" /></div>
+                    <div class="field"><label>TLS Client Cert Path</label><input type="text" name="wiz_comparison_tls_cert_path" value="{{ cfg.comparison_db.tls_cert_path }}" placeholder="/path/to/client-cert.pem" /></div>
+                    <div class="field"><label>TLS Client Key Path</label><input type="text" name="wiz_comparison_tls_key_path" value="{{ cfg.comparison_db.tls_key_path }}" placeholder="/path/to/client-key.pem" /></div>
+                  </div>
+
+                  <div class="line"></div>
+                  <div class="tiny">Engine-specific settings</div>
+                  <div class="grid cols-3" data-wiz-target-family="mysql">
+                    <div class="field"><label>MySQL SQL Mode</label><input type="text" name="wiz_comparison_mysql_sql_mode" value="{{ cfg.comparison_db.mysql_sql_mode }}" placeholder="STRICT_TRANS_TABLES,NO_ZERO_DATE" /></div>
+                    <div class="field"><label>MySQL Time Zone</label><input type="text" name="wiz_comparison_mysql_time_zone" value="{{ cfg.comparison_db.mysql_time_zone }}" /></div>
+                    <div class="field">
+                      <label>MySQL TX Isolation</label>
+                      <select name="wiz_comparison_mysql_tx_isolation">
+                        <option value="READ COMMITTED" {% if cfg.comparison_db.mysql_tx_isolation == 'READ COMMITTED' %}selected{% endif %}>READ COMMITTED</option>
+                        <option value="REPEATABLE READ" {% if cfg.comparison_db.mysql_tx_isolation == 'REPEATABLE READ' %}selected{% endif %}>REPEATABLE READ</option>
+                        <option value="SERIALIZABLE" {% if cfg.comparison_db.mysql_tx_isolation == 'SERIALIZABLE' %}selected{% endif %}>SERIALIZABLE</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="grid cols-3" data-wiz-target-family="postgres">
+                    <div class="field"><label>PG Application Name</label><input type="text" name="wiz_comparison_pg_application_name" value="{{ cfg.comparison_db.pg_application_name }}" /></div>
+                    <div class="field"><label>PG Search Path</label><input type="text" name="wiz_comparison_pg_search_path" value="{{ cfg.comparison_db.pg_search_path }}" /></div>
+                    <div class="field"><label>PG Lock Timeout (ms)</label><input type="number" min="0" name="wiz_comparison_pg_lock_timeout_ms" value="{{ cfg.comparison_db.pg_lock_timeout_ms }}" /></div>
+                  </div>
+                  <div class="grid cols-4" data-wiz-target-family="mssql">
+                    <div class="field"><label>SQL Server Command Timeout (sec)</label><input type="number" min="1" name="wiz_comparison_sqlserver_command_timeout_sec" value="{{ cfg.comparison_db.sqlserver_command_timeout_sec }}" /></div>
+                    <div class="field">
+                      <label>SQL Server Application Intent</label>
+                      <select name="wiz_comparison_sqlserver_application_intent">
+                        <option value="ReadWrite" {% if cfg.comparison_db.sqlserver_application_intent == 'ReadWrite' %}selected{% endif %}>ReadWrite</option>
+                        <option value="ReadOnly" {% if cfg.comparison_db.sqlserver_application_intent == 'ReadOnly' %}selected{% endif %}>ReadOnly</option>
+                      </select>
+                    </div>
+                    <div class="field"><label>MARS</label><label class="check"><input type="checkbox" name="wiz_comparison_sqlserver_mars" {% if cfg.comparison_db.sqlserver_mars %}checked{% endif %} /> enabled</label></div>
+                    <div class="field"><label>SQL Server Packet Size</label><input type="number" min="512" step="512" name="wiz_comparison_sqlserver_packet_size" value="{{ cfg.comparison_db.sqlserver_packet_size }}" /></div>
+                  </div>
+                </div>
+              </details>
               <div class="tiny">Technology-specific options: PostgreSQL uses SSL Mode, SQL Server uses Driver/Encrypt/Trust Certificate, and MySQL-family targets use standard SSL settings.</div>
               <div class="tiny">Automated side-by-side workload execution currently supports MySQL family targets. Postgres and SQL Server targets are captured for planning/config parity.</div>
             </div>
@@ -2471,6 +2533,68 @@
                 </select>
               </div>
             </div>
+            <details class="advanced-details">
+              <summary>Advanced Comparison Settings</summary>
+              <div class="advanced-content">
+                <div class="grid cols-4">
+                  <div class="field"><label>Connect Timeout (sec)</label><input type="number" min="1" name="comparison_connect_timeout_sec" value="{{ cfg.comparison_db.connect_timeout_sec }}" /></div>
+                  <div class="field"><label>Statement Timeout (sec)</label><input type="number" min="1" name="comparison_statement_timeout_sec" value="{{ cfg.comparison_db.statement_timeout_sec }}" /></div>
+                  <div class="field"><label>Retry Count</label><input type="number" min="0" name="comparison_retry_count" value="{{ cfg.comparison_db.retry_count }}" /></div>
+                  <div class="field"><label>Retry Backoff (ms)</label><input type="number" min="0" name="comparison_retry_backoff_ms" value="{{ cfg.comparison_db.retry_backoff_ms }}" /></div>
+                </div>
+                <div class="grid cols-4">
+                  <div class="field"><label>Max Pool Size</label><input type="number" min="1" name="comparison_max_pool_size" value="{{ cfg.comparison_db.max_pool_size }}" /></div>
+                  <div class="field"><label>Parity Sample Size</label><input type="number" min="1" name="comparison_parity_sample_size" value="{{ cfg.comparison_db.parity_sample_size }}" /></div>
+                  <div class="field"><label>Read-only Mode</label><label class="check"><input type="checkbox" name="comparison_read_only_mode" {% if cfg.comparison_db.read_only_mode %}checked{% endif %} /> enabled</label></div>
+                  <div class="field"><label>Capture EXPLAIN Plans</label><label class="check"><input type="checkbox" name="comparison_capture_explain_plans" {% if cfg.comparison_db.capture_explain_plans %}checked{% endif %} /> enabled</label></div>
+                </div>
+                <div class="grid cols-2">
+                  <div class="field"><label>Session Init SQL</label><input type="text" name="comparison_session_init_sql" value="{{ cfg.comparison_db.session_init_sql }}" placeholder="SET time_zone = '+00:00';" /></div>
+                  <div class="field"><label>Include Tables (comma-separated)</label><input type="text" name="comparison_include_tables" value="{{ cfg.comparison_db.include_tables }}" placeholder="orders, customers" /></div>
+                </div>
+                <div class="grid cols-2">
+                  <div class="field"><label>Exclude Tables (comma-separated)</label><input type="text" name="comparison_exclude_tables" value="{{ cfg.comparison_db.exclude_tables }}" placeholder="audit_log, temp_*" /></div>
+                  <div class="field"></div>
+                </div>
+                <div class="grid cols-3">
+                  <div class="field"><label>TLS CA Path</label><input type="text" name="comparison_tls_ca_path" value="{{ cfg.comparison_db.tls_ca_path }}" placeholder="/path/to/ca.pem" /></div>
+                  <div class="field"><label>TLS Client Cert Path</label><input type="text" name="comparison_tls_cert_path" value="{{ cfg.comparison_db.tls_cert_path }}" placeholder="/path/to/client-cert.pem" /></div>
+                  <div class="field"><label>TLS Client Key Path</label><input type="text" name="comparison_tls_key_path" value="{{ cfg.comparison_db.tls_key_path }}" placeholder="/path/to/client-key.pem" /></div>
+                </div>
+
+                <div class="line"></div>
+                <div class="tiny">Engine-specific settings</div>
+                <div class="grid cols-3" data-target-family="mysql">
+                  <div class="field"><label>MySQL SQL Mode</label><input type="text" name="comparison_mysql_sql_mode" value="{{ cfg.comparison_db.mysql_sql_mode }}" placeholder="STRICT_TRANS_TABLES,NO_ZERO_DATE" /></div>
+                  <div class="field"><label>MySQL Time Zone</label><input type="text" name="comparison_mysql_time_zone" value="{{ cfg.comparison_db.mysql_time_zone }}" /></div>
+                  <div class="field">
+                    <label>MySQL TX Isolation</label>
+                    <select name="comparison_mysql_tx_isolation">
+                      <option value="READ COMMITTED" {% if cfg.comparison_db.mysql_tx_isolation == 'READ COMMITTED' %}selected{% endif %}>READ COMMITTED</option>
+                      <option value="REPEATABLE READ" {% if cfg.comparison_db.mysql_tx_isolation == 'REPEATABLE READ' %}selected{% endif %}>REPEATABLE READ</option>
+                      <option value="SERIALIZABLE" {% if cfg.comparison_db.mysql_tx_isolation == 'SERIALIZABLE' %}selected{% endif %}>SERIALIZABLE</option>
+                    </select>
+                  </div>
+                </div>
+                <div class="grid cols-3" data-target-family="postgres">
+                  <div class="field"><label>PG Application Name</label><input type="text" name="comparison_pg_application_name" value="{{ cfg.comparison_db.pg_application_name }}" /></div>
+                  <div class="field"><label>PG Search Path</label><input type="text" name="comparison_pg_search_path" value="{{ cfg.comparison_db.pg_search_path }}" /></div>
+                  <div class="field"><label>PG Lock Timeout (ms)</label><input type="number" min="0" name="comparison_pg_lock_timeout_ms" value="{{ cfg.comparison_db.pg_lock_timeout_ms }}" /></div>
+                </div>
+                <div class="grid cols-4" data-target-family="mssql">
+                  <div class="field"><label>SQL Server Command Timeout (sec)</label><input type="number" min="1" name="comparison_sqlserver_command_timeout_sec" value="{{ cfg.comparison_db.sqlserver_command_timeout_sec }}" /></div>
+                  <div class="field">
+                    <label>SQL Server Application Intent</label>
+                    <select name="comparison_sqlserver_application_intent">
+                      <option value="ReadWrite" {% if cfg.comparison_db.sqlserver_application_intent == 'ReadWrite' %}selected{% endif %}>ReadWrite</option>
+                      <option value="ReadOnly" {% if cfg.comparison_db.sqlserver_application_intent == 'ReadOnly' %}selected{% endif %}>ReadOnly</option>
+                    </select>
+                  </div>
+                  <div class="field"><label>MARS</label><label class="check"><input type="checkbox" name="comparison_sqlserver_mars" {% if cfg.comparison_db.sqlserver_mars %}checked{% endif %} /> enabled</label></div>
+                  <div class="field"><label>SQL Server Packet Size</label><input type="number" min="512" step="512" name="comparison_sqlserver_packet_size" value="{{ cfg.comparison_db.sqlserver_packet_size }}" /></div>
+                </div>
+              </div>
+            </details>
             <div class="tiny">Targets available: Starter support now for MySQL family (Aurora/MySQL/RDS MySQL/SingleStore). Postgres and SQL Server targets are captured for planning and future runner support.</div>
           </div>
 

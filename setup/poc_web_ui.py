@@ -89,6 +89,30 @@ DEFAULT_CFG = {
         "sqlserver_driver": "ODBC Driver 18 for SQL Server",
         "sqlserver_encrypt": True,
         "sqlserver_trust_server_certificate": False,
+        "connect_timeout_sec": 30,
+        "statement_timeout_sec": 60,
+        "retry_count": 1,
+        "retry_backoff_ms": 500,
+        "max_pool_size": 8,
+        "session_init_sql": "",
+        "read_only_mode": True,
+        "parity_sample_size": 250,
+        "capture_explain_plans": True,
+        "include_tables": "",
+        "exclude_tables": "",
+        "tls_ca_path": "",
+        "tls_cert_path": "",
+        "tls_key_path": "",
+        "mysql_sql_mode": "",
+        "mysql_time_zone": "UTC",
+        "mysql_tx_isolation": "READ COMMITTED",
+        "pg_application_name": "tidb_pov_comparison",
+        "pg_search_path": "public",
+        "pg_lock_timeout_ms": 5000,
+        "sqlserver_command_timeout_sec": 60,
+        "sqlserver_application_intent": "ReadWrite",
+        "sqlserver_mars": False,
+        "sqlserver_packet_size": 4096,
     },
     "tier": {
         "selected": "serverless",
@@ -548,6 +572,70 @@ def parse_import_methods_from_form(form, prefix: str) -> List[str]:
         if form.get(f"{prefix}{method}") == "on":
             selected.append(method)
     return selected or list(IMPORT_METHOD_LABELS.keys())
+
+
+def apply_comparison_advanced_from_form(comp: Dict, form, prefix: str = "") -> None:
+    def g(name: str, default: str = "") -> str:
+        return form.get(f"{prefix}{name}", default)
+
+    comp["connect_timeout_sec"] = max(1, to_int(g("comparison_connect_timeout_sec"), int(comp.get("connect_timeout_sec", 30))))
+    comp["statement_timeout_sec"] = max(
+        1, to_int(g("comparison_statement_timeout_sec"), int(comp.get("statement_timeout_sec", 60)))
+    )
+    comp["retry_count"] = max(0, to_int(g("comparison_retry_count"), int(comp.get("retry_count", 1))))
+    comp["retry_backoff_ms"] = max(
+        0, to_int(g("comparison_retry_backoff_ms"), int(comp.get("retry_backoff_ms", 500)))
+    )
+    comp["max_pool_size"] = max(1, to_int(g("comparison_max_pool_size"), int(comp.get("max_pool_size", 8))))
+    comp["session_init_sql"] = g("comparison_session_init_sql", str(comp.get("session_init_sql", ""))).strip()
+    comp["read_only_mode"] = to_bool(
+        form.get(f"{prefix}comparison_read_only_mode"), bool(comp.get("read_only_mode", True))
+    )
+    comp["parity_sample_size"] = max(
+        1, to_int(g("comparison_parity_sample_size"), int(comp.get("parity_sample_size", 250)))
+    )
+    comp["capture_explain_plans"] = to_bool(
+        form.get(f"{prefix}comparison_capture_explain_plans"), bool(comp.get("capture_explain_plans", True))
+    )
+    comp["include_tables"] = g("comparison_include_tables", str(comp.get("include_tables", ""))).strip()
+    comp["exclude_tables"] = g("comparison_exclude_tables", str(comp.get("exclude_tables", ""))).strip()
+    comp["tls_ca_path"] = g("comparison_tls_ca_path", str(comp.get("tls_ca_path", ""))).strip()
+    comp["tls_cert_path"] = g("comparison_tls_cert_path", str(comp.get("tls_cert_path", ""))).strip()
+    comp["tls_key_path"] = g("comparison_tls_key_path", str(comp.get("tls_key_path", ""))).strip()
+
+    comp["mysql_sql_mode"] = g("comparison_mysql_sql_mode", str(comp.get("mysql_sql_mode", ""))).strip()
+    comp["mysql_time_zone"] = g("comparison_mysql_time_zone", str(comp.get("mysql_time_zone", "UTC"))).strip() or "UTC"
+    comp["mysql_tx_isolation"] = (
+        g("comparison_mysql_tx_isolation", str(comp.get("mysql_tx_isolation", "READ COMMITTED"))).strip()
+        or "READ COMMITTED"
+    )
+
+    comp["pg_application_name"] = (
+        g("comparison_pg_application_name", str(comp.get("pg_application_name", "tidb_pov_comparison"))).strip()
+        or "tidb_pov_comparison"
+    )
+    comp["pg_search_path"] = g("comparison_pg_search_path", str(comp.get("pg_search_path", "public"))).strip() or "public"
+    comp["pg_lock_timeout_ms"] = max(
+        0, to_int(g("comparison_pg_lock_timeout_ms"), int(comp.get("pg_lock_timeout_ms", 5000)))
+    )
+
+    comp["sqlserver_command_timeout_sec"] = max(
+        1,
+        to_int(
+            g("comparison_sqlserver_command_timeout_sec"),
+            int(comp.get("sqlserver_command_timeout_sec", 60)),
+        ),
+    )
+    comp["sqlserver_application_intent"] = (
+        g("comparison_sqlserver_application_intent", str(comp.get("sqlserver_application_intent", "ReadWrite"))).strip()
+        or "ReadWrite"
+    )
+    if comp["sqlserver_application_intent"] not in {"ReadWrite", "ReadOnly"}:
+        comp["sqlserver_application_intent"] = "ReadWrite"
+    comp["sqlserver_mars"] = to_bool(
+        form.get(f"{prefix}comparison_sqlserver_mars"), bool(comp.get("sqlserver_mars", False))
+    )
+    comp["sqlserver_packet_size"] = max(512, to_int(g("comparison_sqlserver_packet_size"), int(comp.get("sqlserver_packet_size", 4096))))
 
 
 def modules_from_suite(
@@ -1301,6 +1389,7 @@ def create_app(config_path: Path) -> Flask:
         comp["sqlserver_trust_server_certificate"] = to_bool(
             request.form.get("comparison_sqlserver_trust_server_certificate"), False
         )
+        apply_comparison_advanced_from_form(comp, request.form, "")
         cfg["comparison_db"] = normalize_comparison_cfg(comp)
 
         chosen_tier = request.form.get("tier_selected", "serverless")
@@ -1457,6 +1546,7 @@ def create_app(config_path: Path) -> Flask:
         comp["sqlserver_trust_server_certificate"] = to_bool(
             request.form.get("wiz_comparison_sqlserver_trust_server_certificate"), False
         )
+        apply_comparison_advanced_from_form(comp, request.form, "wiz_")
         cfg["comparison_db"] = normalize_comparison_cfg(comp)
 
         report = cfg.setdefault("report", {})
