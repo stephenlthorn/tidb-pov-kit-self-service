@@ -1741,6 +1741,104 @@
         <pre class="log" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
 
         <div class="line"></div>
+        <h3 class="subhead">PoC Metrics Snapshot</h3>
+        {% if report_dashboard.ready %}
+          <div class="stats-grid">
+            {% for card in report_dashboard.summary_cards[:4] %}
+              <div class="stat">
+                <div class="k">{{ card.label }}</div>
+                <div class="v">{{ card.value }}</div>
+                <div class="sub">{{ card.sub }}</div>
+              </div>
+            {% endfor %}
+          </div>
+
+          <div class="report-grid-two">
+            <div class="subpanel">
+              <h3 class="subhead">Baseline TPS by Concurrency</h3>
+              {% if report_dashboard.baseline_tps %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.baseline_tps %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.tps }}</span></div>
+                      <div class="bar-track"><div class="bar-fill tps" style="width: {{ row.tps_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No baseline TPS data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Baseline P99 Latency (ms)</h3>
+              {% if report_dashboard.baseline_p99 %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.baseline_p99 %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.p99_ms }}</span></div>
+                      <div class="bar-track"><div class="bar-fill latency" style="width: {{ row.p99_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No baseline latency data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">Import Throughput (GB/min)</h3>
+              {% if report_dashboard.import_bars %}
+                <div class="bar-list">
+                  {% for row in report_dashboard.import_bars %}
+                    <div class="bar-row">
+                      <div class="bar-meta"><span>{{ row.label }}</span><span>{{ row.throughput }}</span></div>
+                      <div class="bar-track"><div class="bar-fill import" style="width: {{ row.throughput_pct }}%"></div></div>
+                    </div>
+                  {% endfor %}
+                </div>
+              {% else %}
+                <div class="empty-state">No import throughput data yet.</div>
+              {% endif %}
+            </div>
+
+            <div class="subpanel">
+              <h3 class="subhead">MySQL Compatibility</h3>
+              <div class="bar-meta">
+                <span>Passed {{ report_dashboard.compat_passed }} / {{ report_dashboard.compat_total }}</span>
+                <span>{{ report_dashboard.compat_pct }}%</span>
+              </div>
+              <div class="compat-track"><div class="compat-fill" style="width: {{ report_dashboard.compat_pct }}%"></div></div>
+              <div class="tiny">Generated: {{ report_dashboard.generated_at if report_dashboard.generated_at else 'n/a' }}</div>
+            </div>
+          </div>
+
+          {% if report_dashboard.line_charts %}
+            <div class="line"></div>
+            <div class="line-grid">
+              {% for chart in report_dashboard.line_charts[:4] %}
+                <div class="line-card">
+                  <div class="line-title">{{ chart.title }}</div>
+                  <svg class="spark" viewBox="0 0 460 150" preserveAspectRatio="none">
+                    <polyline class="{{ chart.class }}" points="{{ chart.points }}" fill="none"></polyline>
+                  </svg>
+                  <div class="line-meta">
+                    <span>min {{ chart.min }}</span>
+                    <span>max {{ chart.max }}</span>
+                    <span>last {{ chart.last }}</span>
+                    <span>{{ chart.samples }} samples</span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% endif %}
+        {% else %}
+          <div class="empty-state">
+            Metrics graphs appear here after a run creates <code>results/metrics_summary.json</code>. You can run the full PoC or build report artifacts first.
+          </div>
+        {% endif %}
+
+        <div class="line"></div>
         <div class="path-grid">
           <div class="path-card">
             <div class="title">Workload Lab</div>
