@@ -37,7 +37,9 @@ except ModuleNotFoundError:
     raise SystemExit(3)
 
 ROOT = Path(__file__).resolve().parents[1]
-RESULTS_DIR = ROOT / "results"
+IS_VERCEL = bool(os.environ.get("VERCEL"))
+DEFAULT_RESULTS_DIR = Path("/tmp/tidb-pov-results") if IS_VERCEL else (ROOT / "results")
+RESULTS_DIR = Path(os.environ.get("POV_RESULTS_DIR", str(DEFAULT_RESULTS_DIR)))
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 RUN_SCRIPT = ROOT / "run_all.sh"
 BASELINE_SCRIPT = ROOT / "tests" / "01_baseline_perf" / "run.py"

@@ -56,6 +56,12 @@ cp .env.example .env
 Optionally add your own SQL queries under `customer_queries:` to validate them
 in Module 0 and include them in the OLTP workload.
 
+Vercel deployment note:
+1. Import repo `stephenlthorn/tidb-pov-kit-self-service`
+2. Set project root directory to `tidb-pov-kit`
+3. Vercel uses root Flask entrypoint `app.py`
+4. Configure env vars from `.env.example` in Vercel project settings
+
 ### Step 3 — Run
 
 ```bash
