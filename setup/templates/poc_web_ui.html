@@ -1700,11 +1700,15 @@
         <div class="line"></div>
         <div class="actions-grid">
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
+          <form method="post" action="/sync-artifacts-s3"><button class="btn soft" type="submit">Sync Artifacts to S3</button></form>
           {% if report_ready %}
             <a class="btn ok" href="/report" target="_blank">Open Report PDF</a>
           {% else %}
             <div><button class="btn" type="button" disabled title="Run PoC first">Open Report PDF</button></div>
           {% endif %}
+        </div>
+        <div class="tiny">
+          S3 artifacts: {% if s3_artifacts_enabled %}enabled (bucket {{ s3_artifacts_bucket }}){% else %}disabled{% endif %}
         </div>
 
         <div class="line"></div>
@@ -1857,6 +1861,7 @@
         </div>
         <div class="actions-grid">
           <form method="post" action="/build-report"><button class="btn" type="submit">Build Report Only</button></form>
+          <form method="post" action="/sync-artifacts-s3"><button class="btn soft" type="submit">Sync Artifacts to S3</button></form>
           {% if report_ready %}
             <a class="btn ok" href="/report" target="_blank">Open or Download Report PDF</a>
           {% else %}
@@ -2191,6 +2196,7 @@
                   <div><button class="btn" type="button" disabled>PDF not generated yet</button></div>
                 {% endif %}
                 <form method="post" action="/build-report"><button class="btn" type="submit">Refresh Report Artifacts</button></form>
+                <form method="post" action="/sync-artifacts-s3"><button class="btn soft" type="submit">Sync Artifacts to S3</button></form>
               </div>
             </div>
           </div>

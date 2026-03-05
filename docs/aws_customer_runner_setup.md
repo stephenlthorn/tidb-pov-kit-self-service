@@ -195,5 +195,12 @@ Suggested Vercel environment variables:
 - `AWS_DEFAULT_VPC_ID=vpc-0d2122788fc944c5c`
 - `AWS_DEFAULT_SUBNET_ID=subnet-08a374994d1a8c902`
 - `AWS_DEFAULT_SECURITY_GROUP_ID=sg-01014111d2efb1ab2`
+
+Suggested artifact persistence variables:
+- `S3_ARTIFACTS_ENABLED=true`
+- `S3_BUCKET=<your-report-bucket>`
+- `S3_PREFIX=tidb-pov`
+- `S3_ARTIFACTS_PROJECT=default`
+- `S3_REGION=us-east-1`
 - `AWS_RUNNER_INSTANCE_PROFILE_NAME=TidbPovRunnerInstanceRole`
 - `AWS_RUNNER_ROLE_ARN=arn:aws:iam::219248915861:role/TidbPovRunnerInstanceRole`

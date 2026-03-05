@@ -36,6 +36,11 @@ except ModuleNotFoundError:
     )
     raise SystemExit(3)
 
+try:
+    import boto3
+except ModuleNotFoundError:
+    boto3 = None
+
 ROOT = Path(__file__).resolve().parents[1]
 IS_VERCEL = bool(os.environ.get("VERCEL"))
 DEFAULT_RESULTS_DIR = Path("/tmp/tidb-pov-results") if IS_VERCEL else (ROOT / "results")
@@ -54,6 +59,7 @@ RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
 AUTH_DB = RESULTS_DIR / "auth.db"
 DEFAULT_INVITE_TTL_DAYS = 14
 MAX_INVITE_TTL_DAYS = 3650
+S3_PROJECT_SLUG = str(os.environ.get("S3_ARTIFACTS_PROJECT", "default")).strip() or "default"
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -1102,11 +1108,18 @@ def build_svg_points(values: List[float], width: int = 460, height: int = 150) -
 
 def load_metrics_summary() -> Dict | None:
     if not METRICS_JSON.exists():
-        return None
+        if not s3_download_to_local("metrics_json"):
+            return None
     try:
         return json.loads(METRICS_JSON.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def report_artifact_ready() -> bool:
+    if REPORT_PDF.exists():
+        return True
+    return s3_download_to_local("report_pdf")
 
 
 def build_report_dashboard() -> Dict:
@@ -1455,6 +1468,108 @@ def drop_configured_database(cfg: Dict) -> Tuple[bool, str]:
         return True, f"Dropped database `{database}`."
     except Exception as e:
         return False, str(e)
+
+
+def s3_bucket() -> str:
+    return (
+        str(os.environ.get("S3_BUCKET", "")).strip()
+        or str(os.environ.get("S3_ARTIFACTS_BUCKET", "")).strip()
+    )
+
+
+def s3_prefix() -> str:
+    raw = str(os.environ.get("S3_PREFIX", "")).strip() or str(os.environ.get("S3_ARTIFACTS_PREFIX", "")).strip()
+    if not raw:
+        raw = "tidb-pov"
+    return raw.strip("/")
+
+
+def s3_enabled() -> bool:
+    flag = str(os.environ.get("S3_ARTIFACTS_ENABLED", "")).strip().lower()
+    if flag in {"1", "true", "yes", "y", "on"}:
+        return True
+    if flag in {"0", "false", "no", "n", "off"}:
+        return False
+    return bool(s3_bucket())
+
+
+def s3_client():
+    if not s3_enabled() or not s3_bucket() or boto3 is None:
+        return None
+    region = str(os.environ.get("S3_REGION", "")).strip() or str(os.environ.get("AWS_REGION", "")).strip() or None
+    return boto3.client("s3", region_name=region)
+
+
+def s3_artifact_key(kind: str) -> str:
+    kind_clean = kind.strip("/")
+    return f"{s3_prefix()}/{S3_PROJECT_SLUG}/{kind_clean}"
+
+
+def s3_local_artifact_map() -> Dict[str, Dict]:
+    return {
+        "report_pdf": {
+            "local": REPORT_PDF,
+            "key": s3_artifact_key("reports/tidb_pov_report.pdf"),
+            "content_type": "application/pdf",
+        },
+        "metrics_json": {
+            "local": METRICS_JSON,
+            "key": s3_artifact_key("metrics/metrics_summary.json"),
+            "content_type": "application/json",
+        },
+        "run_log": {
+            "local": RUN_LOG,
+            "key": s3_artifact_key("logs/web_ui_run.log"),
+            "content_type": "text/plain",
+        },
+    }
+
+
+def s3_download_to_local(kind: str) -> bool:
+    mapping = s3_local_artifact_map().get(kind)
+    if not mapping:
+        return False
+    client = s3_client()
+    if client is None:
+        return False
+    local = Path(mapping["local"])
+    key = str(mapping["key"])
+    try:
+        local.parent.mkdir(parents=True, exist_ok=True)
+        client.download_file(s3_bucket(), key, str(local))
+        return True
+    except Exception:
+        return False
+
+
+def sync_local_artifacts_to_s3() -> Tuple[bool, List[str]]:
+    client = s3_client()
+    if client is None:
+        return False, ["S3 is not configured (set S3_BUCKET/S3_ARTIFACTS_BUCKET and credentials)."]
+
+    uploaded: List[str] = []
+    errors: List[str] = []
+    for _, mapping in s3_local_artifact_map().items():
+        local = Path(mapping["local"])
+        if not local.exists():
+            continue
+        key = str(mapping["key"])
+        content_type = str(mapping["content_type"])
+        try:
+            client.upload_file(
+                str(local),
+                s3_bucket(),
+                key,
+                ExtraArgs={"ContentType": content_type},
+            )
+            uploaded.append(f"s3://{s3_bucket()}/{key}")
+        except Exception as e:
+            errors.append(f"{local.name}: {e}")
+    if errors:
+        return False, errors
+    if not uploaded:
+        return False, ["No local artifacts found to upload."]
+    return True, uploaded
 
 
 def database_url() -> str:
@@ -2070,7 +2185,7 @@ def create_app(config_path: Path) -> Flask:
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
-        report_ready = REPORT_PDF.exists()
+        report_ready = report_artifact_ready()
         report_dashboard = build_report_dashboard()
         workload_insights = build_workload_insights(cfg)
         blaster_insights = build_blaster_insights(cfg)
@@ -2126,6 +2241,8 @@ def create_app(config_path: Path) -> Flask:
             comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
             blaster_insights=blaster_insights,
             runner_size_presets=RUNNER_SIZE_PRESETS,
+            s3_artifacts_enabled=s3_enabled(),
+            s3_artifacts_bucket=s3_bucket(),
         )
 
     @app.get("/ui-skeleton")
@@ -2515,6 +2632,15 @@ def create_app(config_path: Path) -> Flask:
         flash(msg, "success" if ok else "error")
         return redirect(url_for("index") + "#dashboards")
 
+    @app.post("/sync-artifacts-s3")
+    def sync_artifacts_s3_route():
+        ok, details = sync_local_artifacts_to_s3()
+        if ok:
+            flash(f"S3 sync complete: {', '.join(details)}", "success")
+        else:
+            flash(f"S3 sync incomplete: {' | '.join(details)}", "warning")
+        return redirect(url_for("index") + "#dashboards")
+
     @app.post("/run-workload")
     def run_workload_route():
         cfg = load_cfg(config_path)
@@ -2744,7 +2870,7 @@ def create_app(config_path: Path) -> Flask:
 
     @app.get("/report")
     def report_route():
-        if not REPORT_PDF.exists():
+        if not report_artifact_ready():
             flash("Report PDF not available yet.", "error")
             return redirect(url_for("index") + "#dashboards")
         return send_file(REPORT_PDF, as_attachment=False)
@@ -2752,7 +2878,7 @@ def create_app(config_path: Path) -> Flask:
     @app.get("/run-status")
     def run_status_route():
         st = run_status()
-        st["report_ready"] = REPORT_PDF.exists()
+        st["report_ready"] = report_artifact_ready()
         return jsonify(st)
 
     return app

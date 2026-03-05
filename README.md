@@ -62,6 +62,7 @@ Vercel deployment note:
 3. Vercel uses root Flask entrypoint `app.py`
 4. Configure env vars from `.env.example` in Vercel project settings
 5. Attach Vercel Postgres (or set `DATABASE_URL`) for persistent users/invites/config state
+6. Configure S3 env vars (`S3_BUCKET`, `S3_PREFIX`, `S3_ARTIFACTS_ENABLED=true`) to persist PDF/metrics/log artifacts
 
 ### Step 3 — Run
 
