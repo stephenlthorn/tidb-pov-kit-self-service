@@ -1254,7 +1254,6 @@
       <button class="tab-btn" data-tab-btn="quickstart"><span class="ico">[Q]</span>Deployment Wizard</button>
       <button class="tab-btn" data-tab-btn="test-details"><span class="ico">[T]</span>Test Details</button>
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
-      <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
     </nav>
@@ -1793,13 +1792,13 @@
       </div>
     </section>
 
-    <section class="tab-pane" data-tab-pane="workload-lab">
+    <section class="tab-pane" data-tab-pane="manual-config" id="manual-workload-generator">
       <div class="panel">
-        <h2>Workload Lab</h2>
-        <p class="help">Tune and run workloads from UI using Workload Generator orchestration plus module-level tuning.</p>
-        <div class="actions-grid">
-          <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
-        </div>
+        <h2>Manual Configuration - Workload Generator</h2>
+        <p class="help">Workload tuning and execution controls are nested under Manual Configuration for one-page navigation.</p>
+        <details class="advanced-details">
+          <summary>Open Workload Generator Controls</summary>
+          <div class="advanced-content">
 
         {% set bl = blaster_insights.config %}
         <div class="config-section">
@@ -1973,6 +1972,8 @@
         {% else %}
           <div class="empty-state">Workload query templates unavailable.</div>
         {% endif %}
+          </div>
+        </details>
       </div>
     </section>
 
@@ -2181,34 +2182,21 @@
     <section class="tab-pane" data-tab-pane="manual-config">
       <div class="panel">
         <h2>Manual Configuration</h2>
-        <p class="help">Complete control over tier, module plan, workload tuning, targets, and reporting settings.</p>
+        <p class="help">Set TiDB connection, optional comparison target, and exact tests to run. Workload tuning is included below in the Workload Generator section.</p>
 
         <div class="planner-summary">
-          Full-control mode: configure everything, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
+          Configure everything here, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
         </div>
 
-        <div class="path-grid">
-          <div class="path-card">
-            <div class="title">Workload Lab</div>
-            <div class="desc">Tune workload threads, mix, and import options as part of manual configuration workflow.</div>
-            <button class="btn soft" type="button" data-tab-jump="workload-lab">Open Workload Lab</button>
-          </div>
+        <div class="actions-grid">
+          <div><button class="btn soft small" type="button" data-scroll-target="manual-tidb-connection">TiDB Connection</button></div>
+          <div><button class="btn soft small" type="button" data-scroll-target="manual-comparison-target">Comparison Target</button></div>
+          <div><button class="btn soft small" type="button" data-scroll-target="manual-tests">Tests To Run</button></div>
+          <div><button class="btn soft small" type="button" data-scroll-target="manual-workload-generator">Workload Generator</button></div>
         </div>
-
-        <form method="post" action="/apply-module-suite" class="config-section">
-          <h3>Module Suite Helper</h3>
-          <div class="tiny">Select one or more suites. If multiple are checked, the helper combines them and enables the union of module coverage.</div>
-          <div class="module-grid">
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="oltp_migration" {% if cfg.pre_poc.scenario_template == 'oltp_migration' %}checked{% endif %} /> OLTP + Migration</label>
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="htap_analytics" {% if cfg.pre_poc.scenario_template == 'htap_analytics' %}checked{% endif %} /> HTAP Analytics</label>
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="ai_vector" {% if cfg.pre_poc.scenario_template == 'ai_vector' %}checked{% endif %} /> AI / Vector</label>
-            <label class="check"><input type="checkbox" name="module_suite_pick" value="smoke" /> Smoke Validation</label>
-          </div>
-          <button class="btn" type="submit">Apply Module Suite Selection</button>
-        </form>
 
         <form method="post" action="/save-config">
-          <div class="config-section">
+          <div class="config-section" id="manual-tidb-connection">
             <h3>TiDB Cluster Connection</h3>
             <div class="grid cols-4">
               <div class="field"><label>Host</label><input type="text" name="tidb_host" value="{{ cfg.tidb.host }}" /></div>
@@ -2227,7 +2215,7 @@
             </div>
           </div>
 
-          <div class="config-section">
+          <div class="config-section" id="manual-comparison-target">
             <h3>Comparison Target Database</h3>
             <div class="grid cols-4">
               <div class="field">
@@ -2368,6 +2356,39 @@
             <div class="tiny">Targets available: Starter support now for MySQL family (Aurora/MySQL/RDS MySQL/SingleStore). Postgres and SQL Server targets are captured for planning and future runner support.</div>
           </div>
 
+          <div class="config-section" id="manual-tests">
+            <h3>Specific Tests to Run</h3>
+            <div class="actions-grid">
+              <div><button class="btn soft small" type="button" data-manual-tests-action="all">Select All Tests</button></div>
+              <div><button class="btn soft small" type="button" data-manual-tests-action="none">Clear All Tests</button></div>
+              <div class="field">
+                <label>Selected Tests</label>
+                <input id="manual_selected_tests" type="text" value="0 / {{ module_order|length }}" readonly />
+              </div>
+            </div>
+
+            <div class="wizard-tests-menu">
+              {% for key in module_order %}
+                {% set insight = module_insights.get(key, {}) %}
+                <label class="wizard-test-item {% if cfg.modules[key] %}is-checked{% endif %}">
+                  <input
+                    type="checkbox"
+                    name="mod_{{ key }}"
+                    data-manual-module="{{ key }}"
+                    {% if cfg.modules[key] %}checked{% endif %}
+                  />
+                  <span class="wizard-test-main">
+                    <span class="wizard-test-label">{{ module_labels.get(key, key) }}</span>
+                    <span class="wizard-test-meta">
+                      <span class="wizard-test-category">{{ quickstart_test_categories.get(key, 'General') }}</span>
+                      <span class="wizard-test-focus">{{ insight.get('focus', 'Coverage test') }}</span>
+                    </span>
+                  </span>
+                </label>
+              {% endfor %}
+            </div>
+          </div>
+
           <div class="config-section">
             <h3>Scenario and Test Profile</h3>
             <div class="grid cols-4">
@@ -2437,24 +2458,22 @@
           </div>
 
           <div class="config-section">
-            <h3>Customer Queries and Modules</h3>
-            <div class="grid cols-2">
-              <div class="field">
-                <label>Customer Queries (one SQL per line)</label>
-                <textarea name="customer_queries">{{ cfg.customer_queries | join('\n') }}</textarea>
-              </div>
-              <div class="field">
-                <label>Customer Query Ratio</label>
-                <input type="number" step="0.01" name="customer_query_ratio" value="{{ cfg.customer_query_ratio }}" />
-                <div class="line"></div>
-                <label>Modules</label>
-                <div class="module-grid">
-                  {% for key in module_order %}
-                    <label class="check"><input type="checkbox" name="mod_{{ key }}" {% if cfg.modules[key] %}checked{% endif %} /> {{ module_labels.get(key, key) }}</label>
-                  {% endfor %}
+            <details class="advanced-details">
+              <summary>Customer Query Injection (optional)</summary>
+              <div class="advanced-content">
+                <div class="grid cols-2">
+                  <div class="field">
+                    <label>Customer Queries (one SQL per line)</label>
+                    <textarea name="customer_queries">{{ cfg.customer_queries | join('\n') }}</textarea>
+                  </div>
+                  <div class="field">
+                    <label>Customer Query Ratio</label>
+                    <input type="number" step="0.01" name="customer_query_ratio" value="{{ cfg.customer_query_ratio }}" />
+                    <div class="tiny">Share of workload using customer-provided SQL templates.</div>
+                  </div>
                 </div>
               </div>
-            </div>
+            </details>
           </div>
 
           <div class="config-section">
@@ -2522,6 +2541,7 @@
     configuration: 'manual-config',
     monitor: 'dashboards',
     'test-planner': 'test-details',
+    'workload-lab': 'manual-config',
   };
   const buttonFallback = {
     'cloud-tier': 'manual-config',
@@ -2558,26 +2578,49 @@
     btn.addEventListener('click', () => activate(btn.dataset.tabJump));
   });
 
-  document.querySelectorAll('form[action="/apply-module-suite"]').forEach((formEl) => {
-    const checks = Array.from(formEl.querySelectorAll('input[type="checkbox"][name="module_suite_pick"]'));
-    const smokeCheck = checks.find((check) => check.value === 'smoke');
-    if (!smokeCheck) {
-      return;
-    }
-    checks.forEach((check) => {
-      check.addEventListener('change', () => {
-        if (check.value === 'smoke' && check.checked) {
-          checks.forEach((other) => {
-            if (other !== check) {
-              other.checked = false;
-            }
-          });
-        } else if (check.value !== 'smoke' && check.checked) {
-          smokeCheck.checked = false;
-        }
-      });
+  document.querySelectorAll('[data-scroll-target]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const id = btn.dataset.scrollTarget;
+      if (!id) return;
+      const el = document.getElementById(id);
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     });
   });
+
+  const manualModuleChecks = Array.from(document.querySelectorAll('input[data-manual-module]'));
+  const manualSelectedTestsEl = document.getElementById('manual_selected_tests');
+  const manualTestsActionBtns = Array.from(document.querySelectorAll('[data-manual-tests-action]'));
+
+  function syncManualTestSelection() {
+    let selected = 0;
+    manualModuleChecks.forEach((check) => {
+      if (check.checked) selected += 1;
+      const row = check.closest('.wizard-test-item');
+      if (row) row.classList.toggle('is-checked', check.checked);
+    });
+    if (manualSelectedTestsEl) {
+      manualSelectedTestsEl.value = `${selected} / ${manualModuleChecks.length}`;
+    }
+  }
+
+  if (manualModuleChecks.length) {
+    manualModuleChecks.forEach((check) => {
+      check.addEventListener('change', syncManualTestSelection);
+    });
+    manualTestsActionBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const action = btn.dataset.manualTestsAction;
+        if (action === 'all') {
+          manualModuleChecks.forEach((check) => { check.checked = true; });
+        } else if (action === 'none') {
+          manualModuleChecks.forEach((check) => { check.checked = false; });
+        }
+        syncManualTestSelection();
+      });
+    });
+    syncManualTestSelection();
+  }
 
   const wizardForm = document.getElementById('quickstart_form');
   const wizardStepPanes = Array.from(document.querySelectorAll('[data-wizard-step]'));
