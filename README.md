@@ -58,9 +58,10 @@ in Module 0 and include them in the OLTP workload.
 
 Vercel deployment note:
 1. Import repo `stephenlthorn/tidb-pov-kit-self-service`
-2. Set project root directory to `tidb-pov-kit`
+2. Set project root directory to repo root (`.`)
 3. Vercel uses root Flask entrypoint `app.py`
 4. Configure env vars from `.env.example` in Vercel project settings
+5. Attach Vercel Postgres (or set `DATABASE_URL`) for persistent users/invites/config state
 
 ### Step 3 — Run
 

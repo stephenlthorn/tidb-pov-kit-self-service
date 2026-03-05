@@ -53,7 +53,7 @@ RUN_PID = RESULTS_DIR / "web_ui_run.pid"
 RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
 AUTH_DB = RESULTS_DIR / "auth.db"
 DEFAULT_INVITE_TTL_DAYS = 14
-MAX_INVITE_TTL_DAYS = 90
+MAX_INVITE_TTL_DAYS = 3650
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -76,6 +76,13 @@ from load.tidb_blaster import (  # type: ignore  # noqa: E402
     normalize_blaster_config,
 )
 from werkzeug.security import check_password_hash, generate_password_hash
+
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except ModuleNotFoundError:
+    psycopg = None
+    dict_row = None
 
 
 DEFAULT_CFG = {
@@ -696,6 +703,13 @@ def _to_int_safe(value, default: int, minimum: int = 0) -> int:
 
 
 def load_cfg(config_path: Path) -> Dict:
+    if using_postgres():
+        raw_cfg = _app_state_get("config_json")
+        if raw_cfg:
+            try:
+                return normalize_cfg(json.loads(raw_cfg))
+            except Exception:
+                pass
     if not config_path.exists():
         return normalize_cfg({})
     with config_path.open("r", encoding="utf-8") as f:
@@ -703,9 +717,12 @@ def load_cfg(config_path: Path) -> Dict:
 
 
 def save_cfg(config_path: Path, cfg: Dict) -> None:
+    normalized = normalize_cfg(cfg)
+    if using_postgres():
+        _app_state_set("config_json", json.dumps(normalized))
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with config_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
+        yaml.safe_dump(normalized, f, sort_keys=False)
 
 
 def to_bool(raw: str | None, default: bool = False) -> bool:
@@ -1440,6 +1457,26 @@ def drop_configured_database(cfg: Dict) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def database_url() -> str:
+    for key in ("DATABASE_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL"):
+        raw = str(os.environ.get(key, "") or "").strip()
+        if raw:
+            if raw.startswith("postgres://"):
+                return "postgresql://" + raw[len("postgres://") :]
+            return raw
+    return ""
+
+
+def using_postgres() -> bool:
+    return bool(database_url())
+
+
+def pg_auth_conn():
+    if psycopg is None:
+        raise RuntimeError("Postgres URL is set, but psycopg is not installed.")
+    return psycopg.connect(database_url(), row_factory=dict_row)
+
+
 def auth_conn() -> sqlite3.Connection:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(AUTH_DB))
@@ -1448,6 +1485,51 @@ def auth_conn() -> sqlite3.Connection:
 
 
 def init_auth_db() -> None:
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                  id BIGSERIAL PRIMARY KEY,
+                  email TEXT NOT NULL UNIQUE,
+                  password_hash TEXT NOT NULL,
+                  role TEXT NOT NULL CHECK (role IN ('admin','user')),
+                  is_active INTEGER NOT NULL DEFAULT 1,
+                  invited_by BIGINT,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS invites (
+                  id BIGSERIAL PRIMARY KEY,
+                  code TEXT NOT NULL UNIQUE,
+                  email TEXT,
+                  role TEXT NOT NULL CHECK (role IN ('admin','user')) DEFAULT 'user',
+                  is_active INTEGER NOT NULL DEFAULT 1,
+                  max_uses INTEGER NOT NULL DEFAULT 1,
+                  used_count INTEGER NOT NULL DEFAULT 0,
+                  expires_at TEXT NOT NULL,
+                  created_by BIGINT,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS app_state (
+                  key TEXT PRIMARY KEY,
+                  value_json TEXT NOT NULL,
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+            conn.commit()
+        return
+
     with auth_conn() as conn:
         conn.execute(
             """
@@ -1478,8 +1560,62 @@ def init_auth_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS app_state (
+              key TEXT PRIMARY KEY,
+              value_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
         conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        conn.commit()
+
+
+def _app_state_get(key: str) -> str | None:
+    try:
+        if using_postgres():
+            with pg_auth_conn() as conn:
+                row = conn.execute("SELECT value_json FROM app_state WHERE key = %s", (key,)).fetchone()
+                if not row:
+                    return None
+                return str(row.get("value_json", ""))
+        with auth_conn() as conn:
+            row = conn.execute("SELECT value_json FROM app_state WHERE key = ?", (key,)).fetchone()
+            if not row:
+                return None
+            return str(row["value_json"])
+    except Exception:
+        return None
+
+
+def _app_state_set(key: str, value_json: str) -> None:
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO app_state(key, value_json, updated_at)
+                VALUES (%s, %s, NOW())
+                ON CONFLICT (key)
+                DO UPDATE SET value_json = EXCLUDED.value_json, updated_at = NOW()
+                """,
+                (key, value_json),
+            )
+            conn.commit()
+        return
+
+    with auth_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO app_state(key, value_json, updated_at)
+            VALUES (?, ?, datetime('now'))
+            ON CONFLICT(key)
+            DO UPDATE SET value_json = excluded.value_json, updated_at = datetime('now')
+            """,
+            (key, value_json),
+        )
         conn.commit()
 
 
@@ -1488,6 +1624,10 @@ def normalize_email(raw: str) -> str:
 
 
 def users_exist() -> bool:
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
+            return bool(row and int(row.get("c", 0)) > 0)
     with auth_conn() as conn:
         row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
         return bool(row and int(row["c"]) > 0)
@@ -1496,6 +1636,13 @@ def users_exist() -> bool:
 def get_user_by_id(user_id: int | None) -> Dict | None:
     if not user_id:
         return None
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute(
+                "SELECT id, email, role, is_active, created_at FROM users WHERE id = %s",
+                (int(user_id),),
+            ).fetchone()
+        return dict(row) if row else None
     with auth_conn() as conn:
         row = conn.execute(
             "SELECT id, email, role, is_active, created_at FROM users WHERE id = ?",
@@ -1504,10 +1651,21 @@ def get_user_by_id(user_id: int | None) -> Dict | None:
     return dict(row) if row else None
 
 
-def get_user_by_email(email: str) -> sqlite3.Row | None:
+def get_user_by_email(email: str) -> Dict | None:
     normalized = normalize_email(email)
     if not normalized:
         return None
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, email, password_hash, role, is_active, created_at
+                FROM users
+                WHERE email = %s
+                """,
+                (normalized,),
+            ).fetchone()
+        return dict(row) if row else None
     with auth_conn() as conn:
         row = conn.execute(
             """
@@ -1517,7 +1675,7 @@ def get_user_by_email(email: str) -> sqlite3.Row | None:
             """,
             (normalized,),
         ).fetchone()
-    return row
+    return dict(row) if row else None
 
 
 def create_user(email: str, password: str, role: str, invited_by: int | None = None) -> Tuple[bool, str]:
@@ -1530,6 +1688,17 @@ def create_user(email: str, password: str, role: str, invited_by: int | None = N
         role = "user"
     pw_hash = generate_password_hash(password)
     try:
+        if using_postgres():
+            with pg_auth_conn() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO users(email, password_hash, role, is_active, invited_by)
+                    VALUES (%s, %s, %s, 1, %s)
+                    """,
+                    (normalized, pw_hash, role, invited_by),
+                )
+                conn.commit()
+            return True, "User created."
         with auth_conn() as conn:
             conn.execute(
                 """
@@ -1540,8 +1709,11 @@ def create_user(email: str, password: str, role: str, invited_by: int | None = N
             )
             conn.commit()
         return True, "User created."
-    except sqlite3.IntegrityError:
-        return False, "Email is already registered."
+    except Exception as e:
+        msg = str(e).lower()
+        if "unique" in msg or "duplicate" in msg:
+            return False, "Email is already registered."
+        return False, f"Unable to create user: {e}"
 
 
 def auth_user_from_session() -> Dict | None:
@@ -1572,16 +1744,29 @@ def create_invite(
     max_uses_safe = max(1, min(100, int(max_uses)))
     expires_at = (dt.datetime.utcnow() + dt.timedelta(days=ttl)).replace(microsecond=0).isoformat()
     code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:12]
-    with auth_conn() as conn:
-        conn.execute(
-            """
-            INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
-            VALUES (?, ?, ?, 1, ?, 0, ?, ?)
-            """,
-            (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
-        )
-        invite_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
-        conn.commit()
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute(
+                """
+                INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
+                VALUES (%s, %s, %s, 1, %s, 0, %s, %s)
+                RETURNING id
+                """,
+                (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
+            ).fetchone()
+            conn.commit()
+        invite_id = int(row["id"]) if row else 0
+    else:
+        with auth_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
+                VALUES (?, ?, ?, 1, ?, 0, ?, ?)
+                """,
+                (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
+            )
+            invite_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+            conn.commit()
     return {
         "id": invite_id,
         "code": code,
@@ -1594,10 +1779,21 @@ def create_invite(
     }
 
 
-def get_invite_for_code(code: str) -> sqlite3.Row | None:
+def get_invite_for_code(code: str) -> Dict | None:
     normalized = str(code or "").strip().upper()
     if not normalized:
         return None
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_by, created_at
+                FROM invites
+                WHERE code = %s
+                """,
+                (normalized,),
+            ).fetchone()
+        return dict(row) if row else None
     with auth_conn() as conn:
         row = conn.execute(
             """
@@ -1607,10 +1803,28 @@ def get_invite_for_code(code: str) -> sqlite3.Row | None:
             """,
             (normalized,),
         ).fetchone()
-    return row
+    return dict(row) if row else None
 
 
 def consume_invite(invite_id: int) -> None:
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            row = conn.execute(
+                "SELECT used_count, max_uses FROM invites WHERE id = %s",
+                (int(invite_id),),
+            ).fetchone()
+            if not row:
+                return
+            used_count = int(row["used_count"]) + 1
+            max_uses = int(row["max_uses"])
+            is_active = 1 if used_count < max_uses else 0
+            conn.execute(
+                "UPDATE invites SET used_count = %s, is_active = %s WHERE id = %s",
+                (used_count, is_active, int(invite_id)),
+            )
+            conn.commit()
+        return
+
     with auth_conn() as conn:
         row = conn.execute(
             "SELECT used_count, max_uses FROM invites WHERE id = ?",
@@ -1629,6 +1843,18 @@ def consume_invite(invite_id: int) -> None:
 
 
 def list_users(limit: int = 200) -> List[Dict]:
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, email, role, is_active, created_at
+                FROM users
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (int(max(1, limit)),),
+            ).fetchall()
+        return [dict(row) for row in rows]
     with auth_conn() as conn:
         rows = conn.execute(
             """
@@ -1643,21 +1869,32 @@ def list_users(limit: int = 200) -> List[Dict]:
 
 
 def list_invites(limit: int = 200) -> List[Dict]:
-    with auth_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
-            FROM invites
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (int(max(1, limit)),),
-        ).fetchall()
-    out: List[Dict] = []
-    for row in rows:
-        item = dict(row)
+    if using_postgres():
+        with pg_auth_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
+                FROM invites
+                ORDER BY id DESC
+                LIMIT %s
+                """,
+                (int(max(1, limit)),),
+            ).fetchall()
+        out = [dict(row) for row in rows]
+    else:
+        with auth_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
+                FROM invites
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (int(max(1, limit)),),
+            ).fetchall()
+        out = [dict(row) for row in rows]
+    for item in out:
         item["expired"] = invite_expired(item.get("expires_at", ""))
-        out.append(item)
     return out
 
 
@@ -1666,6 +1903,8 @@ def create_app(config_path: Path) -> Flask:
     app.secret_key = os.environ.get("POV_UI_SECRET", "tidb-pov-local-ui-dev-change-me")
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    app.config["SESSION_COOKIE_SECURE"] = IS_VERCEL
+    app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=3650)
     init_auth_db()
 
     def current_user() -> Dict | None:
@@ -1676,6 +1915,7 @@ def create_app(config_path: Path) -> Flask:
 
     @app.before_request
     def require_login() -> None | object:
+        session.permanent = True
         endpoint = request.endpoint or ""
         if endpoint == "static":
             return None
