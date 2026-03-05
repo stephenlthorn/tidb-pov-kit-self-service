@@ -32,6 +32,28 @@ comparison_db:
 tier:
   selected: "serverless"   # serverless | essential | premium | dedicated | byoc
 
+# Optional: run load generation in customer AWS account (cross-account AssumeRole).
+# This keeps EC2/network run costs in customer account while summary artifacts
+# can still be uploaded to control plane for shared visibility.
+aws_runner:
+  enabled: false
+  launch_mode: "customer_assume_role"
+  connectivity_mode: "private_endpoint"     # private_endpoint | public_endpoint
+  aws_region: "us-east-1"
+  customer_account_id: ""
+  customer_assume_role_arn: "arn:aws:iam::<ACCOUNT_ID>:role/TidbPovCustomerRunnerLaunchRole"
+  external_id: ""
+  vpc_id: ""
+  subnet_id: ""
+  security_group_id: ""
+  runner_instance_profile_name: "TidbPovRunnerInstanceRole"
+  runner_role_arn: "arn:aws:iam::<ACCOUNT_ID>:role/TidbPovRunnerInstanceRole"
+  instance_size: "medium"                   # small | medium | large
+  allowed_instance_types: ["c7i.2xlarge", "c7i.4xlarge", "c7i.8xlarge"]
+  max_instances_per_run: 8
+  summary_upload_only: true
+  run_timeout_minutes: 180
+
 test:
   data_scale:            "small"      # serverless default: small
   duration_seconds:      120

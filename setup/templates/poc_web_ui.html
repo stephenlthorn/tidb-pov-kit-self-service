@@ -169,6 +169,40 @@
       padding-top: 10px;
     }
 
+    .sidebar-auth {
+      margin-top: 12px;
+      border-top: 1px solid #1f242b;
+      padding-top: 11px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .sidebar-auth .who {
+      border: 1px solid #252b34;
+      border-radius: 8px;
+      background: #0f1319;
+      padding: 8px 9px;
+      font-size: 0.79rem;
+      color: #bcc5d2;
+    }
+
+    .sidebar-auth .who strong {
+      color: #eef2f8;
+      display: block;
+      margin-bottom: 3px;
+      font-size: 0.82rem;
+    }
+
+    .sidebar-auth .actions-grid {
+      margin: 0;
+      gap: 7px;
+    }
+
+    .sidebar-auth .btn {
+      width: 100%;
+      justify-content: center;
+    }
+
     .tab-btn {
       border: 1px solid #252b34;
       background: linear-gradient(180deg, #111419 0%, #0d1015 100%);
@@ -236,6 +270,27 @@
       margin: 6px 0 0;
       color: #8f98a4;
       font-size: 0.84rem;
+    }
+
+    .header-user {
+      min-width: 240px;
+      display: grid;
+      gap: 7px;
+      justify-items: end;
+      text-align: right;
+    }
+
+    .header-user .who {
+      border: 1px solid #2b323e;
+      border-radius: 8px;
+      background: #0f1319;
+      padding: 7px 10px;
+      font-size: 0.76rem;
+      color: #b8c1cf;
+    }
+
+    .header-user .who strong {
+      color: #edf1f8;
     }
 
     .logo-ribbon {
@@ -1255,8 +1310,21 @@
       <button class="tab-btn" data-tab-btn="test-details"><span class="ico">[T]</span>Test Details</button>
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
+      {% if is_admin %}
+        <button class="tab-btn" data-tab-btn="admin"><span class="ico">[A]</span>Admin</button>
+      {% endif %}
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
     </nav>
+
+    <div class="sidebar-auth">
+      <div class="who">
+        <strong>{{ auth_user.email }}</strong>
+        role: {{ auth_user.role }}
+      </div>
+      <form method="post" action="/logout">
+        <button class="btn soft small" type="submit">Sign Out</button>
+      </form>
+    </div>
   </aside>
 
   <main class="main">
@@ -1264,6 +1332,12 @@
       <div>
         <h1>TiDB PoV Copilot</h1>
         <p>Structured workflow for fast setup, controlled execution, and report-driven outcomes.</p>
+      </div>
+      <div class="header-user">
+        <div class="who"><strong>{{ auth_user.email }}</strong><br/>{{ auth_user.role }}</div>
+        {% if is_admin %}
+          <a class="btn soft small" href="#admin" data-tab-jump="admin">Open Admin</a>
+        {% endif %}
       </div>
     </div>
 
@@ -2190,6 +2264,7 @@
 
         <div class="actions-grid">
           <div><button class="btn soft small" type="button" data-scroll-target="manual-tidb-connection">TiDB Connection</button></div>
+          <div><button class="btn soft small" type="button" data-scroll-target="manual-aws-runner">AWS Runner</button></div>
           <div><button class="btn soft small" type="button" data-scroll-target="manual-comparison-target">Comparison Target</button></div>
           <div><button class="btn soft small" type="button" data-scroll-target="manual-tests">Tests To Run</button></div>
           <div><button class="btn soft small" type="button" data-scroll-target="manual-workload-generator">Workload Generator</button></div>
@@ -2212,6 +2287,60 @@
                   <option value="false" {% if not cfg.tidb.ssl %}selected{% endif %}>false</option>
                 </select>
               </div>
+            </div>
+          </div>
+
+          <div class="config-section" id="manual-aws-runner">
+            <h3>AWS Customer Runner (Cross-Account)</h3>
+            <div class="tiny">Keeps run compute costs in customer AWS account. Control plane stores summary artifacts for shared admin/customer visibility.</div>
+            <div class="grid cols-4">
+              <div class="field">
+                <label>Enable AWS Runner</label>
+                <label class="check"><input type="checkbox" name="aws_runner_enabled" {% if cfg.aws_runner.enabled %}checked{% endif %} /> enabled</label>
+              </div>
+              <div class="field">
+                <label>Launch Mode</label>
+                <select name="aws_launch_mode">
+                  <option value="customer_assume_role" {% if cfg.aws_runner.launch_mode == 'customer_assume_role' %}selected{% endif %}>customer_assume_role</option>
+                </select>
+              </div>
+              <div class="field">
+                <label>Connectivity Mode</label>
+                <select name="aws_connectivity_mode">
+                  <option value="private_endpoint" {% if cfg.aws_runner.connectivity_mode == 'private_endpoint' %}selected{% endif %}>private_endpoint</option>
+                  <option value="public_endpoint" {% if cfg.aws_runner.connectivity_mode == 'public_endpoint' %}selected{% endif %}>public_endpoint</option>
+                </select>
+              </div>
+              <div class="field"><label>AWS Region</label><input type="text" name="aws_region" value="{{ cfg.aws_runner.aws_region }}" /></div>
+            </div>
+            <div class="grid cols-4">
+              <div class="field"><label>Customer Account ID</label><input type="text" name="aws_customer_account_id" value="{{ cfg.aws_runner.customer_account_id }}" placeholder="219248915861" /></div>
+              <div class="field"><label>Assume Role ARN</label><input type="text" name="aws_customer_assume_role_arn" value="{{ cfg.aws_runner.customer_assume_role_arn }}" placeholder="arn:aws:iam::...:role/TidbPovCustomerRunnerLaunchRole" /></div>
+              <div class="field"><label>External ID</label><input type="text" name="aws_external_id" value="{{ cfg.aws_runner.external_id }}" placeholder="tidbpov-..." /></div>
+              <div class="field"><label>Runner Role ARN</label><input type="text" name="aws_runner_role_arn" value="{{ cfg.aws_runner.runner_role_arn }}" placeholder="arn:aws:iam::...:role/TidbPovRunnerInstanceRole" /></div>
+            </div>
+            <div class="grid cols-4">
+              <div class="field"><label>VPC ID</label><input type="text" name="aws_vpc_id" value="{{ cfg.aws_runner.vpc_id }}" placeholder="vpc-..." /></div>
+              <div class="field"><label>Subnet ID</label><input type="text" name="aws_subnet_id" value="{{ cfg.aws_runner.subnet_id }}" placeholder="subnet-..." /></div>
+              <div class="field"><label>Security Group ID</label><input type="text" name="aws_security_group_id" value="{{ cfg.aws_runner.security_group_id }}" placeholder="sg-..." /></div>
+              <div class="field"><label>Runner Instance Profile Name</label><input type="text" name="aws_runner_instance_profile_name" value="{{ cfg.aws_runner.runner_instance_profile_name }}" placeholder="TidbPovRunnerInstanceRole" /></div>
+            </div>
+            <div class="grid cols-4">
+              <div class="field">
+                <label>Runner Size Preset</label>
+                <select name="aws_instance_size">
+                  {% for key, meta in runner_size_presets.items() %}
+                    <option value="{{ key }}" {% if cfg.aws_runner.instance_size == key %}selected{% endif %}>{{ meta.label }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="field"><label>Allowed Instance Types (csv)</label><input type="text" name="aws_allowed_instance_types" value="{{ cfg.aws_runner.allowed_instance_types | join(', ') }}" /></div>
+              <div class="field"><label>Max Instances Per Run</label><input type="number" min="1" name="aws_max_instances_per_run" value="{{ cfg.aws_runner.max_instances_per_run }}" /></div>
+              <div class="field"><label>Run Timeout Minutes</label><input type="number" min="10" name="aws_run_timeout_minutes" value="{{ cfg.aws_runner.run_timeout_minutes }}" /></div>
+            </div>
+            <div class="grid cols-2">
+              <div class="field"><label>Upload Summary Only</label><label class="check"><input type="checkbox" name="aws_summary_upload_only" {% if cfg.aws_runner.summary_upload_only %}checked{% endif %} /> enabled</label></div>
+              <div class="field"></div>
             </div>
           </div>
 
@@ -2506,6 +2635,126 @@
         </form>
       </div>
     </section>
+
+    {% if is_admin %}
+    <section class="tab-pane" data-tab-pane="admin">
+      <div class="panel">
+        <h2>Admin Access</h2>
+        <p class="help">Create invite links or invite codes. Users can sign up with email + password + invite code.</p>
+
+        <form method="post" action="/admin/create-invite">
+          <div class="grid cols-4">
+            <div class="field">
+              <label>Invite Email (optional)</label>
+              <input type="email" name="invite_email" placeholder="user@company.com" />
+            </div>
+            <div class="field">
+              <label>Role</label>
+              <select name="invite_role">
+                <option value="user" selected>User</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Expires In (days)</label>
+              <input type="number" min="1" max="90" name="invite_ttl_days" value="14" />
+            </div>
+            <div class="field">
+              <label>Max Uses</label>
+              <input type="number" min="1" max="100" name="invite_max_uses" value="1" />
+            </div>
+          </div>
+          <div class="actions-grid">
+            <div><button class="btn primary" type="submit">Create Invite</button></div>
+          </div>
+        </form>
+
+        <div class="line"></div>
+        <h3 class="subhead">Signup Endpoint</h3>
+        <div class="tiny"><code>{{ signup_base_url }}</code></div>
+
+        <div class="line"></div>
+        <h3 class="subhead">Recent Invites</h3>
+        {% if admin_invites %}
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Email Scope</th>
+                  <th>Role</th>
+                  <th>Usage</th>
+                  <th>Expires</th>
+                  <th>Status</th>
+                  <th>Signup Link</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for inv in admin_invites %}
+                  <tr>
+                    <td><code>{{ inv.code }}</code></td>
+                    <td>{{ inv.email if inv.email else 'any email' }}</td>
+                    <td>{{ inv.role }}</td>
+                    <td>{{ inv.used_count }} / {{ inv.max_uses }}</td>
+                    <td>{{ inv.expires_at }}</td>
+                    <td>
+                      {% if inv.is_active and not inv.expired %}
+                        <span class="status-pill success">active</span>
+                      {% elif inv.expired %}
+                        <span class="status-pill danger">expired</span>
+                      {% else %}
+                        <span class="status-pill muted">inactive</span>
+                      {% endif %}
+                    </td>
+                    <td class="sql-cell"><code>{{ inv.signup_url }}</code></td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="empty-state">No invites created yet.</div>
+        {% endif %}
+
+        <div class="line"></div>
+        <h3 class="subhead">Users</h3>
+        {% if admin_users %}
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Email</th>
+                  <th>Role</th>
+                  <th>Status</th>
+                  <th>Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for u in admin_users %}
+                  <tr>
+                    <td>{{ u.id }}</td>
+                    <td>{{ u.email }}</td>
+                    <td>{{ u.role }}</td>
+                    <td>
+                      {% if u.is_active %}
+                        <span class="status-pill success">active</span>
+                      {% else %}
+                        <span class="status-pill danger">disabled</span>
+                      {% endif %}
+                    </td>
+                    <td>{{ u.created_at }}</td>
+                  </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        {% else %}
+          <div class="empty-state">No users found.</div>
+        {% endif %}
+      </div>
+    </section>
+    {% endif %}
 
     <section class="tab-pane" data-tab-pane="data-reset">
       <div class="panel">

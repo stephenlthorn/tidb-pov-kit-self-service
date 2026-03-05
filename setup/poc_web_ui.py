@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import re
+import secrets
 import sqlite3
 import shutil
 import subprocess
@@ -16,7 +17,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 try:
-    from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
+    from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 except ModuleNotFoundError:
     print(
         "Missing dependency: flask. Install dependencies first "
@@ -48,6 +49,9 @@ METRICS_JSON = RESULTS_DIR / "metrics_summary.json"
 RUN_LOG = RESULTS_DIR / "web_ui_run.log"
 RUN_PID = RESULTS_DIR / "web_ui_run.pid"
 RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
+AUTH_DB = RESULTS_DIR / "auth.db"
+DEFAULT_INVITE_TTL_DAYS = 14
+MAX_INVITE_TTL_DAYS = 90
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -69,6 +73,7 @@ from load.tidb_blaster import (  # type: ignore  # noqa: E402
     list_recent_runs,
     normalize_blaster_config,
 )
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 DEFAULT_CFG = {
@@ -174,6 +179,25 @@ DEFAULT_CFG = {
         "concurrency": 8,
         "duration_seconds": 120,
         "blaster": {},
+    },
+    "aws_runner": {
+        "enabled": False,
+        "launch_mode": "customer_assume_role",
+        "connectivity_mode": "private_endpoint",
+        "aws_region": os.environ.get("AWS_REGION", "us-east-1"),
+        "customer_account_id": os.environ.get("AWS_CUSTOMER_ACCOUNT_ID", ""),
+        "customer_assume_role_arn": os.environ.get("AWS_CUSTOMER_ASSUME_ROLE_ARN", ""),
+        "external_id": os.environ.get("AWS_EXTERNAL_ID", ""),
+        "vpc_id": os.environ.get("AWS_DEFAULT_VPC_ID", ""),
+        "subnet_id": os.environ.get("AWS_DEFAULT_SUBNET_ID", ""),
+        "security_group_id": os.environ.get("AWS_DEFAULT_SECURITY_GROUP_ID", ""),
+        "runner_instance_profile_name": os.environ.get("AWS_RUNNER_INSTANCE_PROFILE_NAME", "TidbPovRunnerInstanceRole"),
+        "runner_role_arn": os.environ.get("AWS_RUNNER_ROLE_ARN", ""),
+        "instance_size": "medium",
+        "allowed_instance_types": ["c7i.2xlarge", "c7i.4xlarge", "c7i.8xlarge"],
+        "max_instances_per_run": 8,
+        "summary_upload_only": True,
+        "run_timeout_minutes": 180,
     },
 }
 
@@ -445,6 +469,24 @@ IMPORT_METHOD_LABELS = {
     "import_into": "IMPORT INTO",
 }
 
+RUNNER_SIZE_PRESETS = {
+    "small": {
+        "label": "Small (<=50k QPS)",
+        "default_instance_type": "c7i.2xlarge",
+        "default_max_instances": 2,
+    },
+    "medium": {
+        "label": "Medium (<=200k QPS)",
+        "default_instance_type": "c7i.4xlarge",
+        "default_max_instances": 8,
+    },
+    "large": {
+        "label": "Large (500k-1M QPS)",
+        "default_instance_type": "c7i.8xlarge",
+        "default_max_instances": 24,
+    },
+}
+
 QUICKSTART_WORKLOAD_PRESETS = {
     "fast_validation": {
         "label": "Fast Validation",
@@ -601,6 +643,44 @@ def normalize_cfg(cfg: Dict) -> Dict:
         cfg.get("workload_lab", {}).get("blaster") or {},
         cfg.get("tidb", {}) or {},
     )
+
+    cfg.setdefault("aws_runner", {})
+    runner = cfg["aws_runner"]
+    runner["enabled"] = bool(runner.get("enabled", False))
+    runner["launch_mode"] = str(runner.get("launch_mode", "customer_assume_role")).strip().lower() or "customer_assume_role"
+    if runner["launch_mode"] not in {"customer_assume_role"}:
+        runner["launch_mode"] = "customer_assume_role"
+    runner["connectivity_mode"] = str(runner.get("connectivity_mode", "private_endpoint")).strip().lower()
+    if runner["connectivity_mode"] not in {"private_endpoint", "public_endpoint"}:
+        runner["connectivity_mode"] = "private_endpoint"
+    runner["aws_region"] = str(runner.get("aws_region", "us-east-1")).strip() or "us-east-1"
+    runner["customer_account_id"] = str(runner.get("customer_account_id", "")).strip()
+    runner["customer_assume_role_arn"] = str(runner.get("customer_assume_role_arn", "")).strip()
+    runner["external_id"] = str(runner.get("external_id", "")).strip()
+    runner["vpc_id"] = str(runner.get("vpc_id", "")).strip()
+    runner["subnet_id"] = str(runner.get("subnet_id", "")).strip()
+    runner["security_group_id"] = str(runner.get("security_group_id", "")).strip()
+    runner["runner_instance_profile_name"] = (
+        str(runner.get("runner_instance_profile_name", "TidbPovRunnerInstanceRole")).strip()
+        or "TidbPovRunnerInstanceRole"
+    )
+    runner["runner_role_arn"] = str(runner.get("runner_role_arn", "")).strip()
+    runner["instance_size"] = str(runner.get("instance_size", "medium")).strip().lower()
+    if runner["instance_size"] not in RUNNER_SIZE_PRESETS:
+        runner["instance_size"] = "medium"
+
+    allowed = runner.get("allowed_instance_types", [])
+    if isinstance(allowed, str):
+        allowed_types = [part.strip() for part in re.split(r"[\s,]+", allowed) if part.strip()]
+    elif isinstance(allowed, list):
+        allowed_types = [str(part).strip() for part in allowed if str(part).strip()]
+    else:
+        allowed_types = []
+    runner["allowed_instance_types"] = allowed_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+
+    runner["max_instances_per_run"] = _to_int_safe(runner.get("max_instances_per_run"), 8, 1)
+    runner["summary_upload_only"] = bool(runner.get("summary_upload_only", True))
+    runner["run_timeout_minutes"] = _to_int_safe(runner.get("run_timeout_minutes"), 180, 10)
 
     return cfg
 
@@ -1358,12 +1438,393 @@ def drop_configured_database(cfg: Dict) -> Tuple[bool, str]:
         return False, str(e)
 
 
+def auth_conn() -> sqlite3.Connection:
+    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(AUTH_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_auth_db() -> None:
+    with auth_conn() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              email TEXT NOT NULL UNIQUE,
+              password_hash TEXT NOT NULL,
+              role TEXT NOT NULL CHECK(role IN ('admin','user')),
+              is_active INTEGER NOT NULL DEFAULT 1,
+              invited_by INTEGER,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS invites (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              code TEXT NOT NULL UNIQUE,
+              email TEXT,
+              role TEXT NOT NULL CHECK(role IN ('admin','user')) DEFAULT 'user',
+              is_active INTEGER NOT NULL DEFAULT 1,
+              max_uses INTEGER NOT NULL DEFAULT 1,
+              used_count INTEGER NOT NULL DEFAULT 0,
+              expires_at TEXT NOT NULL,
+              created_by INTEGER,
+              created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
+        conn.commit()
+
+
+def normalize_email(raw: str) -> str:
+    return str(raw or "").strip().lower()
+
+
+def users_exist() -> bool:
+    with auth_conn() as conn:
+        row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
+        return bool(row and int(row["c"]) > 0)
+
+
+def get_user_by_id(user_id: int | None) -> Dict | None:
+    if not user_id:
+        return None
+    with auth_conn() as conn:
+        row = conn.execute(
+            "SELECT id, email, role, is_active, created_at FROM users WHERE id = ?",
+            (int(user_id),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_user_by_email(email: str) -> sqlite3.Row | None:
+    normalized = normalize_email(email)
+    if not normalized:
+        return None
+    with auth_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, email, password_hash, role, is_active, created_at
+            FROM users
+            WHERE email = ?
+            """,
+            (normalized,),
+        ).fetchone()
+    return row
+
+
+def create_user(email: str, password: str, role: str, invited_by: int | None = None) -> Tuple[bool, str]:
+    normalized = normalize_email(email)
+    if not normalized or "@" not in normalized:
+        return False, "Valid email is required."
+    if len(password or "") < 10:
+        return False, "Password must be at least 10 characters."
+    if role not in {"admin", "user"}:
+        role = "user"
+    pw_hash = generate_password_hash(password)
+    try:
+        with auth_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO users(email, password_hash, role, is_active, invited_by)
+                VALUES (?, ?, ?, 1, ?)
+                """,
+                (normalized, pw_hash, role, invited_by),
+            )
+            conn.commit()
+        return True, "User created."
+    except sqlite3.IntegrityError:
+        return False, "Email is already registered."
+
+
+def auth_user_from_session() -> Dict | None:
+    user_id = session.get("auth_user_id")
+    if not user_id:
+        return None
+    return get_user_by_id(int(user_id))
+
+
+def invite_expired(expires_at: str) -> bool:
+    try:
+        expiry = dt.datetime.fromisoformat(str(expires_at))
+    except Exception:
+        return True
+    return dt.datetime.utcnow() > expiry
+
+
+def create_invite(
+    created_by: int,
+    email: str,
+    role: str,
+    ttl_days: int,
+    max_uses: int,
+) -> Dict:
+    safe_role = role if role in {"admin", "user"} else "user"
+    normalized_email = normalize_email(email) if email else ""
+    ttl = max(1, min(MAX_INVITE_TTL_DAYS, int(ttl_days)))
+    max_uses_safe = max(1, min(100, int(max_uses)))
+    expires_at = (dt.datetime.utcnow() + dt.timedelta(days=ttl)).replace(microsecond=0).isoformat()
+    code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:12]
+    with auth_conn() as conn:
+        conn.execute(
+            """
+            INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
+            VALUES (?, ?, ?, 1, ?, 0, ?, ?)
+            """,
+            (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
+        )
+        invite_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
+        conn.commit()
+    return {
+        "id": invite_id,
+        "code": code,
+        "email": normalized_email,
+        "role": safe_role,
+        "max_uses": max_uses_safe,
+        "used_count": 0,
+        "expires_at": expires_at,
+        "is_active": 1,
+    }
+
+
+def get_invite_for_code(code: str) -> sqlite3.Row | None:
+    normalized = str(code or "").strip().upper()
+    if not normalized:
+        return None
+    with auth_conn() as conn:
+        row = conn.execute(
+            """
+            SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_by, created_at
+            FROM invites
+            WHERE code = ?
+            """,
+            (normalized,),
+        ).fetchone()
+    return row
+
+
+def consume_invite(invite_id: int) -> None:
+    with auth_conn() as conn:
+        row = conn.execute(
+            "SELECT used_count, max_uses FROM invites WHERE id = ?",
+            (int(invite_id),),
+        ).fetchone()
+        if not row:
+            return
+        used_count = int(row["used_count"]) + 1
+        max_uses = int(row["max_uses"])
+        is_active = 1 if used_count < max_uses else 0
+        conn.execute(
+            "UPDATE invites SET used_count = ?, is_active = ? WHERE id = ?",
+            (used_count, is_active, int(invite_id)),
+        )
+        conn.commit()
+
+
+def list_users(limit: int = 200) -> List[Dict]:
+    with auth_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, email, role, is_active, created_at
+            FROM users
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(max(1, limit)),),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def list_invites(limit: int = 200) -> List[Dict]:
+    with auth_conn() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
+            FROM invites
+            ORDER BY id DESC
+            LIMIT ?
+            """,
+            (int(max(1, limit)),),
+        ).fetchall()
+    out: List[Dict] = []
+    for row in rows:
+        item = dict(row)
+        item["expired"] = invite_expired(item.get("expires_at", ""))
+        out.append(item)
+    return out
+
+
 def create_app(config_path: Path) -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
-    app.secret_key = "tidb-pov-local-ui"
+    app.secret_key = os.environ.get("POV_UI_SECRET", "tidb-pov-local-ui-dev-change-me")
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    init_auth_db()
+
+    def current_user() -> Dict | None:
+        return auth_user_from_session()
+
+    def require_admin(user: Dict | None) -> bool:
+        return bool(user and user.get("role") == "admin" and int(user.get("is_active", 0)) == 1)
+
+    @app.before_request
+    def require_login() -> None | object:
+        endpoint = request.endpoint or ""
+        if endpoint == "static":
+            return None
+        public_endpoints = {
+            "login_route",
+            "login_post_route",
+            "signup_route",
+            "signup_post_route",
+            "setup_admin_route",
+            "setup_admin_post_route",
+        }
+        if endpoint in public_endpoints:
+            return None
+        if not users_exist():
+            return redirect(url_for("setup_admin_route"))
+        user = current_user()
+        if user:
+            return None
+        return redirect(url_for("login_route", next=request.full_path if request.query_string else request.path))
+
+    @app.get("/setup-admin")
+    def setup_admin_route():
+        if users_exist():
+            return redirect(url_for("login_route"))
+        return render_template("setup_admin.html")
+
+    @app.post("/setup-admin")
+    def setup_admin_post_route():
+        if users_exist():
+            flash("Admin already initialized. Please sign in.", "warning")
+            return redirect(url_for("login_route"))
+
+        email = normalize_email(request.form.get("email", ""))
+        password = request.form.get("password", "")
+        ok, msg = create_user(email, password, "admin")
+        if not ok:
+            flash(msg, "error")
+            return redirect(url_for("setup_admin_route"))
+
+        row = get_user_by_email(email)
+        if row:
+            session["auth_user_id"] = int(row["id"])
+        flash("Admin account created.", "success")
+        return redirect(url_for("index"))
+
+    @app.get("/login")
+    def login_route():
+        if current_user():
+            return redirect(url_for("index"))
+        if not users_exist():
+            return redirect(url_for("setup_admin_route"))
+        return render_template("login.html", next_url=str(request.args.get("next", "")).strip())
+
+    @app.post("/login")
+    def login_post_route():
+        if not users_exist():
+            return redirect(url_for("setup_admin_route"))
+        email = normalize_email(request.form.get("email", ""))
+        password = request.form.get("password", "")
+        row = get_user_by_email(email)
+        if not row or int(row["is_active"]) != 1:
+            flash("Invalid credentials.", "error")
+            return redirect(url_for("login_route"))
+        if not check_password_hash(str(row["password_hash"]), password):
+            flash("Invalid credentials.", "error")
+            return redirect(url_for("login_route"))
+        session["auth_user_id"] = int(row["id"])
+        next_url = str(request.form.get("next", "") or request.args.get("next", "")).strip()
+        if next_url and next_url.startswith("/"):
+            return redirect(next_url)
+        return redirect(url_for("index"))
+
+    @app.post("/logout")
+    def logout_route():
+        session.pop("auth_user_id", None)
+        flash("Signed out.", "success")
+        return redirect(url_for("login_route"))
+
+    @app.get("/signup")
+    def signup_route():
+        if not users_exist():
+            return redirect(url_for("setup_admin_route"))
+        invite_code = str(request.args.get("code", "")).strip().upper()
+        return render_template("signup.html", invite_code=invite_code)
+
+    @app.post("/signup")
+    def signup_post_route():
+        if not users_exist():
+            return redirect(url_for("setup_admin_route"))
+        email = normalize_email(request.form.get("email", ""))
+        password = request.form.get("password", "")
+        invite_code = str(request.form.get("invite_code", "")).strip().upper()
+
+        invite = get_invite_for_code(invite_code)
+        if not invite:
+            flash("Invite code is invalid.", "error")
+            return redirect(url_for("signup_route", code=invite_code))
+        if int(invite["is_active"]) != 1:
+            flash("Invite code is inactive.", "error")
+            return redirect(url_for("signup_route", code=invite_code))
+        if invite_expired(str(invite["expires_at"])):
+            flash("Invite code is expired.", "error")
+            return redirect(url_for("signup_route", code=invite_code))
+        if int(invite["used_count"]) >= int(invite["max_uses"]):
+            flash("Invite code usage limit reached.", "error")
+            return redirect(url_for("signup_route", code=invite_code))
+        invite_email = normalize_email(str(invite["email"] or ""))
+        if invite_email and invite_email != email:
+            flash("Invite code is restricted to a different email.", "error")
+            return redirect(url_for("signup_route", code=invite_code))
+
+        ok, msg = create_user(email, password, str(invite["role"]), invited_by=invite["created_by"])
+        if not ok:
+            flash(msg, "error")
+            return redirect(url_for("signup_route", code=invite_code))
+
+        consume_invite(int(invite["id"]))
+        row = get_user_by_email(email)
+        if row:
+            session["auth_user_id"] = int(row["id"])
+        flash("Account created.", "success")
+        return redirect(url_for("index"))
+
+    @app.post("/admin/create-invite")
+    def admin_create_invite_route():
+        user = current_user()
+        if not require_admin(user):
+            flash("Admin access required.", "error")
+            return redirect(url_for("index"))
+
+        invite_email = normalize_email(request.form.get("invite_email", ""))
+        invite_role = str(request.form.get("invite_role", "user")).strip().lower()
+        ttl_days = to_int(request.form.get("invite_ttl_days"), DEFAULT_INVITE_TTL_DAYS)
+        max_uses = to_int(request.form.get("invite_max_uses"), 1)
+        invite = create_invite(
+            created_by=int(user["id"]),
+            email=invite_email,
+            role=invite_role,
+            ttl_days=ttl_days,
+            max_uses=max_uses,
+        )
+        signup_url = f"{request.url_root.rstrip('/')}{url_for('signup_route')}?code={invite['code']}"
+        flash(
+            f"Invite created. Code: {invite['code']} | Signup link: {signup_url}",
+            "success",
+        )
+        return redirect(url_for("index") + "#admin")
 
     @app.get("/")
     def index():
+        user = current_user()
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
@@ -1375,9 +1836,20 @@ def create_app(config_path: Path) -> Flask:
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
         tiers_for_ui = visible_tiers_for_ui(selected_tier)
+        is_admin = require_admin(user)
+        users = list_users(250) if is_admin else []
+        invites = list_invites(250) if is_admin else []
+        signup_base = f"{request.url_root.rstrip('/')}{url_for('signup_route')}"
+        for invite in invites:
+            invite["signup_url"] = f"{signup_base}?code={invite['code']}"
 
         return render_template(
             "poc_web_ui.html",
+            auth_user=user,
+            is_admin=is_admin,
+            admin_users=users,
+            admin_invites=invites,
+            signup_base_url=signup_base,
             cfg=cfg,
             report_ready=report_ready,
             report_dashboard=report_dashboard,
@@ -1411,6 +1883,7 @@ def create_app(config_path: Path) -> Flask:
             comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
             comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
             blaster_insights=blaster_insights,
+            runner_size_presets=RUNNER_SIZE_PRESETS,
         )
 
     @app.get("/ui-skeleton")
@@ -1496,6 +1969,45 @@ def create_app(config_path: Path) -> Flask:
         tco["engineers_managing_shards"] = to_int(request.form.get("tco_engineers_managing_shards"), 2)
         tco["engineer_annual_cost"] = to_int(request.form.get("tco_engineer_annual_cost"), 180000)
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
+
+        aws_runner = cfg.setdefault("aws_runner", {})
+        aws_runner["enabled"] = to_bool(request.form.get("aws_runner_enabled"), False)
+        aws_runner["launch_mode"] = (
+            request.form.get("aws_launch_mode", "customer_assume_role").strip().lower() or "customer_assume_role"
+        )
+        aws_runner["connectivity_mode"] = (
+            request.form.get("aws_connectivity_mode", "private_endpoint").strip().lower() or "private_endpoint"
+        )
+        aws_runner["aws_region"] = request.form.get("aws_region", "us-east-1").strip() or "us-east-1"
+        aws_runner["customer_account_id"] = request.form.get("aws_customer_account_id", "").strip()
+        aws_runner["customer_assume_role_arn"] = request.form.get("aws_customer_assume_role_arn", "").strip()
+        aws_runner["external_id"] = request.form.get("aws_external_id", "").strip()
+        aws_runner["vpc_id"] = request.form.get("aws_vpc_id", "").strip()
+        aws_runner["subnet_id"] = request.form.get("aws_subnet_id", "").strip()
+        aws_runner["security_group_id"] = request.form.get("aws_security_group_id", "").strip()
+        aws_runner["runner_instance_profile_name"] = (
+            request.form.get("aws_runner_instance_profile_name", "TidbPovRunnerInstanceRole").strip()
+            or "TidbPovRunnerInstanceRole"
+        )
+        aws_runner["runner_role_arn"] = request.form.get("aws_runner_role_arn", "").strip()
+        aws_runner["instance_size"] = request.form.get("aws_instance_size", "medium").strip().lower() or "medium"
+        allowed_instance_types = [
+            part.strip()
+            for part in re.split(r"[\n,\\s]+", request.form.get("aws_allowed_instance_types", "").strip())
+            if part.strip()
+        ]
+        aws_runner["allowed_instance_types"] = (
+            allowed_instance_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+        )
+        aws_runner["max_instances_per_run"] = max(
+            1,
+            to_int(
+                request.form.get("aws_max_instances_per_run"),
+                int(DEFAULT_CFG["aws_runner"]["max_instances_per_run"]),
+            ),
+        )
+        aws_runner["summary_upload_only"] = to_bool(request.form.get("aws_summary_upload_only"), True)
+        aws_runner["run_timeout_minutes"] = max(10, to_int(request.form.get("aws_run_timeout_minutes"), 180))
 
         save_cfg(config_path, cfg)
         action = str(request.form.get("save_action", "save")).strip().lower()

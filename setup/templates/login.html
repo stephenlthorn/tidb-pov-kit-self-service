@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TiDB PoV - Sign In</title>
+  <style>
+    :root {
+      --bg: #07090d;
+      --surface: #0f1319;
+      --line: #252c36;
+      --text: #ecf0f5;
+      --muted: #98a2b1;
+      --primary: #ff7a1a;
+      --danger: #ff7b8a;
+      --success: #58c58f;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      background: radial-gradient(900px 500px at -10% -20%, rgba(126, 29, 29, 0.26), transparent 62%), var(--bg);
+      color: var(--text);
+      font-family: "SFMono-Regular", Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    }
+    .card {
+      width: min(520px, 92vw);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: linear-gradient(180deg, #121722 0%, #0d1118 100%);
+      padding: 20px;
+      display: grid;
+      gap: 14px;
+    }
+    h1 { margin: 0; font-size: 1.2rem; }
+    p { margin: 0; color: var(--muted); font-size: 0.9rem; }
+    .field { display: grid; gap: 6px; }
+    label { font-size: 0.78rem; color: #b6c0cf; text-transform: uppercase; letter-spacing: 0.05em; }
+    input {
+      width: 100%;
+      border: 1px solid #313949;
+      border-radius: 8px;
+      background: #0a0f16;
+      color: var(--text);
+      padding: 11px;
+      font: inherit;
+    }
+    .row { display: grid; gap: 10px; grid-template-columns: 1fr 1fr; }
+    .btn {
+      border: 1px solid #6a4327;
+      border-radius: 8px;
+      background: var(--primary);
+      color: #fff;
+      padding: 11px 14px;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .msg { border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; font-size: 0.83rem; }
+    .msg.error { border-color: #7a3846; color: #ffd6dd; background: rgba(152, 47, 69, 0.16); }
+    .msg.warning { border-color: #7f6139; color: #ffe5bf; background: rgba(183, 120, 37, 0.16); }
+    .msg.success { border-color: #2f704f; color: #ccffe6; background: rgba(44, 116, 77, 0.16); }
+    a { color: #ffab6d; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div>
+      <h1>Sign in to TiDB PoV</h1>
+      <p>Use your account email and password. Need access? Use an invite code to sign up.</p>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        {% for category, message in messages %}
+          <div class="msg {{ category }}">{{ message }}</div>
+        {% endfor %}
+      {% endif %}
+    {% endwith %}
+
+    <form method="post" action="/login">
+      <input type="hidden" name="next" value="{{ next_url }}" />
+      <div class="field">
+        <label>Email</label>
+        <input type="email" name="email" required />
+      </div>
+      <div class="field">
+        <label>Password</label>
+        <input type="password" name="password" required />
+      </div>
+      <div class="row">
+        <button class="btn" type="submit">Sign In</button>
+        <a href="/signup" style="align-self:center;justify-self:end;">Create account with invite</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>

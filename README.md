@@ -46,6 +46,13 @@ cp config.yaml.example config.yaml
 # Open config.yaml and fill in host, port, user, password
 ```
 
+Optional: preload AWS runner defaults for cross-account execution in UI/config:
+
+```bash
+cp .env.example .env
+# export vars from .env into your shell before launching web UI
+```
+
 Optionally add your own SQL queries under `customer_queries:` to validate them
 in Module 0 and include them in the OLTP workload.
 
@@ -84,6 +91,14 @@ Dark web UI:
 2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
 3. Use Test Planner to view per-module test insights and choose all/some suites before execution
 4. Run security screener, run defaults, build report-only, and clear/reset data
+
+UI access control (invite-based):
+1. First launch redirects to `/setup-admin` to create the first admin account.
+2. Admin signs in and opens the `Admin` tab.
+3. Admin can generate either:
+   - email-scoped invite link/code (restricted to one email), or
+   - open invite code (usable by any email, with max-use and expiry controls).
+4. Invitees open `/signup`, enter email + password + invite code, and get user access.
 
 Workload Lab (Workload Generator flow):
 1. Open the `Workload Lab` tab.
@@ -154,6 +169,26 @@ comparison_db:
 # Tier metadata (wizard updates this)
 tier:
   selected: "serverless"   # serverless | essential | premium | dedicated | byoc
+
+# Optional: launch workload generators in customer AWS account (AssumeRole)
+aws_runner:
+  enabled: false
+  launch_mode: "customer_assume_role"
+  connectivity_mode: "private_endpoint"   # private_endpoint | public_endpoint
+  aws_region: "us-east-1"
+  customer_account_id: "219248915861"
+  customer_assume_role_arn: "arn:aws:iam::219248915861:role/TidbPovCustomerRunnerLaunchRole"
+  external_id: "tidbpov-...generated..."
+  vpc_id: "vpc-..."
+  subnet_id: "subnet-..."
+  security_group_id: "sg-..."
+  runner_instance_profile_name: "TidbPovRunnerInstanceRole"
+  runner_role_arn: "arn:aws:iam::219248915861:role/TidbPovRunnerInstanceRole"
+  instance_size: "medium"                  # small | medium | large
+  allowed_instance_types: ["c7i.2xlarge","c7i.4xlarge","c7i.8xlarge"]
+  max_instances_per_run: 8
+  summary_upload_only: true
+  run_timeout_minutes: 180
 
 test:
   data_scale:           "small"     # serverless default: small
