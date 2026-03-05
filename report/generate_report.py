@@ -5,21 +5,23 @@ generate_report.py — Produces a professional PDF PoV results report.
 Layout:
   Page 1:  Cover + Executive Summary (KPI cards)
   Page 2:  Module status table
-  Page 3:  Baseline OLTP performance charts (latency + TPS by concurrency)
-  Page 4:  Elastic scale time-series chart
-  Page 5:  HA recovery chart (RTO visualisation)
-  Page 6:  Write contention comparison (sequential vs AUTO_RANDOM)
-  Page 7:  HTAP chart (OLTP-only vs HTAP p99)
-  Page 8:  MySQL compatibility heatmap
-  Page 9:  Data import comparison bar chart
-  Page 10: TCO model (3-year cost comparison)
-  Page 11: (Optional) Vector search QPS chart
-  Page 12: Appendix — raw latency table
+  Page 3:  Data population snapshot
+  Page 4:  Baseline OLTP performance charts (latency + TPS by concurrency)
+  Page 5:  Warm workload stability chart
+  Page 6:  Elastic scale time-series chart
+  Page 7:  HA recovery chart (RTO visualisation)
+  Page 8:  Write contention comparison (sequential vs AUTO_RANDOM)
+  Page 9:  HTAP chart (OLTP-only vs HTAP p99)
+  Page 10: MySQL compatibility heatmap
+  Page 11: Data import comparison bar chart
+  Page 12: TCO model (3-year cost comparison)
+  Page 13: (Optional) Vector search QPS chart
+  Page 14: Appendix — raw latency table
 
 Usage:
     python report/generate_report.py [config.yaml]
 """
-import sys, os, json, time, io
+import sys, os, json, time, io, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import yaml
@@ -173,16 +175,23 @@ def _chart_baseline(metrics) -> plt.Figure:
     mod  = metrics["modules"].get("01_baseline_perf", {})
     tidb = mod.get("tidb", {})
     comp_label = metrics.get("comparison_label") or "Comparison DB"
-    phases = sorted(tidb.keys())
+    phase_rows = []
+    for ph, stats in tidb.items():
+        if not isinstance(stats, dict):
+            continue
+        if re.fullmatch(r"c\d+", str(ph)):
+            phase_rows.append((int(str(ph)[1:]), str(ph), stats))
+    phase_rows.sort(key=lambda x: x[0])
+
+    if not phase_rows:
+        return _empty_chart("No baseline OLTP phase data")
+
+    phases = [row[1] for row in phase_rows]
     concs  = []
     p99s   = []
     tpss   = []
-    for ph in phases:
-        s = tidb[ph]
-        try:
-            concs.append(int(ph.lstrip("c")))
-        except Exception:
-            concs.append(ph)
+    for conc, _phase, s in phase_rows:
+        concs.append(conc)
         p99s.append(s.get("p99_ms", 0))
         tpss.append(s.get("tps", 0))
 
@@ -218,6 +227,88 @@ def _chart_baseline(metrics) -> plt.Figure:
     ax2.set_title("Throughput (TPS) vs Concurrency")
     ax2.legend()
     ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_warm_steady(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("01_baseline_perf", {})
+    tidb = mod.get("tidb", {})
+    warm_stats = tidb.get("warm_steady", {}) if isinstance(tidb, dict) else {}
+    ts = mod.get("time_series", {}).get("warm_steady", []) if isinstance(mod.get("time_series"), dict) else []
+
+    if ts:
+        elapsed = [r.get("elapsed_sec", 0) for r in ts]
+        p99 = [r.get("p99_ms", 0) for r in ts]
+        tps = [r.get("tps", 0) for r in ts]
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
+        ax1.plot(elapsed, p99, color=_rgb(BLUE), lw=1.7)
+        ax1.set_ylabel("p99 Latency (ms)")
+        ax1.set_title("Warm Workload: Latency Stability Over Time")
+        ax1.grid(alpha=0.3)
+
+        ax2.plot(elapsed, tps, color=_rgb(GREEN), lw=1.7)
+        ax2.fill_between(elapsed, tps, alpha=0.2, color=_rgb(GREEN))
+        ax2.set_xlabel("Elapsed (seconds)")
+        ax2.set_ylabel("TPS")
+        ax2.set_title("Warm Workload: Throughput Over Time")
+        ax2.grid(alpha=0.3)
+
+        fig.tight_layout()
+        return fig
+
+    if warm_stats:
+        labels = ["p50", "p95", "p99"]
+        vals = [
+            warm_stats.get("p50_ms", 0),
+            warm_stats.get("p95_ms", 0),
+            warm_stats.get("p99_ms", 0),
+        ]
+        fig, ax = plt.subplots(figsize=(8, 4))
+        bars = ax.bar(labels, vals, color=[_rgb(BLUE), _rgb(ORANGE), _rgb(RED)])
+        for bar, val in zip(bars, vals):
+            ax.text(bar.get_x() + bar.get_width() / 2, bar.get_height(), f"{val:.1f}", ha="center", va="bottom")
+        ax.set_ylabel("Latency (ms)")
+        ax.set_title("Warm Workload Steady-State Latency")
+        ax.grid(axis="y", alpha=0.3)
+        fig.tight_layout()
+        return fig
+
+    return _empty_chart("No warm workload data")
+
+
+def _chart_data_population(metrics) -> plt.Figure:
+    manifest = metrics.get("data_manifest", {}) or {}
+    counts = manifest.get("counts", {}) if isinstance(manifest, dict) else {}
+    if not isinstance(counts, dict) or not counts:
+        return _empty_chart("No data manifest available")
+
+    rows = [(str(k), int(v)) for k, v in counts.items() if isinstance(v, (int, float))]
+    if not rows:
+        return _empty_chart("No row counts in manifest")
+    rows.sort(key=lambda x: x[1], reverse=True)
+
+    labels = [k.replace("_", " ") for k, _ in rows]
+    vals = [v for _, v in rows]
+    y = np.arange(len(labels))
+
+    fig, ax = plt.subplots(figsize=(12, max(4.5, len(labels) * 0.35)))
+    bars = ax.barh(y, vals, color=_rgb(BLUE), alpha=0.8)
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis()
+    ax.set_xlabel("Rows")
+    ax.set_title("Data Population by Table")
+    ax.grid(axis="x", alpha=0.3)
+
+    if max(vals) / max(min(vals), 1) > 50:
+        ax.set_xscale("log")
+        ax.set_xlabel("Rows (log scale)")
+
+    for bar, val in zip(bars, vals):
+        ax.text(bar.get_width(), bar.get_y() + bar.get_height() / 2, f" {val:,}", va="center", fontsize=8)
 
     fig.tight_layout()
     return fig
@@ -527,11 +618,28 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         pdf.ln()
     pdf.ln(5)
 
-    # ── Pages 3-10: Charts ────────────────────────────────────────────────────
+    # ── Pages 3+: Charts ──────────────────────────────────────────────────────
+    manifest = metrics.get("data_manifest", {}) or {}
+    _add_chart_page(
+        pdf,
+        "Data Population Snapshot",
+        _chart_data_population(metrics),
+        f"Scale: {manifest.get('scale', 'n/a')} | "
+        f"Rows generated across schemas: {sum((manifest.get('counts') or {}).values()) if isinstance(manifest.get('counts'), dict) else 'n/a'} | "
+        f"Generation time: {manifest.get('generation_duration_sec', 'n/a')} sec",
+    )
+
     _add_chart_page(pdf, "Baseline OLTP Performance",
                     _chart_baseline(metrics),
-                    "OLTP workload across concurrency levels (c8–c64). "
+                    "OLTP workload across configured concurrency levels. "
                     "Shows p99 latency and transactions per second.")
+
+    _add_chart_page(
+        pdf,
+        "Warm Workload Stability",
+        _chart_warm_steady(metrics),
+        "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time.",
+    )
 
     _add_chart_page(pdf, "Elastic Auto-Scaling",
                     _chart_scale(metrics),

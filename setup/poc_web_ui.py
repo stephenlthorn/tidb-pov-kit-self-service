@@ -129,6 +129,9 @@ DEFAULT_CFG = {
         "duration_seconds": 120,
         "concurrency_levels": [8, 16, 32],
         "ramp_duration_seconds": 300,
+        "warm_phase_enabled": True,
+        "warm_phase_duration_seconds": 300,
+        "warm_phase_concurrency": 32,
         "import_rows": 1000000,
         "workload_mix": "mixed",
         "read_weight_multiplier": 1.0,
@@ -452,6 +455,9 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "duration_seconds": 60,
             "concurrency_levels": [4, 8, 16],
             "ramp_duration_seconds": 120,
+            "warm_phase_enabled": True,
+            "warm_phase_duration_seconds": 180,
+            "warm_phase_concurrency": 16,
             "import_rows": 250000,
             "workload_mix": "mixed",
             "read_weight_multiplier": 1.0,
@@ -472,6 +478,9 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "duration_seconds": 240,
             "concurrency_levels": [16, 32, 64],
             "ramp_duration_seconds": 480,
+            "warm_phase_enabled": True,
+            "warm_phase_duration_seconds": 600,
+            "warm_phase_concurrency": 64,
             "import_rows": 3000000,
             "workload_mix": "mixed",
             "read_weight_multiplier": 1.2,
@@ -566,6 +575,18 @@ def normalize_cfg(cfg: Dict) -> Dict:
         cfg["test"]["write_weight_multiplier"] = float(cfg.get("test", {}).get("write_weight_multiplier", 1.0))
     except (TypeError, ValueError):
         cfg["test"]["write_weight_multiplier"] = 1.0
+
+    cfg["test"]["warm_phase_enabled"] = bool(cfg.get("test", {}).get("warm_phase_enabled", True))
+    cfg["test"]["warm_phase_duration_seconds"] = _to_int_safe(
+        cfg.get("test", {}).get("warm_phase_duration_seconds"),
+        300,
+        30,
+    )
+    cfg["test"]["warm_phase_concurrency"] = _to_int_safe(
+        cfg.get("test", {}).get("warm_phase_concurrency"),
+        max(cfg.get("test", {}).get("concurrency_levels", [8, 16, 32])),
+        1,
+    )
 
     try:
         batch = int(cfg.get("test", {}).get("import_batch_size", 5000))
@@ -1557,6 +1578,9 @@ def create_app(config_path: Path) -> Flask:
         test["duration_seconds"] = to_int(request.form.get("test_duration_seconds"), 120)
         test["concurrency_levels"] = parse_concurrency(request.form.get("test_concurrency_levels", "8,16,32"), [8, 16, 32])
         test["ramp_duration_seconds"] = to_int(request.form.get("test_ramp_duration_seconds"), 300)
+        test["warm_phase_enabled"] = to_bool(request.form.get("test_warm_phase_enabled"), True)
+        test["warm_phase_duration_seconds"] = max(30, to_int(request.form.get("test_warm_phase_duration_seconds"), 300))
+        test["warm_phase_concurrency"] = max(1, to_int(request.form.get("test_warm_phase_concurrency"), max(test["concurrency_levels"])))
         test["import_rows"] = to_int(request.form.get("test_import_rows"), 1000000)
         test["workload_mix"] = request.form.get("test_workload_mix", "mixed")
         test["read_weight_multiplier"] = to_float(request.form.get("test_read_weight_multiplier"), 1.0)

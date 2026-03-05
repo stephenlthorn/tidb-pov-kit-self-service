@@ -2618,6 +2618,17 @@
               <div class="field"><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
               <div class="field"><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
             </div>
+            <div class="grid cols-4">
+              <div class="field"><label>Warm Phase Enabled</label>
+                <select name="test_warm_phase_enabled">
+                  <option value="true" {% if cfg.test.warm_phase_enabled %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.test.warm_phase_enabled %}selected{% endif %}>false</option>
+                </select>
+              </div>
+              <div class="field"><label>Warm Phase Duration Seconds</label><input type="number" min="30" name="test_warm_phase_duration_seconds" value="{{ cfg.test.warm_phase_duration_seconds }}" /></div>
+              <div class="field"><label>Warm Phase Concurrency</label><input type="number" min="1" name="test_warm_phase_concurrency" value="{{ cfg.test.warm_phase_concurrency }}" /></div>
+              <div class="field"></div>
+            </div>
             <div class="grid cols-3">
               <div class="field"><label>Read Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_read_weight_multiplier" value="{{ cfg.test.read_weight_multiplier }}" /></div>
               <div class="field"><label>Write Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_write_weight_multiplier" value="{{ cfg.test.write_weight_multiplier }}" /></div>

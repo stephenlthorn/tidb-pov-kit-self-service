@@ -6,7 +6,7 @@ data_manifest.json into a single JSON payload used by generate_report.py.
 Run standalone:
     python report/collect_metrics.py > results/metrics_summary.json
 """
-import sys, os, json, time, argparse
+import sys, os, json, time, argparse, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from lib.result_store import (
@@ -135,19 +135,55 @@ def collect() -> dict:
 
 
 def _get_phases_for_module(mod: str) -> list:
-    """Return known phase names per module."""
+    """Return ordered phase names per module, preferring actual observed phases."""
     phase_map = {
-        "01_baseline_perf":    ["c8", "c16", "c32", "c64"],
-        "02_elastic_scale":    ["ramp_up", "sustain", "ramp_down"],
-        "03_high_availability":["warmup", "during_failure", "recovery"],
-        "03b_write_contention":["sequential", "autorand"],
-        "04_htap_concurrent":  ["oltp_only", "htap", "analytics"],
-        "05_online_ddl":       [],   # phases are dynamic DDL step names
-        "06_mysql_compat":     [],
-        "07_data_import":      [],
-        "08_vector_search":    ["ann_conc1", "ann_conc4", "ann_conc8", "ann_conc16", "hybrid"],
+        "01_baseline_perf": ["c8", "c16", "c32", "c64", "warm_steady"],
+        "02_elastic_scale": ["ramp_up", "sustain", "ramp_down"],
+        "03_high_availability": ["warmup", "during_failure", "recovery"],
+        "03b_write_contention": ["sequential", "autorand"],
+        "04_htap_concurrent": ["oltp_only", "htap", "analytics"],
+        "05_online_ddl": [],  # phases are dynamic DDL step names
+        "06_mysql_compat": [],
+        "07_data_import": [],
+        "08_vector_search": ["ann_conc1", "ann_conc4", "ann_conc8", "ann_conc16", "hybrid"],
     }
-    return phase_map.get(mod, [])
+    default_phases = phase_map.get(mod, [])
+    observed = _get_observed_phases(mod)
+    if not observed:
+        return default_phases
+    return _order_phases(mod, observed, default_phases)
+
+
+def _get_observed_phases(mod: str) -> list:
+    with _conn() as c:
+        rows = c.execute(
+            "SELECT DISTINCT phase FROM results WHERE module=? AND phase IS NOT NULL AND TRIM(phase) <> ''",
+            (mod,),
+        ).fetchall()
+    return [str(r["phase"]) for r in rows if r["phase"] is not None]
+
+
+def _order_phases(mod: str, observed: list, defaults: list) -> list:
+    seen = set()
+    ordered = []
+    for phase in observed:
+        if phase not in seen:
+            ordered.append(phase)
+            seen.add(phase)
+
+    if mod == "01_baseline_perf":
+        def baseline_key(phase: str):
+            m = re.fullmatch(r"c(\d+)", phase)
+            if m:
+                return (0, int(m.group(1)))
+            if phase == "warm_steady":
+                return (1, 0)
+            return (2, phase)
+
+        return sorted(ordered, key=baseline_key)
+
+    default_rank = {name: idx for idx, name in enumerate(defaults)}
+    return sorted(ordered, key=lambda p: (0, default_rank[p]) if p in default_rank else (1, p))
 
 
 def _build_summary(payload: dict) -> dict:

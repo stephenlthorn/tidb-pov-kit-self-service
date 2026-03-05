@@ -23,6 +23,9 @@ def run(cfg: dict):
     counts = _get_counts(cfg)
     concurrency_levels = cfg["test"].get("concurrency_levels", [16, 64, 256])
     duration = cfg["test"].get("duration_seconds", 300)
+    warm_enabled = bool(cfg.get("test", {}).get("warm_phase_enabled", True))
+    warm_duration = max(30, int(cfg.get("test", {}).get("warm_phase_duration_seconds", max(300, duration))))
+    warm_concurrency = max(1, int(cfg.get("test", {}).get("warm_phase_concurrency", max(concurrency_levels or [16]))))
     customer_queries = cfg.get("customer_queries", [])
     customer_ratio = cfg.get("customer_query_ratio", 0.3)
 
@@ -60,6 +63,10 @@ def run(cfg: dict):
         print(f"  Comparison DB: {comparison_label}")
     elif comparison_cfg.get("enabled"):
         print(f"  Comparison DB disabled for run: {comparison_reason(comparison_cfg)}")
+    if warm_enabled:
+        print(f"  Warm workload phase: enabled ({warm_concurrency} threads, {warm_duration}s)")
+    else:
+        print("  Warm workload phase: disabled")
     print(f"{'='*60}")
 
     summary = {}
@@ -78,6 +85,29 @@ def run(cfg: dict):
         if has_comparison:
             summary[phase]["comparison"] = get_latency_stats(
                 MODULE, phase=phase, db_label=comparison_label)
+
+    if warm_enabled:
+        phase = "warm_steady"
+        print(f"\n  Warm steady-state run: concurrency={warm_concurrency}, duration={warm_duration}s")
+        runner.run(
+            pool,
+            concurrency=warm_concurrency,
+            duration_sec=warm_duration,
+            phase=phase,
+            customer_queries=customer_queries,
+            customer_ratio=customer_ratio,
+        )
+        tidb_stats = get_latency_stats(MODULE, phase=phase, db_label="tidb")
+        if tidb_stats.get("count", 0) > 0:
+            any_success = True
+        summary[phase] = {
+            "concurrency": warm_concurrency,
+            "tidb": tidb_stats,
+        }
+        if has_comparison:
+            summary[phase]["comparison"] = get_latency_stats(
+                MODULE, phase=phase, db_label=comparison_label
+            )
 
     _print_summary(summary)
     if any_success:
