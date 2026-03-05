@@ -52,7 +52,6 @@ RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
     SCENARIOS,
-    SECURITY_ITEMS,
     TIER_LABELS,
     TIERS,
     build_tier_modules,
@@ -513,13 +512,6 @@ QUICKSTART_TEST_CATEGORIES = {
     "data_import": "Migration",
     "vector_search": "AI / Vector",
 }
-
-QUICKSTART_SECURITY_MODES = {
-    "keep_existing": "Keep existing screener state",
-    "all_pass": "Mark all controls PASS (for controlled test envs)",
-    "all_na": "Mark all controls N/A (forces review-required hold)",
-}
-
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Launch PoC web UI")
@@ -1366,111 +1358,6 @@ def drop_configured_database(cfg: Dict) -> Tuple[bool, str]:
         return False, str(e)
 
 
-def security_from_cfg(cfg: Dict) -> Dict:
-    sec = cfg.get("pre_poc", {}).get("security")
-    if isinstance(sec, dict):
-        return sec
-
-    items = []
-    for item in SECURITY_ITEMS:
-        items.append(
-            {
-                "id": item["id"],
-                "prompt": item["prompt"],
-                "status": "not_assessed",
-                "blocking": item["blocking"],
-                "owner": item["owner"],
-            }
-        )
-
-    return {
-        "items": items,
-        "blocking_failures": [],
-        "non_blocking_failures": [],
-        "recommendation": "review_required",
-        "proceed": True,
-    }
-
-
-def build_security_result(form) -> Dict:
-    items = []
-    for item in SECURITY_ITEMS:
-        key = f"sec_{item['id']}"
-        status = (form.get(key) or "not_assessed").lower()
-        if status not in {"pass", "fail", "na", "not_assessed"}:
-            status = "not_assessed"
-
-        items.append(
-            {
-                "id": item["id"],
-                "prompt": item["prompt"],
-                "status": status,
-                "blocking": item["blocking"],
-                "owner": item["owner"],
-            }
-        )
-
-    blocking_failures = [r["id"] for r in items if r["status"] == "fail" and r["blocking"]]
-    non_blocking_failures = [r["id"] for r in items if r["status"] == "fail" and not r["blocking"]]
-    has_review_required = any(r["status"] in {"na", "not_assessed"} for r in items)
-
-    if blocking_failures:
-        recommendation = "hold"
-        proceed = False
-    elif has_review_required:
-        recommendation = "review_required"
-        proceed = False
-    elif non_blocking_failures:
-        recommendation = "proceed_with_risks"
-        proceed = True
-    else:
-        recommendation = "proceed"
-        proceed = True
-
-    return {
-        "items": items,
-        "blocking_failures": blocking_failures,
-        "non_blocking_failures": non_blocking_failures,
-        "recommendation": recommendation,
-        "proceed": proceed,
-    }
-
-
-def build_security_profile(profile: str) -> Dict | None:
-    profile = str(profile or "").strip().lower()
-    if profile not in {"all_pass", "all_na"}:
-        return None
-
-    status = "pass" if profile == "all_pass" else "na"
-    items = [
-        {
-            "id": item["id"],
-            "prompt": item["prompt"],
-            "status": status,
-            "blocking": item["blocking"],
-            "owner": item["owner"],
-        }
-        for item in SECURITY_ITEMS
-    ]
-
-    if profile == "all_pass":
-        return {
-            "items": items,
-            "blocking_failures": [],
-            "non_blocking_failures": [],
-            "recommendation": "proceed",
-            "proceed": True,
-        }
-
-    return {
-        "items": items,
-        "blocking_failures": [],
-        "non_blocking_failures": [],
-        "recommendation": "review_required",
-        "proceed": False,
-    }
-
-
 def create_app(config_path: Path) -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
     app.secret_key = "tidb-pov-local-ui"
@@ -1479,7 +1366,6 @@ def create_app(config_path: Path) -> Flask:
     def index():
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
-        sec = security_from_cfg(cfg)
         st = run_status()
         report_ready = REPORT_PDF.exists()
         report_dashboard = build_report_dashboard()
@@ -1501,8 +1387,6 @@ def create_app(config_path: Path) -> Flask:
             tiers=tiers_for_ui,
             tier_labels=UI_TIER_LABELS,
             scenarios=SCENARIOS,
-            security_items=SECURITY_ITEMS,
-            security_result=sec,
             module_order=MODULE_ORDER,
             module_labels=MODULE_LABELS,
             config_path=str(config_path),
@@ -1518,7 +1402,6 @@ def create_app(config_path: Path) -> Flask:
             quickstart_preset_suites=QUICKSTART_PRESET_SUITES,
             quickstart_preset_modules=QUICKSTART_PRESET_MODULES,
             quickstart_test_categories=QUICKSTART_TEST_CATEGORIES,
-            quickstart_security_modes=QUICKSTART_SECURITY_MODES,
             module_insights=MODULE_INSIGHTS,
             module_detail_notes=MODULE_DETAIL_NOTES,
             module_suites=MODULE_SUITES,
@@ -1863,22 +1746,6 @@ def create_app(config_path: Path) -> Flask:
         save_cfg(config_path, cfg)
         flash(f"Applied tier profile: {ui_tier_label(selected_tier)}.", "success")
         return redirect(url_for("index") + "#manual-config")
-
-    @app.post("/security")
-    def security_route():
-        cfg = load_cfg(config_path)
-        result = build_security_result(request.form)
-
-        cfg.setdefault("pre_poc", {})
-        cfg["pre_poc"]["security"] = result
-        cfg["pre_poc"]["go_no_go"] = "proceed" if result["proceed"] else "hold"
-
-        save_cfg(config_path, cfg)
-        flash(
-            f"Security screener saved. Recommendation: {result['recommendation']}",
-            "warning" if not result["proceed"] else "success",
-        )
-        return redirect(url_for("index") + "#security")
 
     @app.post("/run-defaults")
     def run_defaults_route():

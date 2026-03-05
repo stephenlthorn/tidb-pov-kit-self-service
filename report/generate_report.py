@@ -109,7 +109,7 @@ class PoVReport(FPDF):
         self.set_font("Helvetica", "I", 7)
         self.set_text_color(*DARK_GREY)
         self.cell(0, 5,
-                  f"Confidential | {time.strftime('%B %Y')} | Page {self.page_no()}",
+                  f"Generated {time.strftime('%B %Y')} | Page {self.page_no()}",
                   align="C")
 
     def section_title(self, text):

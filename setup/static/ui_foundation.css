@@ -53,26 +53,6 @@
   --z-toast: 60;
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
-  --bg: #f7f8fb;
-  --surface: #ffffff;
-  --surface-subtle: #f2f4f8;
-  --surface-muted: #eef1f6;
-  --border: #d7dde8;
-  --border-strong: #c2cbd9;
-  --text: #182031;
-  --text-muted: #4f5d73;
-  --text-subtle: #6b788f;
-  --accent: #49679d;
-  --accent-strong: #3d5a8f;
-  --focus: #5677b2;
-  --success: #2f7a57;
-  --warning: #8c6938;
-  --danger: #964646;
-  --overlay: rgba(19, 25, 36, 0.28);
-}
-
 * {
   box-sizing: border-box;
 }

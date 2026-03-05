@@ -902,146 +902,6 @@
       font-family: inherit;
     }
 
-    .security-list {
-      display: grid;
-      gap: 10px;
-    }
-
-    .security-row {
-      display: grid;
-      grid-template-columns: 1fr 290px;
-      gap: 12px;
-      align-items: stretch;
-      border: 1px solid #2b323d;
-      border-radius: 8px;
-      background: linear-gradient(180deg, #0f141a, #0b1015);
-      padding: 10px;
-    }
-
-    .security-row.blocking {
-      border-color: #5f3a25;
-      box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.08);
-    }
-
-    .security-title {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      margin-bottom: 4px;
-      flex-wrap: wrap;
-    }
-
-    .security-id {
-      font-size: 0.8rem;
-      color: #f0f5fc;
-      font-weight: 700;
-    }
-
-    .security-badge {
-      border: 1px solid #3b4552;
-      border-radius: 999px;
-      padding: 2px 8px;
-      font-size: 0.7rem;
-      color: #bcc7d6;
-      background: #10151c;
-      text-transform: uppercase;
-    }
-
-    .security-badge.blocking {
-      border-color: #6e4326;
-      color: #ffd5b8;
-      background: rgba(255, 122, 26, 0.08);
-    }
-
-    .security-owner {
-      font-size: 0.72rem;
-      color: #9ea8b7;
-      margin-bottom: 5px;
-      text-transform: uppercase;
-    }
-
-    .security-prompt {
-      font-size: 0.84rem;
-      color: #dbe3ee;
-    }
-
-    .toggle-group {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 0;
-      border: 1px solid #384352;
-      border-radius: 8px;
-      overflow: hidden;
-      min-height: 40px;
-    }
-
-    .toggle-group input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .toggle-group label {
-      margin: 0;
-      padding: 10px 8px;
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      text-align: center;
-      border-right: 1px solid #384352;
-      color: #b9c4d3;
-      background: #11161d;
-      cursor: pointer;
-      letter-spacing: 0.16px;
-    }
-
-    .toggle-group label:last-child {
-      border-right: none;
-    }
-
-    .toggle-group input:checked + label {
-      color: #18100b;
-      background: linear-gradient(180deg, #ff8e38, #ff7618);
-      font-weight: 700;
-    }
-
-    .toggle-group input[value="na"]:checked + label {
-      color: #e3e9f2;
-      background: linear-gradient(180deg, #3f4f66, #2d394a);
-    }
-
-    .toggle-group input[value="fail"]:checked + label {
-      color: #ffe3e7;
-      background: linear-gradient(180deg, #8b3448, #5d2431);
-    }
-
-    .security-toolbar {
-      display: grid;
-      gap: 10px;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      margin-bottom: 10px;
-    }
-
-    .security-summary {
-      margin-top: 10px;
-      font-size: 0.82rem;
-      color: #a8b2c0;
-      display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .security-summary .pill {
-      border: 1px solid #364151;
-      border-radius: 999px;
-      padding: 4px 9px;
-      background: #10151b;
-      color: #d3dbe7;
-      font-size: 0.75rem;
-    }
-
-    .pill.pass { border-color: #2f7e5f; color: #d7ffe7; }
-    .pill.fail { border-color: #8f3d55; color: #ffd8e3; }
-
     .target-note {
       border: 1px solid #364151;
       border-radius: 8px;
@@ -1358,8 +1218,6 @@
       .grid.cols-4,
       .grid.cols-3,
       .grid.cols-2,
-      .security-row,
-      .security-toolbar,
       .report-grid-two,
       .line-grid,
       .module-grid,
@@ -1398,12 +1256,8 @@
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
       <button class="tab-btn" data-tab-btn="workload-lab"><span class="ico">[W]</span>Workload Lab</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
-      <button class="tab-btn" data-tab-btn="security"><span class="ico">[S]</span>Security Screener</button>
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
     </nav>
-    <div class="sidebar-footer">
-      <button class="btn soft" type="button" id="theme_toggle_btn">Light</button>
-    </div>
   </aside>
 
   <main class="main">
@@ -1444,10 +1298,6 @@
 
         <h2>Start a PoV</h2>
         <p class="help">Choose one path to configure your deployment.</p>
-        <div class="quickstart-cta">
-          <div class="headline">Configuration Paths</div>
-          <div class="text">Use the Deployment Wizard for guided setup, or Manual Configuration for full control.</div>
-        </div>
         <div class="path-grid">
           <div class="path-card">
             <div class="title">Deployment Wizard</div>
@@ -1771,7 +1621,7 @@
             <div class="pair"><div class="pk">Last Log Update</div><div class="pv" id="monitor_last_log">{{ run_status.last_log if run_status.last_log else 'n/a' }}</div></div>
             <div class="pair"><div class="pk">Report PDF</div><div class="pv" id="monitor_report_ready">{% if report_ready %}Ready{% else %}Not generated{% endif %}</div></div>
           </div>
-          <pre class="log cli-terminal" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</pre>
+          <div class="log cli-terminal" id="monitor_log_output">{{ run_status.last_lines if run_status.last_lines else 'No log output yet.' }}</div>
         </div>
 
         <div class="line"></div>
@@ -2328,64 +2178,6 @@
       </div>
     </section>
 
-    <section class="tab-pane" data-tab-pane="security">
-      <div class="panel">
-        <h2>Security Screener</h2>
-        <p class="help">Use quick toggles for each control: PASS, NOT PASS, or N/A (default).</p>
-        <form method="post" action="/security">
-          <div class="security-toolbar">
-            <button class="btn soft small" type="button" data-sec-set="pass">Set all PASS</button>
-            <button class="btn soft small" type="button" data-sec-set="fail">Set all NOT PASS</button>
-            <button class="btn soft small" type="button" data-sec-set="na">Set all N/A</button>
-          </div>
-
-          <div class="security-list">
-            {% for item in security_items %}
-              {% set ns = namespace(current='not_assessed') %}
-              {% for row in security_result["items"] %}
-                {% if row["id"] == item.id %}
-                  {% set ns.current = row["status"] %}
-                {% endif %}
-              {% endfor %}
-
-              <div class="security-row {% if item.blocking %}blocking{% endif %}">
-                <div>
-                  <div class="security-title">
-                    <span class="security-id">{{ item.id }}</span>
-                    <span class="security-badge {% if item.blocking %}blocking{% endif %}">{% if item.blocking %}Blocking{% else %}Non-blocking{% endif %}</span>
-                  </div>
-                  <div class="security-owner">Owner: {{ item.owner }}</div>
-                  <div class="security-prompt">{{ item.prompt }}</div>
-                </div>
-
-                <div class="toggle-group">
-                  <input id="{{ item.id }}_pass" type="radio" name="sec_{{ item.id }}" value="pass" {% if ns.current == 'pass' %}checked{% endif %} />
-                  <label for="{{ item.id }}_pass">Pass</label>
-
-                  <input id="{{ item.id }}_fail" type="radio" name="sec_{{ item.id }}" value="fail" {% if ns.current == 'fail' %}checked{% endif %} />
-                  <label for="{{ item.id }}_fail">Not Pass</label>
-
-                  <input id="{{ item.id }}_na" type="radio" name="sec_{{ item.id }}" value="na" {% if ns.current in ['na', 'not_assessed'] %}checked{% endif %} />
-                  <label for="{{ item.id }}_na">N/A</label>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-
-          <div class="line"></div>
-          <div class="actions-grid">
-            <button class="btn warn" type="submit">Save Security Screener</button>
-          </div>
-        </form>
-
-        <div class="security-summary">
-          <span class="pill">Recommendation: {{ security_result.recommendation }}</span>
-          <span class="pill">Blocking failures: {{ security_result.blocking_failures|length }}</span>
-          <span class="pill {% if security_result.proceed %}pass{% else %}fail{% endif %}">Proceed: {{ security_result.proceed }}</span>
-        </div>
-      </div>
-    </section>
-
     <section class="tab-pane" data-tab-pane="manual-config">
       <div class="panel">
         <h2>Manual Configuration</h2>
@@ -2764,17 +2556,6 @@
 
   document.querySelectorAll('[data-tab-jump]').forEach((btn) => {
     btn.addEventListener('click', () => activate(btn.dataset.tabJump));
-  });
-
-  document.querySelectorAll('[data-sec-set]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const next = btn.dataset.secSet;
-      document
-        .querySelectorAll(`input[type="radio"][name^="sec_"][value="${next}"]`)
-        .forEach((radio) => {
-          radio.checked = true;
-        });
-    });
   });
 
   document.querySelectorAll('form[action="/apply-module-suite"]').forEach((formEl) => {
@@ -3197,6 +2978,62 @@
   const monitorRefreshBtn = document.getElementById('monitor_refresh_btn');
   const monitorRefreshStateEl = document.getElementById('monitor_refresh_state');
   const overviewRunInProgressEl = document.getElementById('overview_run_in_progress');
+  const ANSI_PATTERN = /\u001b\[[0-9;]*[A-Za-z]/g;
+
+  function escapeHtml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function classifyCliLine(line) {
+    const raw = String(line || '');
+    const text = raw.trim();
+    if (!text) return 'blank';
+    if (/^=+$/.test(text)) return 'divider';
+    if (/^\[\d+\/\d+\]/.test(text)) return 'phase';
+    if (/(^|\s)(✗|fail|failed|error|exception|traceback|cannot connect|unknown database)(\s|$)/i.test(text)) return 'error';
+    if (/(^|\s)(skipped|warn|warning)(\s|$)/i.test(text)) return 'warn';
+    if (/(^|\s)(✓|pass|passed|complete)(\s|$)/i.test(text)) return 'success';
+    if (/^(module|pov complete|intake artifacts:|to view the report)/i.test(text)) return 'header';
+    return 'info';
+  }
+
+  function markerForKind(kind) {
+    if (kind === 'success') return '✔';
+    if (kind === 'error') return '✖';
+    if (kind === 'warn') return '!';
+    if (kind === 'phase') return '#';
+    if (kind === 'header') return '$';
+    if (kind === 'divider') return '─';
+    return '·';
+  }
+
+  function renderCliOutput(rawOutput, keepBottom) {
+    if (!monitorLogOutputEl) {
+      return;
+    }
+    const normalized = String(rawOutput || '')
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n')
+      .replace(ANSI_PATTERN, '');
+    const lines = normalized.split('\n');
+    const content = lines.length ? lines : ['No log output yet.'];
+    const html = content
+      .map((line) => {
+        const kind = classifyCliLine(line);
+        const marker = markerForKind(kind);
+        return `<div class="cli-line cli-${kind}"><span class="cli-mark">${marker}</span><span class="cli-text">${escapeHtml(line)}</span></div>`;
+      })
+      .join('');
+    monitorLogOutputEl.innerHTML = html;
+    if (keepBottom) {
+      monitorLogOutputEl.scrollTop = monitorLogOutputEl.scrollHeight;
+    }
+  }
 
   function updateMonitorFromStatus(status) {
     if (!status) {
@@ -3223,10 +3060,7 @@
     if (monitorLogOutputEl) {
       const atBottom =
         monitorLogOutputEl.scrollTop + monitorLogOutputEl.clientHeight >= monitorLogOutputEl.scrollHeight - 8;
-      monitorLogOutputEl.textContent = status.last_lines || 'No log output yet.';
-      if (atBottom) {
-        monitorLogOutputEl.scrollTop = monitorLogOutputEl.scrollHeight;
-      }
+      renderCliOutput(status.last_lines || 'No log output yet.', atBottom);
     }
   }
 
@@ -3251,40 +3085,12 @@
   if (monitorRefreshBtn) {
     monitorRefreshBtn.addEventListener('click', refreshMonitorStatus);
   }
+  if (monitorLogOutputEl) {
+    renderCliOutput(monitorLogOutputEl.textContent || 'No log output yet.', true);
+  }
   setInterval(refreshMonitorStatus, 3000);
   refreshMonitorStatus();
-
-  const themeToggleBtn = document.getElementById('theme_toggle_btn');
-
-  function setTheme(nextTheme) {
-    document.documentElement.setAttribute('data-theme', nextTheme);
-    if (themeToggleBtn) {
-      themeToggleBtn.textContent = nextTheme === 'dark' ? 'Light' : 'Dark';
-    }
-    try {
-      window.localStorage.setItem('poc_ui_theme', nextTheme);
-    } catch (err) {
-      // ignore localStorage failures in restricted contexts
-    }
-  }
-
-  if (themeToggleBtn) {
-    themeToggleBtn.addEventListener('click', () => {
-      const current = document.documentElement.getAttribute('data-theme') || 'dark';
-      setTheme(current === 'dark' ? 'light' : 'dark');
-    });
-  }
-
-  try {
-    const savedTheme = window.localStorage.getItem('poc_ui_theme');
-    if (savedTheme === 'light' || savedTheme === 'dark') {
-      setTheme(savedTheme);
-    } else {
-      setTheme('dark');
-    }
-  } catch (err) {
-    setTheme('dark');
-  }
+  document.documentElement.setAttribute('data-theme', 'dark');
 
   const fromHash = window.location.hash ? window.location.hash.slice(1) : 'overview';
   activate(fromHash, false);
