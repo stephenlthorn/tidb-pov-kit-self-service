@@ -14,26 +14,26 @@
   --space-8: 32px;
   --space-9: 40px;
 
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
+  --radius-sm: 2px;
+  --radius-md: 2px;
+  --radius-lg: 4px;
   --radius-pill: 999px;
 
   --border-thin: 1px;
   --border-thick: 2px;
 
-  --bg: #0d1117;
-  --surface: #131922;
-  --surface-subtle: #161d27;
-  --surface-muted: #0f141b;
-  --border: #2a3342;
-  --border-strong: #384457;
-  --text: #e6ebf3;
-  --text-muted: #a9b4c4;
-  --text-subtle: #8a95a6;
-  --accent: #8ea2c8;
-  --accent-strong: #a9b9d8;
-  --focus: #9bb4e7;
+  --bg: #1a1a1a;
+  --surface: #222222;
+  --surface-subtle: #252525;
+  --surface-muted: #1e1e1e;
+  --border: #2a2a2a;
+  --border-strong: #3d3d3d;
+  --text: #e0ddd8;
+  --text-muted: #8a8784;
+  --text-subtle: #5a5754;
+  --accent: #c96442;
+  --accent-strong: #d4724e;
+  --focus: #c96442;
   --success: #4fa37b;
   --warning: #c79a52;
   --danger: #c16565;
@@ -106,7 +106,7 @@ textarea {
 .app-shell {
   min-height: 100vh;
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   background: var(--bg);
 }
 
@@ -168,11 +168,12 @@ textarea {
   display: flex;
   align-items: center;
   gap: var(--space-3);
-  border: var(--border-thin) solid transparent;
-  border-radius: var(--radius-md);
+  border: none;
+  border-left: 2px solid transparent;
+  border-radius: 2px;
   background: transparent;
   color: var(--text-muted);
-  padding: 9px 10px;
+  padding: 8px 10px 8px 12px;
   width: 100%;
   text-align: left;
   cursor: pointer;
@@ -180,14 +181,14 @@ textarea {
 }
 
 .nav-item:hover {
-  background: var(--surface-subtle);
-  border-color: var(--border);
+  background: rgba(255,255,255,0.04);
+  border-left-color: transparent;
   color: var(--text);
 }
 
 .nav-item[aria-current="page"] {
-  background: var(--surface-subtle);
-  border-color: var(--border-strong);
+  background: rgba(255,255,255,0.06);
+  border-left-color: var(--accent);
   color: var(--text);
 }
 
@@ -203,6 +204,10 @@ textarea {
   background: var(--accent);
 }
 
+.nav-dot {
+  border-radius: 2px;
+}
+
 .main-shell {
   min-width: 0;
   display: grid;
@@ -211,8 +216,8 @@ textarea {
 
 .topbar {
   border-bottom: var(--border-thin) solid var(--border);
-  background: color-mix(in srgb, var(--bg) 65%, var(--surface) 35%);
-  padding: var(--space-4) var(--space-7);
+  background: var(--bg);
+  padding: var(--space-3) var(--space-7);
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -223,7 +228,7 @@ textarea {
 }
 
 .topbar-title {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 600;
 }
 

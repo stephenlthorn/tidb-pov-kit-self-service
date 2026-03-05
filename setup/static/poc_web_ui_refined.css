@@ -1,19 +1,19 @@
 :root {
   color-scheme: dark;
-  --bg: #0d1117;
-  --surface: #131922;
-  --surface-2: #161d27;
-  --surface-3: #0f141b;
-  --line: #2a3342;
-  --line-2: #384457;
-  --text: #e6ebf3;
-  --muted: #a9b4c4;
-  --primary: #8ea2c8;
-  --primary-soft: rgba(142, 162, 200, 0.18);
+  --bg: #1a1a1a;
+  --surface: #222222;
+  --surface-2: #252525;
+  --surface-3: #1e1e1e;
+  --line: #2a2a2a;
+  --line-2: #3d3d3d;
+  --text: #e0ddd8;
+  --muted: #8a8784;
+  --primary: #c96442;
+  --primary-soft: rgba(201, 100, 66, 0.12);
   --success: #4fa37b;
   --danger: #c16565;
   --warning: #c79a52;
-  --radius: 10px;
+  --radius: 2px;
   --shadow: 0 2px 10px rgba(7, 10, 15, 0.2);
 }
 
@@ -27,8 +27,8 @@
   --line-2: #c2cbd9;
   --text: #182031;
   --muted: #4f5d73;
-  --primary: #49679d;
-  --primary-soft: rgba(73, 103, 157, 0.14);
+  --primary: #c96442;
+  --primary-soft: rgba(201, 100, 66, 0.10);
   --success: #2f7a57;
   --danger: #964646;
   --warning: #8c6938;
@@ -44,7 +44,7 @@ body {
 
 .layout {
   display: grid !important;
-  grid-template-columns: 240px minmax(0, 1fr);
+  grid-template-columns: 200px minmax(0, 1fr);
   min-height: 100vh;
 }
 
@@ -60,7 +60,7 @@ body {
 .brand {
   border: 1px solid var(--line) !important;
   background: var(--surface) !important;
-  border-radius: 10px !important;
+  border-radius: 2px !important;
   box-shadow: none !important;
 }
 
@@ -132,19 +132,20 @@ body {
   display: flex !important;
   align-items: center !important;
   justify-content: flex-start !important;
-  border: 1px solid transparent !important;
+  border: none !important;
+  border-left: 2px solid transparent !important;
   background: transparent !important;
   color: var(--muted) !important;
-  border-radius: 8px !important;
+  border-radius: 2px !important;
   font-weight: 500 !important;
-  padding: 9px 10px !important;
+  padding: 8px 10px 8px 12px !important;
   transform: none !important;
   box-shadow: none !important;
 }
 
 .sidebar .tab-btn:hover {
-  border-color: var(--line) !important;
-  background: var(--surface-2) !important;
+  border-left-color: transparent !important;
+  background: rgba(255,255,255,0.04) !important;
   color: var(--text) !important;
 }
 
@@ -155,8 +156,8 @@ body {
 }
 
 .sidebar .tab-btn.active {
-  border-color: var(--line-2) !important;
-  background: var(--surface-2) !important;
+  border-left-color: var(--primary) !important;
+  background: rgba(255,255,255,0.06) !important;
   color: var(--text) !important;
   box-shadow: none !important;
 }
@@ -220,7 +221,7 @@ body {
 
 .msg {
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 2px;
   background: var(--surface);
   color: var(--text);
   padding: 10px 12px;
@@ -242,7 +243,7 @@ body {
   border: 1px solid var(--line) !important;
   background: var(--surface) !important;
   box-shadow: none !important;
-  border-radius: 10px !important;
+  border-radius: 2px !important;
 }
 
 .panel {
@@ -262,7 +263,7 @@ body {
   border: 1px solid var(--line-2) !important;
   background: var(--surface-2) !important;
   color: var(--text) !important;
-  border-radius: 8px !important;
+  border-radius: 2px !important;
   box-shadow: none !important;
   text-transform: none !important;
   font-weight: 500 !important;
@@ -330,7 +331,7 @@ textarea {
   border: 1px solid var(--line) !important;
   background: var(--surface-3) !important;
   color: var(--text) !important;
-  border-radius: 8px !important;
+  border-radius: 2px !important;
   min-height: 38px !important;
 }
 
@@ -378,7 +379,7 @@ pre.log,
   background: var(--surface-3) !important;
   color: var(--muted) !important;
   border: 1px solid var(--line) !important;
-  border-radius: 8px !important;
+  border-radius: 2px !important;
   font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace !important;
 }
 
@@ -398,7 +399,7 @@ pre.log,
   width: min(720px, calc(100vw - 28px));
   background: var(--surface);
   border: 1px solid var(--line-2);
-  border-radius: 12px;
+  border-radius: 4px;
   box-shadow: var(--shadow);
   z-index: 100;
   display: none;
@@ -412,7 +413,7 @@ pre.log,
 .command-input {
   width: 100%;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 2px;
   background: var(--surface-3);
   color: var(--text);
   min-height: 38px;
@@ -445,7 +446,7 @@ pre.log,
 
 .kbd {
   border: 1px solid var(--line-2);
-  border-radius: 6px;
+  border-radius: 2px;
   padding: 1px 5px;
   color: var(--muted);
   font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
@@ -454,7 +455,7 @@ pre.log,
 
 .overview-status {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--surface);
   padding: 12px;
   display: grid;
@@ -525,7 +526,7 @@ pre.log,
   flex-direction: column;
   gap: 7px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--surface-2);
   padding: 11px;
   cursor: pointer;
@@ -620,7 +621,7 @@ pre.log,
   align-items: flex-start;
   gap: 10px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--surface-2);
   padding: 10px 11px;
   cursor: pointer;
@@ -674,7 +675,7 @@ pre.log,
 .advanced-details {
   margin-top: 8px;
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--surface-2);
   overflow: hidden;
 }
@@ -728,7 +729,7 @@ pre.log,
 
 .cli-shell {
   border: 1px solid var(--line);
-  border-radius: 10px;
+  border-radius: 2px;
   background: var(--surface-3);
   padding: 10px;
   display: grid;
@@ -775,7 +776,7 @@ pre.log,
 
 @media (max-width: 1400px) {
   .layout {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 200px minmax(0, 1fr);
   }
 }
 
