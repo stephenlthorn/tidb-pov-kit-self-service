@@ -1,0 +1,8 @@
+[project]
+name = "tidb-pov-kit-self-service"
+version = "0.1.0"
+description = "TiDB PoV self-service control plane"
+requires-python = ">=3.10"
+
+[project.scripts]
+app = "app:app"
