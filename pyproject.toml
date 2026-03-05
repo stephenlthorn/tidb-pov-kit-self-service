@@ -3,6 +3,11 @@ name = "tidb-pov-kit-self-service"
 version = "0.1.0"
 description = "TiDB PoV self-service control plane"
 requires-python = ">=3.10"
+dependencies = [
+  "flask>=3.0.0",
+  "pyyaml>=6.0",
+  "mysql-connector-python>=8.0.0"
+]
 
 [project.scripts]
 app = "app:app"

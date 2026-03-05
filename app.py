@@ -4,7 +4,10 @@
 from __future__ import annotations
 
 import os
+import traceback
 from pathlib import Path
+
+from flask import Flask
 
 from setup.poc_web_ui import ROOT, create_app
 
@@ -30,7 +33,21 @@ def resolve_config_path() -> Path:
     return ROOT / "config.yaml"
 
 
-app = create_app(resolve_config_path())
+try:
+    app = create_app(resolve_config_path())
+except Exception:
+    bootstrap_trace = traceback.format_exc()
+    app = Flask(__name__)
+
+    @app.route("/", defaults={"path": ""})
+    @app.route("/<path:path>")
+    def bootstrap_error(path: str):  # pragma: no cover - runtime debug helper
+        return (
+            "TiDB PoV bootstrap error on Vercel:\\n\\n"
+            + bootstrap_trace,
+            500,
+            {"Content-Type": "text/plain; charset=utf-8"},
+        )
 
 
 if __name__ == "__main__":
