@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""TiDB Blaster workload controller utilities.
+"""Workload Generator controller utilities.
 
 This module wraps TiUP Bench command planning/execution for the web UI Workload Lab.
 It focuses on high-throughput rawsql first, with tpcc/ycsb support as additional modes.
@@ -462,7 +462,7 @@ def plan_commands(resolved_cfg: Dict, run_dir: Path | None = None) -> List[Dict]
     for idx, host in enumerate(hosts):
         user, addr = _host_ref(host, str(resolved_cfg.get("loadgen", {}).get("ssh_user") or ""))
         is_local = _is_local_host(addr)
-        remote_sql_path = f"/tmp/tidb-blaster/{run_dir.name if run_dir else 'preview'}/rawsql.sql"
+        remote_sql_path = f"/tmp/workload-generator/{run_dir.name if run_dir else 'preview'}/rawsql.sql"
         sql_for_cmd = sql_source_abs
         if mode == "rawsql" and not is_local:
             sql_for_cmd = remote_sql_path
@@ -759,7 +759,7 @@ def aggregate_summary(resolved_cfg: Dict, run_dir: Path, host_results: List[Dict
     (run_dir / "chart_data.json").write_text(json.dumps(chart_data, indent=2), encoding="utf-8")
 
     md_lines = [
-        f"# TiDB Blaster Summary ({mode})",
+        f"# Workload Generator Summary ({mode})",
         "",
         f"- Status: **{summary['status']}**",
         f"- Tag: `{summary['tag']}`",

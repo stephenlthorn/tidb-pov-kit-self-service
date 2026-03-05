@@ -1946,14 +1946,14 @@
     <section class="tab-pane" data-tab-pane="workload-lab">
       <div class="panel">
         <h2>Workload Lab</h2>
-        <p class="help">Tune and run workloads from UI using TiUP Bench orchestration plus module-level tuning.</p>
+        <p class="help">Tune and run workloads from UI using Workload Generator orchestration plus module-level tuning.</p>
         <div class="actions-grid">
           <div><button class="btn soft small" type="button" data-tab-jump="manual-config">Back to Manual Config</button></div>
         </div>
 
         {% set bl = blaster_insights.config %}
         <div class="config-section">
-          <h3>TiUP Bench Blaster</h3>
+          <h3>Workload Generator</h3>
           <div class="tiny">High-throughput controller for <code>rawsql</code>, <code>tpcc</code>, and <code>ycsb</code> with multi-loadgen fanout over SSH.</div>
           <form method="post" action="/workload-blaster" id="blaster_form">
             <div class="grid cols-4">
@@ -2054,7 +2054,7 @@
 
         <div class="workload-grid">
           <div class="workload-card">
-            <h3 class="subhead">Latest Blaster Summary</h3>
+            <h3 class="subhead">Latest Workload Summary</h3>
             {% if blaster_insights.latest_summary %}
               <div class="workload-kv">
                 <div class="item"><div class="k">Status</div><div class="v">{{ blaster_insights.latest_summary.status }}</div></div>
@@ -2067,12 +2067,12 @@
               <div class="line"></div>
               <div class="tiny">Run directory: <code>{{ blaster_insights.latest_run_dir }}</code></div>
             {% else %}
-              <div class="empty-state">No TiDB Blaster summary yet. Save settings and run <code>validate</code>, <code>dry_run</code>, or <code>run</code>.</div>
+              <div class="empty-state">No workload summary yet. Save settings and run <code>validate</code>, <code>dry_run</code>, or <code>run</code>.</div>
             {% endif %}
           </div>
 
           <div class="workload-card">
-            <h3 class="subhead">Recent Blaster Runs</h3>
+            <h3 class="subhead">Recent Workload Runs</h3>
             {% if blaster_insights.recent_runs %}
               <div class="table-wrap">
                 <table>
@@ -2098,78 +2098,6 @@
             {% endif %}
           </div>
         </div>
-
-        <div class="line"></div>
-        <h3 class="subhead">Legacy Module Workload Tuning</h3>
-        <form method="post" action="/run-workload">
-          <div class="grid cols-4">
-            <div class="field">
-              <label>Target</label>
-              <select name="wl_target">
-                {% for key, meta in workload_targets.items() %}
-                  <option value="{{ key }}" {% if workload_insights.target == key %}selected{% endif %}>{{ meta.label }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="field">
-              <label>Concurrency Threads</label>
-              <input type="number" name="wl_concurrency" min="1" value="{{ workload_insights.concurrency }}" />
-            </div>
-            <div class="field">
-              <label>Duration Seconds</label>
-              <input type="number" name="wl_duration_seconds" min="10" value="{{ workload_insights.duration_seconds }}" />
-            </div>
-            <div class="field">
-              <label>Customer Query Ratio</label>
-              <input type="number" step="0.01" min="0" max="1" name="wl_customer_ratio" value="{{ workload_insights.customer_ratio }}" />
-            </div>
-          </div>
-
-          <div class="grid cols-4">
-            <div class="field">
-              <label>Workload Mix</label>
-              <select name="wl_mix">
-                <option value="mixed" {% if workload_insights.mix == "mixed" %}selected{% endif %}>mixed</option>
-                <option value="read_heavy" {% if workload_insights.mix == "read_heavy" %}selected{% endif %}>read_heavy</option>
-                <option value="write_heavy" {% if workload_insights.mix == "write_heavy" %}selected{% endif %}>write_heavy</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Read Weight Multiplier</label>
-              <input type="number" step="0.1" min="0.1" name="wl_read_multiplier" value="{{ workload_insights.read_multiplier }}" />
-            </div>
-            <div class="field">
-              <label>Write Weight Multiplier</label>
-              <input type="number" step="0.1" min="0.1" name="wl_write_multiplier" value="{{ workload_insights.write_multiplier }}" />
-            </div>
-            <div class="field">
-              <label>Import Rows (M7)</label>
-              <input type="number" min="10000" name="wl_import_rows" value="{{ workload_insights.import_rows }}" />
-            </div>
-          </div>
-
-          <div class="grid cols-3">
-            <div class="field">
-              <label>Import Batch Size (M7)</label>
-              <input type="number" min="100" name="wl_import_batch_size" value="{{ workload_insights.import_batch_size }}" />
-            </div>
-            <div class="field">
-              <label>Import Methods (M7)</label>
-              <div class="check-wrap">
-                {% for key, label in import_method_labels.items() %}
-                  <label class="check"><input type="checkbox" name="wl_method_{{ key }}" {% if key in workload_insights.import_methods %}checked{% endif %} /> {{ label }}</label>
-                {% endfor %}
-              </div>
-            </div>
-            <div class="field">
-              <label>Actions</label>
-              <div class="actions-grid">
-                <button class="btn soft" type="submit" name="wl_action" value="save">Save Tuning</button>
-                <button class="btn primary" type="submit" name="wl_action" value="run">Run Selected Workload</button>
-              </div>
-            </div>
-          </div>
-        </form>
 
         <div class="line"></div>
         <h3 class="subhead">Workload Query Templates</h3>

@@ -63,20 +63,31 @@ def run(cfg: dict):
     print(f"{'='*60}")
 
     summary = {}
+    any_success = False
     for c in concurrency_levels:
         phase = f"c{c}"
         runner.run(pool, concurrency=c, duration_sec=duration, phase=phase,
                    customer_queries=customer_queries, customer_ratio=customer_ratio)
+        tidb_stats = get_latency_stats(MODULE, phase=phase, db_label="tidb")
+        if tidb_stats.get("count", 0) > 0:
+            any_success = True
         summary[phase] = {
             "concurrency": c,
-            "tidb": get_latency_stats(MODULE, phase=phase, db_label="tidb"),
+            "tidb": tidb_stats,
         }
         if has_comparison:
             summary[phase]["comparison"] = get_latency_stats(
                 MODULE, phase=phase, db_label=comparison_label)
 
     _print_summary(summary)
-    end_module(MODULE, "passed")
+    if any_success:
+        end_module(MODULE, "passed")
+    else:
+        end_module(
+            MODULE,
+            "failed",
+            "No successful baseline queries were recorded. Check database/schema and connection settings.",
+        )
     return summary
 
 

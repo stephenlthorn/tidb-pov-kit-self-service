@@ -85,7 +85,7 @@ Dark web UI:
 3. Use Test Planner to view per-module test insights and choose all/some suites before execution
 4. Run security screener, run defaults, build report-only, and clear/reset data
 
-Workload Lab (TiUP Bench / tidb-blaster flow):
+Workload Lab (Workload Generator flow):
 1. Open the `Workload Lab` tab.
 2. Set mode: `rawsql`, `tpcc`, or `ycsb`.
 3. Configure DSN, load generator hosts, SSH details, and mode-specific settings.

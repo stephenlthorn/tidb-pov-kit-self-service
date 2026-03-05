@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Background runner entrypoint for TiDB Blaster actions from the web UI."""
+"""Background runner entrypoint for Workload Generator actions from the web UI."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from load.tidb_blaster import (  # noqa: E402
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="Run TiDB Blaster workload actions")
+    p = argparse.ArgumentParser(description="Run Workload Generator actions")
     p.add_argument("--config", default="config.yaml", help="Path to PoV config YAML")
     p.add_argument("--action", choices=["validate", "dry_run", "run", "report"], default="run")
     p.add_argument("--mode", choices=list(MODES), default=None)
@@ -58,33 +58,33 @@ def main() -> int:
         else:
             run_dir = latest_run_dir()
             if run_dir is None:
-                print("[tidb-blaster] no prior runs found; cannot build report")
+                print("[workload-generator] no prior runs found; cannot build report")
                 return 2
 
-        print(f"[tidb-blaster] rebuilding report for run: {run_dir}")
+        print(f"[workload-generator] rebuilding report for run: {run_dir}")
         summary = regenerate_report(run_dir)
         print(json.dumps(summary, indent=2))
         return 0
 
     run_dir = create_run_dir(resolved["mode"], resolved["tag"])
-    print(f"[tidb-blaster] action={args.action} mode={resolved['mode']} tag={resolved['tag']}")
-    print(f"[tidb-blaster] run_dir={run_dir}")
+    print(f"[workload-generator] action={args.action} mode={resolved['mode']} tag={resolved['tag']}")
+    print(f"[workload-generator] run_dir={run_dir}")
 
     if args.action == "validate":
         summary = run_blaster(resolved, run_dir, execute=False)
-        print("[tidb-blaster] validation + dry-run command plan complete")
+        print("[workload-generator] validation + dry-run command plan complete")
         print(json.dumps(summary.get("validation", {}), indent=2))
         return 0 if summary.get("validation_ok") else 1
 
     if args.action == "dry_run":
         summary = run_blaster(resolved, run_dir, execute=False)
-        print("[tidb-blaster] dry-run complete (commands captured; no load executed)")
+        print("[workload-generator] dry-run complete (commands captured; no load executed)")
         print(json.dumps(summary, indent=2))
         return 0
 
-    print("[tidb-blaster] executing loadgen plan")
+    print("[workload-generator] executing loadgen plan")
     summary = run_blaster(resolved, run_dir, execute=True)
-    print("[tidb-blaster] run complete")
+    print("[workload-generator] run complete")
     print(json.dumps(summary, indent=2))
     return 0 if summary.get("status") == "completed" else 1
 

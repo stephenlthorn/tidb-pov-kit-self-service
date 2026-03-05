@@ -2041,11 +2041,11 @@ def create_app(config_path: Path) -> Flask:
 
         action = str(request.form.get("bl_action", "save")).strip().lower()
         if action == "save":
-            flash("TiDB Blaster settings saved.", "success")
+            flash("Workload Generator settings saved.", "success")
             return redirect(url_for("index") + "#workload-lab")
 
         if action not in {"validate", "dry_run", "run", "report"}:
-            flash("Invalid TiDB Blaster action selected.", "error")
+            flash("Invalid Workload Generator action selected.", "error")
             return redirect(url_for("index") + "#workload-lab")
 
         cmd = [
@@ -2065,7 +2065,7 @@ def create_app(config_path: Path) -> Flask:
         if action == "report" and run_dir:
             cmd.extend(["--run", run_dir])
 
-        ok, msg = start_background(cmd, f"tidb-blaster-{action}-{wl['blaster']['mode']}")
+        ok, msg = start_background(cmd, f"workload-generator-{action}-{wl['blaster']['mode']}")
         flash(msg, "success" if ok else "error")
         return redirect(url_for("index") + "#workload-lab")
 

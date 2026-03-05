@@ -73,7 +73,7 @@ def collect() -> dict:
         status = meta.get("status", "not_run")
         dur    = 0
         if meta.get("start_ts") and meta.get("end_ts"):
-            dur = meta["end_ts"] - meta["start_ts"]
+            dur = max(0, meta["end_ts"] - meta["start_ts"])
 
         entry = {
             "status":       status,

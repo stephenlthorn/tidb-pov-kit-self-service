@@ -98,8 +98,18 @@ def start_module(module: str):
         c.execute("""
             INSERT INTO module_meta (module, status, start_ts)
             VALUES (?, 'running', ?)
-            ON CONFLICT(module) DO UPDATE SET status='running', start_ts=excluded.start_ts
+            ON CONFLICT(module) DO UPDATE SET
+                status='running',
+                start_ts=excluded.start_ts,
+                end_ts=NULL,
+                notes=NULL
         """, (module, time.time()))
+        # Keep per-module metrics isolated to the active run to avoid stale data bleed.
+        c.execute("DELETE FROM results WHERE module=?", (module,))
+        if module == "06_mysql_compat":
+            c.execute("DELETE FROM compat_checks")
+        if module == "07_data_import":
+            c.execute("DELETE FROM import_stats")
 
 
 def end_module(module: str, status: str = "passed", notes: str = None):
@@ -129,23 +139,30 @@ def log_import_stat(rows_imported: int, gb_imported: float,
 
 def get_latency_stats(module: str, phase: str = None, db_label: str = "tidb") -> dict:
     """Return p50/p95/p99/max/avg/tps stats for a module+phase."""
+    where = "module=? AND db_label=? AND success=1"
+    params = [module, db_label]
+    if phase:
+        where += " AND phase=?"
+        params.append(phase)
+
     with _conn() as c:
-        where = "module=? AND db_label=? AND success=1"
-        params = [module, db_label]
-        if phase:
-            where += " AND phase=?"
-            params.append(phase)
         rows = c.execute(
-            f"SELECT latency_ms, ts FROM results WHERE {where} ORDER BY latency_ms",
+            f"SELECT latency_ms FROM results WHERE {where} ORDER BY latency_ms",
             params
         ).fetchall()
+        bounds = c.execute(
+            f"SELECT MIN(ts) AS min_ts, MAX(ts) AS max_ts FROM results WHERE {where}",
+            params
+        ).fetchone()
 
     if not rows:
         return {}
 
     latencies = [r["latency_ms"] for r in rows]
     n = len(latencies)
-    duration = rows[-1]["ts"] - rows[0]["ts"] if n > 1 else 1
+    min_ts = bounds["min_ts"] if bounds else None
+    max_ts = bounds["max_ts"] if bounds else None
+    duration = (max_ts - min_ts) if (min_ts is not None and max_ts is not None and max_ts > min_ts) else 1.0
 
     def pct(p):
         idx = max(0, int(n * p / 100) - 1)
