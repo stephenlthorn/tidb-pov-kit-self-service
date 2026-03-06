@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime as dt
 import json
 import os
@@ -40,6 +41,10 @@ try:
     import boto3
 except ModuleNotFoundError:
     boto3 = None
+try:
+    from botocore.exceptions import ClientError
+except ModuleNotFoundError:
+    ClientError = Exception
 
 ROOT = Path(__file__).resolve().parents[1]
 IS_VERCEL = bool(os.environ.get("VERCEL"))
@@ -61,6 +66,8 @@ DEFAULT_INVITE_TTL_DAYS = 14
 MAX_INVITE_TTL_DAYS = 3650
 S3_PROJECT_SLUG = str(os.environ.get("S3_ARTIFACTS_PROJECT", "default")).strip() or "default"
 STORAGE_HEALTH_STATE_KEY = "storage_health_state"
+AWS_RUNNER_STATE_KEY = "aws_runner_state"
+AWS_AL2023_AMI_SSM_PARAM = "/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64"
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -209,11 +216,19 @@ DEFAULT_CFG = {
         "security_group_id": os.environ.get("AWS_DEFAULT_SECURITY_GROUP_ID", ""),
         "runner_instance_profile_name": os.environ.get("AWS_RUNNER_INSTANCE_PROFILE_NAME", "TidbPovRunnerInstanceRole"),
         "runner_role_arn": os.environ.get("AWS_RUNNER_ROLE_ARN", ""),
+        "ami_id": "",
+        "instance_count": 1,
         "instance_size": "medium",
         "allowed_instance_types": ["c7i.2xlarge", "c7i.4xlarge", "c7i.8xlarge"],
         "max_instances_per_run": 8,
         "summary_upload_only": True,
         "run_timeout_minutes": 180,
+        "bootstrap_repo_url": os.environ.get(
+            "POV_BOOTSTRAP_REPO_URL",
+            "https://github.com/stephenlthorn/tidb-pov-kit-self-service.git",
+        ),
+        "bootstrap_repo_ref": os.environ.get("POV_BOOTSTRAP_REPO_REF", "main"),
+        "auto_shutdown_minutes": 15,
     },
 }
 
@@ -681,6 +696,8 @@ def normalize_cfg(cfg: Dict) -> Dict:
         or "TidbPovRunnerInstanceRole"
     )
     runner["runner_role_arn"] = str(runner.get("runner_role_arn", "")).strip()
+    runner["ami_id"] = str(runner.get("ami_id", "")).strip()
+    runner["instance_count"] = _to_int_safe(runner.get("instance_count"), 1, 1)
     runner["instance_size"] = str(runner.get("instance_size", "medium")).strip().lower()
     if runner["instance_size"] not in RUNNER_SIZE_PRESETS:
         runner["instance_size"] = "medium"
@@ -695,8 +712,28 @@ def normalize_cfg(cfg: Dict) -> Dict:
     runner["allowed_instance_types"] = allowed_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
 
     runner["max_instances_per_run"] = _to_int_safe(runner.get("max_instances_per_run"), 8, 1)
+    runner["instance_count"] = min(runner["instance_count"], runner["max_instances_per_run"])
     runner["summary_upload_only"] = bool(runner.get("summary_upload_only", True))
     runner["run_timeout_minutes"] = _to_int_safe(runner.get("run_timeout_minutes"), 180, 10)
+    runner["bootstrap_repo_url"] = (
+        str(
+            runner.get(
+                "bootstrap_repo_url",
+                DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"],
+            )
+        ).strip()
+        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]
+    )
+    runner["bootstrap_repo_ref"] = (
+        str(
+            runner.get(
+                "bootstrap_repo_ref",
+                DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"],
+            )
+        ).strip()
+        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]
+    )
+    runner["auto_shutdown_minutes"] = _to_int_safe(runner.get("auto_shutdown_minutes"), 15, 0)
 
     return cfg
 
@@ -834,6 +871,56 @@ def apply_comparison_advanced_from_form(comp: Dict, form, prefix: str = "") -> N
         form.get(f"{prefix}comparison_sqlserver_mars"), bool(comp.get("sqlserver_mars", False))
     )
     comp["sqlserver_packet_size"] = max(512, to_int(g("comparison_sqlserver_packet_size"), int(comp.get("sqlserver_packet_size", 4096))))
+
+
+def apply_aws_runner_from_form(cfg: Dict, form) -> Dict:
+    aws_runner = cfg.setdefault("aws_runner", {})
+    aws_runner["enabled"] = to_bool(form.get("aws_runner_enabled"), False)
+    aws_runner["launch_mode"] = form.get("aws_launch_mode", "customer_assume_role").strip().lower() or "customer_assume_role"
+    aws_runner["connectivity_mode"] = form.get("aws_connectivity_mode", "private_endpoint").strip().lower() or "private_endpoint"
+    aws_runner["aws_region"] = form.get("aws_region", "us-east-1").strip() or "us-east-1"
+    aws_runner["customer_account_id"] = form.get("aws_customer_account_id", "").strip()
+    aws_runner["customer_assume_role_arn"] = form.get("aws_customer_assume_role_arn", "").strip()
+    aws_runner["external_id"] = form.get("aws_external_id", "").strip()
+    aws_runner["vpc_id"] = form.get("aws_vpc_id", "").strip()
+    aws_runner["subnet_id"] = form.get("aws_subnet_id", "").strip()
+    aws_runner["security_group_id"] = form.get("aws_security_group_id", "").strip()
+    aws_runner["runner_instance_profile_name"] = (
+        form.get("aws_runner_instance_profile_name", "TidbPovRunnerInstanceRole").strip()
+        or "TidbPovRunnerInstanceRole"
+    )
+    aws_runner["runner_role_arn"] = form.get("aws_runner_role_arn", "").strip()
+    aws_runner["ami_id"] = form.get("aws_ami_id", "").strip()
+    aws_runner["instance_count"] = max(1, to_int(form.get("aws_instance_count"), 1))
+    aws_runner["instance_size"] = form.get("aws_instance_size", "medium").strip().lower() or "medium"
+    allowed_instance_types = [
+        part.strip()
+        for part in re.split(r"[\n,\s]+", form.get("aws_allowed_instance_types", "").strip())
+        if part.strip()
+    ]
+    aws_runner["allowed_instance_types"] = (
+        allowed_instance_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+    )
+    aws_runner["max_instances_per_run"] = max(
+        1,
+        to_int(
+            form.get("aws_max_instances_per_run"),
+            int(DEFAULT_CFG["aws_runner"]["max_instances_per_run"]),
+        ),
+    )
+    aws_runner["instance_count"] = min(aws_runner["instance_count"], aws_runner["max_instances_per_run"])
+    aws_runner["summary_upload_only"] = to_bool(form.get("aws_summary_upload_only"), True)
+    aws_runner["run_timeout_minutes"] = max(10, to_int(form.get("aws_run_timeout_minutes"), 180))
+    aws_runner["bootstrap_repo_url"] = (
+        form.get("aws_bootstrap_repo_url", DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]).strip()
+        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]
+    )
+    aws_runner["bootstrap_repo_ref"] = (
+        form.get("aws_bootstrap_repo_ref", DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]).strip()
+        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]
+    )
+    aws_runner["auto_shutdown_minutes"] = max(0, to_int(form.get("aws_auto_shutdown_minutes"), 15))
+    return aws_runner
 
 
 def modules_from_suite(
@@ -1686,6 +1773,500 @@ def run_storage_health_check() -> Dict:
     return out
 
 
+def default_aws_runner_state() -> Dict:
+    return {
+        "checked_at": "",
+        "overall": "unknown",
+        "validate_ok": False,
+        "details": [],
+        "resolved": {},
+        "last_action": "",
+        "last_error": "",
+        "launch": {
+            "run_id": "",
+            "launched_at": "",
+            "instance_ids": [],
+            "instance_type": "",
+            "ami_id": "",
+            "state": "not_launched",
+            "reservation_id": "",
+        },
+    }
+
+
+def get_aws_runner_state() -> Dict:
+    raw = _app_state_get(AWS_RUNNER_STATE_KEY)
+    if not raw:
+        return default_aws_runner_state()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return default_aws_runner_state()
+
+
+def save_aws_runner_state(state: Dict) -> None:
+    try:
+        _app_state_set(AWS_RUNNER_STATE_KEY, json.dumps(state, ensure_ascii=True))
+    except Exception:
+        pass
+
+
+def aws_control_session(region: str):
+    if boto3 is None:
+        raise RuntimeError("boto3 is not installed in this environment.")
+
+    access_key = str(os.environ.get("AWS_CONTROL_ACCESS_KEY_ID", "")).strip()
+    secret_key = str(os.environ.get("AWS_CONTROL_SECRET_ACCESS_KEY", "")).strip()
+    session_token = str(os.environ.get("AWS_CONTROL_SESSION_TOKEN", "")).strip()
+    if access_key and secret_key:
+        kwargs = {
+            "aws_access_key_id": access_key,
+            "aws_secret_access_key": secret_key,
+            "region_name": region,
+        }
+        if session_token:
+            kwargs["aws_session_token"] = session_token
+        return boto3.session.Session(**kwargs)
+
+    return boto3.session.Session(region_name=region)
+
+
+def aws_assume_customer_session(runner: Dict):
+    region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+    role_arn = str(runner.get("customer_assume_role_arn") or "").strip()
+    if not role_arn:
+        raise ValueError("Customer Assume Role ARN is required.")
+
+    control = aws_control_session(region)
+    sts = control.client("sts", region_name=region)
+    role_session_name = f"tidb-pov-{dt.datetime.utcnow().strftime('%Y%m%d%H%M%S')}"
+    args = {"RoleArn": role_arn, "RoleSessionName": role_session_name}
+    external_id = str(runner.get("external_id") or "").strip()
+    if external_id:
+        args["ExternalId"] = external_id
+
+    assumed = sts.assume_role(**args)
+    creds = assumed["Credentials"]
+    session = boto3.session.Session(
+        aws_access_key_id=creds["AccessKeyId"],
+        aws_secret_access_key=creds["SecretAccessKey"],
+        aws_session_token=creds["SessionToken"],
+        region_name=region,
+    )
+    identity = session.client("sts", region_name=region).get_caller_identity()
+    return session, identity
+
+
+def aws_runner_required_fields(runner: Dict) -> List[str]:
+    required = {
+        "aws_region": "AWS region",
+        "customer_assume_role_arn": "Assume role ARN",
+        "subnet_id": "Subnet ID",
+        "security_group_id": "Security group ID",
+        "runner_instance_profile_name": "Runner instance profile name",
+    }
+    missing = []
+    for key, label in required.items():
+        if not str(runner.get(key) or "").strip():
+            missing.append(label)
+    return missing
+
+
+def aws_resolve_instance_type(runner: Dict) -> str:
+    preset_key = str(runner.get("instance_size") or "medium").strip().lower()
+    if preset_key not in RUNNER_SIZE_PRESETS:
+        preset_key = "medium"
+    preferred = str(RUNNER_SIZE_PRESETS[preset_key]["default_instance_type"])
+    allowed = [str(v).strip() for v in (runner.get("allowed_instance_types") or []) if str(v).strip()]
+    if allowed:
+        if preferred in allowed:
+            return preferred
+        return allowed[0]
+    return preferred
+
+
+def aws_resolve_ami_id(session, runner: Dict) -> Tuple[str, str]:
+    configured = str(runner.get("ami_id") or "").strip()
+    if configured:
+        return configured, "manual"
+
+    region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+    ssm = session.client("ssm", region_name=region)
+    param = ssm.get_parameter(Name=AWS_AL2023_AMI_SSM_PARAM)
+    ami_id = str(param.get("Parameter", {}).get("Value") or "").strip()
+    if not ami_id:
+        raise RuntimeError(f"AMI SSM parameter returned empty value: {AWS_AL2023_AMI_SSM_PARAM}")
+    return ami_id, "ssm"
+
+
+def aws_build_runner_config(cfg: Dict, run_tag: str) -> Dict:
+    tidb_cfg = cfg.get("tidb") or {}
+    blaster_raw = ((cfg.get("workload_lab") or {}).get("blaster") or {})
+    blaster_cfg = normalize_blaster_config(blaster_raw, tidb_cfg, mode="rawsql", tag=run_tag)
+    blaster_cfg["loadgen"]["hosts"] = ["localhost"]
+    blaster_cfg["loadgen"]["ssh_user"] = ""
+    blaster_cfg["loadgen"]["ssh_key_path"] = ""
+    blaster_cfg["loadgen"]["max_domains_concurrent"] = 1
+    return {
+        "tidb": {
+            "host": str(tidb_cfg.get("host") or ""),
+            "port": int(tidb_cfg.get("port") or 4000),
+            "user": str(tidb_cfg.get("user") or ""),
+            "password": str(tidb_cfg.get("password") or ""),
+            "database": str(tidb_cfg.get("database") or "test"),
+            "ssl": bool(tidb_cfg.get("ssl", True)),
+        },
+        "workload_lab": {
+            "blaster": blaster_cfg,
+        },
+    }
+
+
+def aws_build_user_data(cfg: Dict, runner: Dict, run_tag: str) -> str:
+    repo_url = str(runner.get("bootstrap_repo_url") or DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]).strip()
+    repo_ref = str(runner.get("bootstrap_repo_ref") or DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]).strip()
+    repo_ref = re.sub(r"[^A-Za-z0-9._/-]+", "", repo_ref) or "main"
+    auto_shutdown = max(0, _to_int_safe(runner.get("auto_shutdown_minutes"), 15, 0))
+
+    runner_cfg = aws_build_runner_config(cfg, run_tag)
+    cfg_yaml = yaml.safe_dump(runner_cfg, sort_keys=False)
+    cfg_b64 = base64.b64encode(cfg_yaml.encode("utf-8")).decode("ascii")
+
+    script = f"""#!/bin/bash
+set -euxo pipefail
+LOG_FILE=/var/log/tidb-pov-bootstrap.log
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+REPO_URL={json.dumps(repo_url)}
+REPO_REF={json.dumps(repo_ref)}
+RUN_TAG={json.dumps(run_tag)}
+
+if command -v dnf >/dev/null 2>&1; then
+  dnf -y install git python3 python3-pip curl jq tar gzip || true
+elif command -v yum >/dev/null 2>&1; then
+  yum -y install git python3 python3-pip curl jq tar gzip || true
+fi
+
+mkdir -p /opt/tidb-pov
+if [ ! -d /opt/tidb-pov/repo/.git ]; then
+  git clone --depth 1 "$REPO_URL" /opt/tidb-pov/repo
+fi
+cd /opt/tidb-pov/repo
+git fetch --all || true
+git checkout "$REPO_REF" || true
+
+python3 -m pip install --upgrade pip || true
+python3 -m pip install -r requirements.txt || true
+
+if ! command -v tiup >/dev/null 2>&1; then
+  curl --proto '=https' --tlsv1.2 -sSf https://tiup-mirrors.pingcap.com/install.sh | sh || true
+fi
+export PATH="$PATH:/root/.tiup/bin:/home/ec2-user/.tiup/bin"
+
+cat <<'CFG_B64' | base64 -d > /opt/tidb-pov/repo/config.aws_runner.yaml
+{cfg_b64}
+CFG_B64
+
+cd /opt/tidb-pov/repo
+python3 load/tidb_blaster_runner.py --config /opt/tidb-pov/repo/config.aws_runner.yaml --action validate --mode rawsql --tag "$RUN_TAG" || true
+python3 load/tidb_blaster_runner.py --config /opt/tidb-pov/repo/config.aws_runner.yaml --action run --mode rawsql --tag "$RUN_TAG" || true
+
+if [ {auto_shutdown} -gt 0 ]; then
+  shutdown -h +{auto_shutdown} || true
+fi
+"""
+    return script
+
+
+def aws_validate_runner_environment(cfg: Dict, user_email: str = "") -> Dict:
+    runner = (cfg.get("aws_runner") or {})
+    state = default_aws_runner_state()
+    state["checked_at"] = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    state["last_action"] = "validate"
+    details: List[Dict] = []
+
+    missing = aws_runner_required_fields(runner)
+    if missing:
+        details.append({"name": "required_fields", "ok": False, "detail": "Missing: " + ", ".join(missing)})
+        state["details"] = details
+        state["overall"] = "degraded"
+        state["validate_ok"] = False
+        state["last_error"] = details[-1]["detail"]
+        return state
+
+    try:
+        session, identity = aws_assume_customer_session(runner)
+        details.append(
+            {
+                "name": "assume_role",
+                "ok": True,
+                "detail": f"Assumed account {identity.get('Account')} as {identity.get('Arn')}",
+            }
+        )
+    except Exception as e:
+        details.append({"name": "assume_role", "ok": False, "detail": str(e)})
+        state["details"] = details
+        state["overall"] = "degraded"
+        state["validate_ok"] = False
+        state["last_error"] = str(e)
+        return state
+
+    region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+    ec2 = session.client("ec2", region_name=region)
+    subnet_id = str(runner.get("subnet_id") or "").strip()
+    security_group_id = str(runner.get("security_group_id") or "").strip()
+
+    try:
+        subnet_resp = ec2.describe_subnets(SubnetIds=[subnet_id])
+        subnet = (subnet_resp.get("Subnets") or [{}])[0]
+        subnet_vpc = str(subnet.get("VpcId") or "")
+        cfg_vpc = str(runner.get("vpc_id") or "").strip()
+        if cfg_vpc and subnet_vpc and cfg_vpc != subnet_vpc:
+            raise RuntimeError(f"Subnet {subnet_id} is in VPC {subnet_vpc}, not configured VPC {cfg_vpc}.")
+        details.append({"name": "subnet", "ok": True, "detail": f"{subnet_id} in {subnet_vpc or 'unknown vpc'}"})
+    except Exception as e:
+        details.append({"name": "subnet", "ok": False, "detail": str(e)})
+
+    try:
+        sg_resp = ec2.describe_security_groups(GroupIds=[security_group_id])
+        sg = (sg_resp.get("SecurityGroups") or [{}])[0]
+        details.append({"name": "security_group", "ok": True, "detail": f"{security_group_id} ({sg.get('GroupName', '')})"})
+    except Exception as e:
+        details.append({"name": "security_group", "ok": False, "detail": str(e)})
+
+    try:
+        ami_id, ami_source = aws_resolve_ami_id(session, runner)
+        img_resp = ec2.describe_images(ImageIds=[ami_id])
+        if not (img_resp.get("Images") or []):
+            raise RuntimeError(f"AMI {ami_id} is not visible in account/region.")
+        details.append({"name": "ami", "ok": True, "detail": f"{ami_id} ({ami_source})"})
+    except Exception as e:
+        ami_id = ""
+        details.append({"name": "ami", "ok": False, "detail": str(e)})
+
+    instance_type = aws_resolve_instance_type(runner)
+    instance_count = min(
+        max(1, _to_int_safe(runner.get("instance_count"), 1, 1)),
+        max(1, _to_int_safe(runner.get("max_instances_per_run"), 1, 1)),
+    )
+    state["resolved"] = {
+        "instance_type": instance_type,
+        "instance_count": instance_count,
+        "ami_id": ami_id,
+    }
+
+    if ami_id:
+        probe_args = {
+            "ImageId": ami_id,
+            "InstanceType": instance_type,
+            "MinCount": 1,
+            "MaxCount": 1,
+            "NetworkInterfaces": [
+                {
+                    "DeviceIndex": 0,
+                    "SubnetId": subnet_id,
+                    "Groups": [security_group_id],
+                    "AssociatePublicIpAddress": str(runner.get("connectivity_mode") or "") == "public_endpoint",
+                }
+            ],
+            "TagSpecifications": [
+                {
+                    "ResourceType": "instance",
+                    "Tags": [
+                        {"Key": "tidb-pov-managed", "Value": "true"},
+                        {"Key": "Name", "Value": "tidb-pov-dry-run"},
+                    ],
+                }
+            ],
+            "UserData": "#!/bin/bash\necho dry-run\n",
+            "DryRun": True,
+        }
+        profile_name = str(runner.get("runner_instance_profile_name") or "").strip()
+        if profile_name:
+            probe_args["IamInstanceProfile"] = {"Name": profile_name}
+        try:
+            ec2.run_instances(**probe_args)
+            details.append({"name": "runinstances_dryrun", "ok": True, "detail": "Dry-run permission succeeded."})
+        except ClientError as e:
+            code = str((getattr(e, "response", {}) or {}).get("Error", {}).get("Code", ""))
+            if code == "DryRunOperation":
+                details.append({"name": "runinstances_dryrun", "ok": True, "detail": "DryRunOperation (expected)."})
+            else:
+                details.append({"name": "runinstances_dryrun", "ok": False, "detail": str(e)})
+        except Exception as e:
+            details.append({"name": "runinstances_dryrun", "ok": False, "detail": str(e)})
+
+    state["details"] = details
+    state["validate_ok"] = all(bool(item.get("ok")) for item in details)
+    state["overall"] = "ok" if state["validate_ok"] else "degraded"
+    if not state["validate_ok"]:
+        failed = [str(item.get("detail")) for item in details if not item.get("ok")]
+        state["last_error"] = failed[0] if failed else "Validation failed."
+    else:
+        state["last_error"] = ""
+    return state
+
+
+def aws_launch_runner(cfg: Dict, user_email: str = "") -> Dict:
+    state = aws_validate_runner_environment(cfg, user_email=user_email)
+    if not state.get("validate_ok"):
+        state["last_action"] = "launch"
+        state["last_error"] = state.get("last_error") or "Cannot launch because validation failed."
+        return state
+
+    runner = (cfg.get("aws_runner") or {})
+    session, _ = aws_assume_customer_session(runner)
+    region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+    ec2 = session.client("ec2", region_name=region)
+
+    resolved = dict(state.get("resolved") or {})
+    ami_id = str(resolved.get("ami_id") or "")
+    instance_type = str(resolved.get("instance_type") or aws_resolve_instance_type(runner))
+    instance_count = int(resolved.get("instance_count") or 1)
+    run_id = f"run-{dt.datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{secrets.token_hex(3)}"
+    run_tag = re.sub(r"[^a-zA-Z0-9._-]+", "-", run_id)
+    user_data = aws_build_user_data(cfg, runner, run_tag)
+
+    args = {
+        "ImageId": ami_id,
+        "InstanceType": instance_type,
+        "MinCount": instance_count,
+        "MaxCount": instance_count,
+        "NetworkInterfaces": [
+            {
+                "DeviceIndex": 0,
+                "SubnetId": str(runner.get("subnet_id") or "").strip(),
+                "Groups": [str(runner.get("security_group_id") or "").strip()],
+                "AssociatePublicIpAddress": str(runner.get("connectivity_mode") or "") == "public_endpoint",
+            }
+        ],
+        "TagSpecifications": [
+            {
+                "ResourceType": "instance",
+                "Tags": [
+                    {"Key": "Name", "Value": f"tidb-pov-{run_tag}"},
+                    {"Key": "tidb-pov-managed", "Value": "true"},
+                    {"Key": "tidb-pov-run-id", "Value": run_id},
+                    {"Key": "tidb-pov-launched-by", "Value": user_email or "unknown"},
+                ],
+            },
+            {
+                "ResourceType": "volume",
+                "Tags": [
+                    {"Key": "tidb-pov-managed", "Value": "true"},
+                    {"Key": "tidb-pov-run-id", "Value": run_id},
+                ],
+            },
+        ],
+        "UserData": user_data,
+    }
+    profile_name = str(runner.get("runner_instance_profile_name") or "").strip()
+    if profile_name:
+        args["IamInstanceProfile"] = {"Name": profile_name}
+
+    launched_at = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    try:
+        resp = ec2.run_instances(**args)
+        instances = resp.get("Instances") or []
+        instance_ids = [str(item.get("InstanceId")) for item in instances if item.get("InstanceId")]
+        reservation_id = str(resp.get("ReservationId") or "")
+
+        state["checked_at"] = launched_at
+        state["overall"] = "ok"
+        state["validate_ok"] = True
+        state["last_action"] = "launch"
+        state["last_error"] = ""
+        state["launch"] = {
+            "run_id": run_id,
+            "launched_at": launched_at,
+            "instance_ids": instance_ids,
+            "instance_type": instance_type,
+            "ami_id": ami_id,
+            "state": "pending",
+            "reservation_id": reservation_id,
+        }
+    except Exception as e:
+        state["last_action"] = "launch"
+        state["last_error"] = str(e)
+        state["overall"] = "degraded"
+    return state
+
+
+def aws_refresh_runner_instances(cfg: Dict, state: Dict) -> Dict:
+    runner = (cfg.get("aws_runner") or {})
+    launch = dict(state.get("launch") or {})
+    instance_ids = [str(v) for v in (launch.get("instance_ids") or []) if str(v)]
+    if not instance_ids:
+        state["last_action"] = "refresh"
+        state["last_error"] = "No launched runner instances found."
+        return state
+
+    try:
+        session, _ = aws_assume_customer_session(runner)
+        region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+        ec2 = session.client("ec2", region_name=region)
+        resp = ec2.describe_instances(InstanceIds=instance_ids)
+        rows = []
+        for reservation in resp.get("Reservations") or []:
+            for inst in reservation.get("Instances") or []:
+                rows.append(
+                    {
+                        "instance_id": inst.get("InstanceId"),
+                        "state": ((inst.get("State") or {}).get("Name") or "unknown"),
+                        "private_ip": inst.get("PrivateIpAddress", ""),
+                        "public_ip": inst.get("PublicIpAddress", ""),
+                    }
+                )
+        launch["instances"] = rows
+        states = [str(row.get("state") or "unknown") for row in rows]
+        if states and all(s in {"terminated", "shutting-down"} for s in states):
+            launch["state"] = "terminated"
+        elif states and any(s in {"running"} for s in states):
+            launch["state"] = "running"
+        elif states and any(s in {"pending"} for s in states):
+            launch["state"] = "pending"
+        else:
+            launch["state"] = "unknown"
+        state["launch"] = launch
+        state["last_action"] = "refresh"
+        state["last_error"] = ""
+        state["checked_at"] = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    except Exception as e:
+        state["last_action"] = "refresh"
+        state["last_error"] = str(e)
+        state["overall"] = "degraded"
+    return state
+
+
+def aws_terminate_runner_instances(cfg: Dict, state: Dict) -> Dict:
+    runner = (cfg.get("aws_runner") or {})
+    launch = dict(state.get("launch") or {})
+    instance_ids = [str(v) for v in (launch.get("instance_ids") or []) if str(v)]
+    if not instance_ids:
+        state["last_action"] = "terminate"
+        state["last_error"] = "No launched runner instances found."
+        return state
+
+    try:
+        session, _ = aws_assume_customer_session(runner)
+        region = str(runner.get("aws_region") or "us-east-1").strip() or "us-east-1"
+        ec2 = session.client("ec2", region_name=region)
+        ec2.terminate_instances(InstanceIds=instance_ids)
+        launch["state"] = "terminating"
+        state["launch"] = launch
+        state["last_action"] = "terminate"
+        state["last_error"] = ""
+        state["checked_at"] = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    except Exception as e:
+        state["last_action"] = "terminate"
+        state["last_error"] = str(e)
+        state["overall"] = "degraded"
+    return state
+
+
 def database_url() -> str:
     for key in ("DATABASE_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL"):
         raw = str(os.environ.get(key, "") or "").strip()
@@ -2301,6 +2882,7 @@ def create_app(config_path: Path) -> Flask:
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
         storage_health = get_storage_health_state() if is_admin else default_storage_health_state()
+        aws_runner_state = get_aws_runner_state()
         report_ready = report_artifact_ready()
         report_dashboard = build_report_dashboard()
         workload_insights = build_workload_insights(cfg)
@@ -2359,6 +2941,7 @@ def create_app(config_path: Path) -> Flask:
             s3_artifacts_enabled=s3_enabled(),
             s3_artifacts_bucket=s3_bucket(),
             storage_health=storage_health,
+            aws_runner_state=aws_runner_state,
         )
 
     @app.get("/ui-skeleton")
@@ -2445,44 +3028,7 @@ def create_app(config_path: Path) -> Flask:
         tco["engineer_annual_cost"] = to_int(request.form.get("tco_engineer_annual_cost"), 180000)
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
 
-        aws_runner = cfg.setdefault("aws_runner", {})
-        aws_runner["enabled"] = to_bool(request.form.get("aws_runner_enabled"), False)
-        aws_runner["launch_mode"] = (
-            request.form.get("aws_launch_mode", "customer_assume_role").strip().lower() or "customer_assume_role"
-        )
-        aws_runner["connectivity_mode"] = (
-            request.form.get("aws_connectivity_mode", "private_endpoint").strip().lower() or "private_endpoint"
-        )
-        aws_runner["aws_region"] = request.form.get("aws_region", "us-east-1").strip() or "us-east-1"
-        aws_runner["customer_account_id"] = request.form.get("aws_customer_account_id", "").strip()
-        aws_runner["customer_assume_role_arn"] = request.form.get("aws_customer_assume_role_arn", "").strip()
-        aws_runner["external_id"] = request.form.get("aws_external_id", "").strip()
-        aws_runner["vpc_id"] = request.form.get("aws_vpc_id", "").strip()
-        aws_runner["subnet_id"] = request.form.get("aws_subnet_id", "").strip()
-        aws_runner["security_group_id"] = request.form.get("aws_security_group_id", "").strip()
-        aws_runner["runner_instance_profile_name"] = (
-            request.form.get("aws_runner_instance_profile_name", "TidbPovRunnerInstanceRole").strip()
-            or "TidbPovRunnerInstanceRole"
-        )
-        aws_runner["runner_role_arn"] = request.form.get("aws_runner_role_arn", "").strip()
-        aws_runner["instance_size"] = request.form.get("aws_instance_size", "medium").strip().lower() or "medium"
-        allowed_instance_types = [
-            part.strip()
-            for part in re.split(r"[\n,\\s]+", request.form.get("aws_allowed_instance_types", "").strip())
-            if part.strip()
-        ]
-        aws_runner["allowed_instance_types"] = (
-            allowed_instance_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
-        )
-        aws_runner["max_instances_per_run"] = max(
-            1,
-            to_int(
-                request.form.get("aws_max_instances_per_run"),
-                int(DEFAULT_CFG["aws_runner"]["max_instances_per_run"]),
-            ),
-        )
-        aws_runner["summary_upload_only"] = to_bool(request.form.get("aws_summary_upload_only"), True)
-        aws_runner["run_timeout_minutes"] = max(10, to_int(request.form.get("aws_run_timeout_minutes"), 180))
+        apply_aws_runner_from_form(cfg, request.form)
 
         save_cfg(config_path, cfg)
         action = str(request.form.get("save_action", "save")).strip().lower()
@@ -2771,6 +3317,82 @@ def create_app(config_path: Path) -> Flask:
         else:
             flash("Storage health check found issues. Review the Storage Health panel.", "warning")
         return redirect(url_for("index") + "#admin")
+
+    @app.post("/aws-runner-validate")
+    def aws_runner_validate_route():
+        user = current_user() or {}
+        cfg = load_cfg(config_path)
+        if request.form:
+            apply_aws_runner_from_form(cfg, request.form)
+            save_cfg(config_path, cfg)
+        state = aws_validate_runner_environment(cfg, user_email=str(user.get("email") or ""))
+        save_aws_runner_state(state)
+        if state.get("validate_ok"):
+            resolved = state.get("resolved") or {}
+            flash(
+                "AWS runner validation passed "
+                f"(AMI {resolved.get('ami_id', 'n/a')}, "
+                f"type {resolved.get('instance_type', 'n/a')}, "
+                f"count {resolved.get('instance_count', 'n/a')}).",
+                "success",
+            )
+        else:
+            flash(
+                "AWS runner validation failed: "
+                + str(state.get("last_error") or "see details in AWS Runner section."),
+                "error",
+            )
+        return redirect(url_for("index") + "#manual-config")
+
+    @app.post("/aws-runner-launch")
+    def aws_runner_launch_route():
+        user = current_user() or {}
+        cfg = load_cfg(config_path)
+        if request.form:
+            apply_aws_runner_from_form(cfg, request.form)
+            save_cfg(config_path, cfg)
+        runner = cfg.get("aws_runner") or {}
+        if not runner.get("enabled"):
+            flash("AWS runner is disabled in Manual Config. Enable it first.", "warning")
+            return redirect(url_for("index") + "#manual-config")
+        state = aws_launch_runner(cfg, user_email=str(user.get("email") or ""))
+        save_aws_runner_state(state)
+        launch = state.get("launch") or {}
+        if state.get("last_error"):
+            flash(f"AWS launch failed: {state.get('last_error')}", "error")
+        else:
+            flash(
+                "AWS runner launched: "
+                + ", ".join(launch.get("instance_ids") or [])
+                + f" (run {launch.get('run_id', 'n/a')})",
+                "success",
+            )
+        return redirect(url_for("index") + "#manual-config")
+
+    @app.post("/aws-runner-refresh")
+    def aws_runner_refresh_route():
+        cfg = load_cfg(config_path)
+        state = get_aws_runner_state()
+        state = aws_refresh_runner_instances(cfg, state)
+        save_aws_runner_state(state)
+        if state.get("last_error"):
+            flash(f"AWS runner refresh issue: {state.get('last_error')}", "warning")
+        else:
+            launch = state.get("launch") or {}
+            flash(f"AWS runner status: {launch.get('state', 'unknown')}.", "success")
+        return redirect(url_for("index") + "#manual-config")
+
+    @app.post("/aws-runner-terminate")
+    def aws_runner_terminate_route():
+        cfg = load_cfg(config_path)
+        state = get_aws_runner_state()
+        state = aws_terminate_runner_instances(cfg, state)
+        save_aws_runner_state(state)
+        if state.get("last_error"):
+            flash(f"AWS runner terminate issue: {state.get('last_error')}", "warning")
+        else:
+            flash("AWS runner termination requested.", "success")
+        return redirect(url_for("index") + "#manual-config")
 
     @app.post("/run-workload")
     def run_workload_route():

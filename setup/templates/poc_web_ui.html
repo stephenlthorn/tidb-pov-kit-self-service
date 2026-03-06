@@ -2332,6 +2332,7 @@
               <div class="field"><label>Runner Instance Profile Name</label><input type="text" name="aws_runner_instance_profile_name" value="{{ cfg.aws_runner.runner_instance_profile_name }}" placeholder="TidbPovRunnerInstanceRole" /></div>
             </div>
             <div class="grid cols-4">
+              <div class="field"><label>AMI ID (optional)</label><input type="text" name="aws_ami_id" value="{{ cfg.aws_runner.ami_id }}" placeholder="Leave blank to auto-resolve Amazon Linux 2023" /></div>
               <div class="field">
                 <label>Runner Size Preset</label>
                 <select name="aws_instance_size">
@@ -2340,13 +2341,111 @@
                   {% endfor %}
                 </select>
               </div>
+              <div class="field"><label>Instance Count</label><input type="number" min="1" name="aws_instance_count" value="{{ cfg.aws_runner.instance_count }}" /></div>
               <div class="field"><label>Allowed Instance Types (csv)</label><input type="text" name="aws_allowed_instance_types" value="{{ cfg.aws_runner.allowed_instance_types | join(', ') }}" /></div>
               <div class="field"><label>Max Instances Per Run</label><input type="number" min="1" name="aws_max_instances_per_run" value="{{ cfg.aws_runner.max_instances_per_run }}" /></div>
+            </div>
+            <div class="grid cols-4">
               <div class="field"><label>Run Timeout Minutes</label><input type="number" min="10" name="aws_run_timeout_minutes" value="{{ cfg.aws_runner.run_timeout_minutes }}" /></div>
+              <div class="field"><label>Auto Shutdown Minutes</label><input type="number" min="0" name="aws_auto_shutdown_minutes" value="{{ cfg.aws_runner.auto_shutdown_minutes }}" /></div>
+              <div class="field"><label>Bootstrap Repo URL</label><input type="text" name="aws_bootstrap_repo_url" value="{{ cfg.aws_runner.bootstrap_repo_url }}" /></div>
+              <div class="field"><label>Bootstrap Repo Ref</label><input type="text" name="aws_bootstrap_repo_ref" value="{{ cfg.aws_runner.bootstrap_repo_ref }}" /></div>
             </div>
             <div class="grid cols-2">
               <div class="field"><label>Upload Summary Only</label><label class="check"><input type="checkbox" name="aws_summary_upload_only" {% if cfg.aws_runner.summary_upload_only %}checked{% endif %} /> enabled</label></div>
               <div class="field"></div>
+            </div>
+            <div class="tiny">Save configuration before running AWS actions so the launch uses your latest values.</div>
+
+            <div class="pair-grid">
+              <div class="pair">
+                <div class="pk">Last AWS Action</div>
+                <div class="pv">{{ aws_runner_state.last_action if aws_runner_state.last_action else 'none' }}</div>
+                <div class="tiny">Checked: {{ aws_runner_state.checked_at if aws_runner_state.checked_at else 'n/a' }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Launch State</div>
+                <div class="pv">{{ aws_runner_state.launch.state if aws_runner_state.launch.state else 'not_launched' }}</div>
+                <div class="tiny">Run ID: {{ aws_runner_state.launch.run_id if aws_runner_state.launch.run_id else 'n/a' }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Instances</div>
+                <div class="pv">
+                  {% if aws_runner_state.launch.instance_ids %}
+                    {{ aws_runner_state.launch.instance_ids | join(', ') }}
+                  {% else %}
+                    n/a
+                  {% endif %}
+                </div>
+                <div class="tiny">Type: {{ aws_runner_state.launch.instance_type if aws_runner_state.launch.instance_type else 'n/a' }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Resolved AMI</div>
+                <div class="pv">{{ aws_runner_state.launch.ami_id if aws_runner_state.launch.ami_id else (aws_runner_state.resolved.ami_id if aws_runner_state.resolved else 'n/a') }}</div>
+                {% if aws_runner_state.last_error %}
+                  <div class="tiny">Last error: {{ aws_runner_state.last_error }}</div>
+                {% else %}
+                  <div class="tiny">Validation: {% if aws_runner_state.validate_ok %}passed{% else %}not passed{% endif %}</div>
+                {% endif %}
+              </div>
+            </div>
+            {% if aws_runner_state.launch.instances %}
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Instance ID</th>
+                      <th>State</th>
+                      <th>Private IP</th>
+                      <th>Public IP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for inst in aws_runner_state.launch.instances %}
+                      <tr>
+                        <td><code>{{ inst.instance_id }}</code></td>
+                        <td>{{ inst.state }}</td>
+                        <td>{{ inst.private_ip if inst.private_ip else 'n/a' }}</td>
+                        <td>{{ inst.public_ip if inst.public_ip else 'n/a' }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+            {% if aws_runner_state.details %}
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Check</th>
+                      <th>Status</th>
+                      <th>Detail</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for item in aws_runner_state.details %}
+                      <tr>
+                        <td>{{ item.name }}</td>
+                        <td>
+                          {% if item.ok %}
+                            <span class="pill-status pill-pass">ok</span>
+                          {% else %}
+                            <span class="pill-status pill-fail">fail</span>
+                          {% endif %}
+                        </td>
+                        <td>{{ item.detail }}</td>
+                      </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            {% endif %}
+            <div class="actions-grid">
+              <div><button class="btn soft" type="submit" formaction="/aws-runner-validate" formmethod="post">Validate AWS Runner</button></div>
+              <div><button class="btn primary" type="submit" formaction="/aws-runner-launch" formmethod="post">Launch AWS Runner</button></div>
+              <div><button class="btn soft" type="submit" formaction="/aws-runner-refresh" formmethod="post">Refresh Runner Status</button></div>
+              <div><button class="btn danger" type="submit" formaction="/aws-runner-terminate" formmethod="post">Terminate Runner</button></div>
             </div>
           </div>
 

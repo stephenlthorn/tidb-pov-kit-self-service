@@ -63,6 +63,9 @@ Vercel deployment note:
 4. Configure env vars from `.env.example` in Vercel project settings
 5. Attach Vercel Postgres (or set `DATABASE_URL`) for persistent users/invites/config state
 6. Configure S3 env vars (`S3_BUCKET`, `S3_PREFIX`, `S3_ARTIFACTS_ENABLED=true`) to persist PDF/metrics/log artifacts
+7. For cross-account AWS runner launch, set control credentials that can call `sts:AssumeRole`:
+   - preferred: `AWS_CONTROL_ACCESS_KEY_ID` + `AWS_CONTROL_SECRET_ACCESS_KEY`
+   - fallback: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`
 
 ### Step 3 — Run
 
@@ -99,6 +102,10 @@ Dark web UI:
 2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
 3. Use Test Planner to view per-module test insights and choose all/some suites before execution
 4. Run security screener, run defaults, build report-only, and clear/reset data
+5. In Manual Config -> AWS Runner, use:
+   - `Validate AWS Runner` (AssumeRole + subnet/SG/AMI + DryRun check)
+   - `Launch AWS Runner` (boots Amazon Linux if AMI is blank, installs deps, runs Workload Generator)
+   - `Refresh Runner Status` / `Terminate Runner`
 
 UI access control (invite-based):
 1. First launch redirects to `/setup-admin` to create the first admin account.
