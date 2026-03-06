@@ -1680,42 +1680,6 @@
         <h2>Dashboards and Execution</h2>
         <p class="help">CLI output is shown first, followed by report and metrics dashboards.</p>
 
-        <div class="config-section">
-          <h3>Storage Health</h3>
-          <div class="pair-grid">
-            <div class="pair">
-              <div class="pk">Auth Persistence</div>
-              <div class="pv">
-                {% if storage_health.database.ok %}
-                  <span class="pill-status pill-pass">healthy</span>
-                {% elif storage_health.database.mode == 'postgres' %}
-                  <span class="pill-status pill-fail">unreachable</span>
-                {% else %}
-                  <span class="pill-status pill-na">local sqlite</span>
-                {% endif %}
-              </div>
-              <div class="tiny">{{ storage_health.database.detail }}</div>
-            </div>
-            <div class="pair">
-              <div class="pk">S3 Artifacts</div>
-              <div class="pv">
-                {% if storage_health.s3.enabled and storage_health.s3.ok %}
-                  <span class="pill-status pill-pass">healthy</span>
-                {% elif storage_health.s3.enabled %}
-                  <span class="pill-status pill-fail">check failed</span>
-                {% else %}
-                  <span class="pill-status pill-na">disabled</span>
-                {% endif %}
-              </div>
-              <div class="tiny">{{ storage_health.s3.detail }}</div>
-            </div>
-          </div>
-          <div class="actions-grid">
-            <form method="post" action="/check-storage-health"><button class="btn soft" type="submit">Run Storage Health Check</button></form>
-          </div>
-          <div class="tiny">Last checked: {{ storage_health.checked_at if storage_health.checked_at else 'not checked yet' }}</div>
-        </div>
-
         <div class="cli-shell">
           <div class="cli-head">
             <div class="cli-title">CLI Session</div>
@@ -2683,6 +2647,42 @@
       <div class="panel">
         <h2>Admin Access</h2>
         <p class="help">Create invite links or invite codes. Users can sign up with email + password + invite code.</p>
+
+        <div class="config-section">
+          <h3>Storage Health</h3>
+          <div class="pair-grid">
+            <div class="pair">
+              <div class="pk">Auth Persistence</div>
+              <div class="pv">
+                {% if storage_health.database.ok %}
+                  <span class="pill-status pill-pass">healthy</span>
+                {% elif storage_health.database.mode == 'postgres' %}
+                  <span class="pill-status pill-fail">unreachable</span>
+                {% else %}
+                  <span class="pill-status pill-na">local sqlite</span>
+                {% endif %}
+              </div>
+              <div class="tiny">{{ storage_health.database.detail }}</div>
+            </div>
+            <div class="pair">
+              <div class="pk">S3 Artifacts</div>
+              <div class="pv">
+                {% if storage_health.s3.enabled and storage_health.s3.ok %}
+                  <span class="pill-status pill-pass">healthy</span>
+                {% elif storage_health.s3.enabled %}
+                  <span class="pill-status pill-fail">check failed</span>
+                {% else %}
+                  <span class="pill-status pill-na">disabled</span>
+                {% endif %}
+              </div>
+              <div class="tiny">{{ storage_health.s3.detail }}</div>
+            </div>
+          </div>
+          <div class="actions-grid">
+            <form method="post" action="/check-storage-health"><button class="btn soft" type="submit">Run Storage Health Check</button></form>
+          </div>
+          <div class="tiny">Last checked: {{ storage_health.checked_at if storage_health.checked_at else 'not checked yet' }}</div>
+        </div>
 
         <form method="post" action="/admin/create-invite">
           <div class="grid cols-4">

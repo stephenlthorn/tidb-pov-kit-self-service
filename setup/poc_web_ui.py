@@ -2296,10 +2296,11 @@ def create_app(config_path: Path) -> Flask:
     @app.get("/")
     def index():
         user = current_user()
+        is_admin = require_admin(user)
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
-        storage_health = get_storage_health_state()
+        storage_health = get_storage_health_state() if is_admin else default_storage_health_state()
         report_ready = report_artifact_ready()
         report_dashboard = build_report_dashboard()
         workload_insights = build_workload_insights(cfg)
@@ -2308,7 +2309,6 @@ def create_app(config_path: Path) -> Flask:
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
         tiers_for_ui = visible_tiers_for_ui(selected_tier)
-        is_admin = require_admin(user)
         users = list_users(250) if is_admin else []
         invites = list_invites(250) if is_admin else []
         signup_base = f"{request.url_root.rstrip('/')}{url_for('signup_route')}"
@@ -2759,13 +2759,18 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/check-storage-health")
     def check_storage_health_route():
+        user = current_user()
+        if not require_admin(user):
+            flash("Admin access required.", "error")
+            return redirect(url_for("index") + "#overview")
+
         state = run_storage_health_check()
         save_storage_health_state(state)
         if state.get("overall") == "ok":
             flash("Storage health check passed (Postgres + S3).", "success")
         else:
             flash("Storage health check found issues. Review the Storage Health panel.", "warning")
-        return redirect(url_for("index") + "#dashboards")
+        return redirect(url_for("index") + "#admin")
 
     @app.post("/run-workload")
     def run_workload_route():
