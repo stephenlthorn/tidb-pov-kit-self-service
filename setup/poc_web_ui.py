@@ -60,6 +60,7 @@ AUTH_DB = RESULTS_DIR / "auth.db"
 DEFAULT_INVITE_TTL_DAYS = 14
 MAX_INVITE_TTL_DAYS = 3650
 S3_PROJECT_SLUG = str(os.environ.get("S3_ARTIFACTS_PROJECT", "default")).strip() or "default"
+STORAGE_HEALTH_STATE_KEY = "storage_health_state"
 
 sys.path.insert(0, str(ROOT))
 from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
@@ -1572,6 +1573,119 @@ def sync_local_artifacts_to_s3() -> Tuple[bool, List[str]]:
     return True, uploaded
 
 
+def default_storage_health_state() -> Dict:
+    db_mode = "postgres" if using_postgres() else "sqlite"
+    db_detail = (
+        "Uses Postgres persistence (Supabase/Vercel Postgres)."
+        if db_mode == "postgres"
+        else f"Using local SQLite at {AUTH_DB}."
+    )
+    s3_detail = "S3 artifact storage is enabled." if s3_enabled() else "S3 artifact storage is disabled."
+    return {
+        "checked_at": "",
+        "overall": "unknown",
+        "database": {
+            "mode": db_mode,
+            "ok": False,
+            "detail": db_detail,
+        },
+        "s3": {
+            "enabled": s3_enabled(),
+            "bucket": s3_bucket(),
+            "ok": False,
+            "detail": s3_detail,
+        },
+    }
+
+
+def get_storage_health_state() -> Dict:
+    raw = _app_state_get(STORAGE_HEALTH_STATE_KEY)
+    if not raw:
+        return default_storage_health_state()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    return default_storage_health_state()
+
+
+def save_storage_health_state(state: Dict) -> None:
+    try:
+        _app_state_set(STORAGE_HEALTH_STATE_KEY, json.dumps(state, ensure_ascii=True))
+    except Exception:
+        pass
+
+
+def run_storage_health_check() -> Dict:
+    out = default_storage_health_state()
+    out["checked_at"] = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+
+    # Check auth persistence connectivity.
+    try:
+        if using_postgres():
+            with pg_auth_conn() as conn:
+                row = conn.execute("SELECT 1 AS ok").fetchone()
+            db_ok = bool(row and int(row.get("ok", 0)) == 1)
+            out["database"]["ok"] = db_ok
+            out["database"]["detail"] = "Connected to Postgres auth store."
+        else:
+            with auth_conn() as conn:
+                conn.execute("SELECT 1").fetchone()
+            out["database"]["ok"] = True
+            out["database"]["detail"] = f"Connected to local SQLite auth store at {AUTH_DB}."
+    except Exception as e:
+        out["database"]["ok"] = False
+        out["database"]["detail"] = f"Auth store check failed: {e}"
+
+    # Check S3 artifact storage with write/read probe.
+    out["s3"]["enabled"] = s3_enabled()
+    out["s3"]["bucket"] = s3_bucket()
+    if not s3_enabled():
+        out["s3"]["ok"] = False
+        out["s3"]["detail"] = "S3 artifacts are disabled."
+    elif not s3_bucket():
+        out["s3"]["ok"] = False
+        out["s3"]["detail"] = "S3 enabled but S3_BUCKET is not set."
+    else:
+        client = s3_client()
+        if client is None:
+            out["s3"]["ok"] = False
+            out["s3"]["detail"] = "Unable to initialize S3 client (check boto3/credentials/env)."
+        else:
+            probe_key = s3_artifact_key("healthchecks/storage-health.txt")
+            probe_body = f"tidb-pov-storage-health {out['checked_at']}"
+            try:
+                client.put_object(
+                    Bucket=s3_bucket(),
+                    Key=probe_key,
+                    Body=probe_body.encode("utf-8"),
+                    ContentType="text/plain",
+                )
+                got = client.get_object(Bucket=s3_bucket(), Key=probe_key)
+                payload = got["Body"].read().decode("utf-8", errors="replace")
+                if probe_body in payload:
+                    out["s3"]["ok"] = True
+                    out["s3"]["detail"] = f"Read/write probe succeeded in s3://{s3_bucket()}/{probe_key}."
+                else:
+                    out["s3"]["ok"] = False
+                    out["s3"]["detail"] = "S3 probe object read back mismatched data."
+                try:
+                    client.delete_object(Bucket=s3_bucket(), Key=probe_key)
+                except Exception:
+                    pass
+            except Exception as e:
+                out["s3"]["ok"] = False
+                out["s3"]["detail"] = f"S3 probe failed: {e}"
+
+    db_ok = bool(out.get("database", {}).get("ok"))
+    s3_required = bool(out.get("s3", {}).get("enabled"))
+    s3_ok = bool(out.get("s3", {}).get("ok"))
+    out["overall"] = "ok" if db_ok and (not s3_required or s3_ok) else "degraded"
+    return out
+
+
 def database_url() -> str:
     for key in ("DATABASE_URL", "POSTGRES_URL_NON_POOLING", "POSTGRES_URL"):
         raw = str(os.environ.get(key, "") or "").strip()
@@ -2185,6 +2299,7 @@ def create_app(config_path: Path) -> Flask:
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
+        storage_health = get_storage_health_state()
         report_ready = report_artifact_ready()
         report_dashboard = build_report_dashboard()
         workload_insights = build_workload_insights(cfg)
@@ -2243,6 +2358,7 @@ def create_app(config_path: Path) -> Flask:
             runner_size_presets=RUNNER_SIZE_PRESETS,
             s3_artifacts_enabled=s3_enabled(),
             s3_artifacts_bucket=s3_bucket(),
+            storage_health=storage_health,
         )
 
     @app.get("/ui-skeleton")
@@ -2639,6 +2755,16 @@ def create_app(config_path: Path) -> Flask:
             flash(f"S3 sync complete: {', '.join(details)}", "success")
         else:
             flash(f"S3 sync incomplete: {' | '.join(details)}", "warning")
+        return redirect(url_for("index") + "#dashboards")
+
+    @app.post("/check-storage-health")
+    def check_storage_health_route():
+        state = run_storage_health_check()
+        save_storage_health_state(state)
+        if state.get("overall") == "ok":
+            flash("Storage health check passed (Postgres + S3).", "success")
+        else:
+            flash("Storage health check found issues. Review the Storage Health panel.", "warning")
         return redirect(url_for("index") + "#dashboards")
 
     @app.post("/run-workload")
