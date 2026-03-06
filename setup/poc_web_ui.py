@@ -1924,6 +1924,14 @@ def aws_control_session(region: str):
             kwargs["aws_session_token"] = session_token
         return boto3.session.Session(**kwargs)
 
+    fallback_access_key = str(os.environ.get("AWS_ACCESS_KEY_ID", "")).strip()
+    fallback_secret_key = str(os.environ.get("AWS_SECRET_ACCESS_KEY", "")).strip()
+    if IS_VERCEL and not (fallback_access_key and fallback_secret_key):
+        raise RuntimeError(
+            "Missing AWS control credentials. Set AWS_CONTROL_ACCESS_KEY_ID and AWS_CONTROL_SECRET_ACCESS_KEY "
+            "(or fallback AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY) in Vercel project environment variables."
+        )
+
     return boto3.session.Session(region_name=region)
 
 

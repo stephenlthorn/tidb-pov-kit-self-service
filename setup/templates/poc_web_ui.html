@@ -2328,30 +2328,34 @@
             </div>
 
             <div class="line"></div>
-            <h3 class="subhead">Managed By Admin (Locked)</h3>
-            <div class="pair-grid">
-              <div class="pair">
-                <div class="pk">Account + Region</div>
-                <div class="pv">{{ cfg.aws_runner.customer_account_id if cfg.aws_runner.customer_account_id else 'n/a' }} / {{ cfg.aws_runner.aws_region }}</div>
-                <div class="tiny">Launch mode: {{ cfg.aws_runner.launch_mode }}</div>
+            {% if is_admin %}
+              <h3 class="subhead">Managed By Admin (Locked)</h3>
+              <div class="pair-grid">
+                <div class="pair">
+                  <div class="pk">Account + Region</div>
+                  <div class="pv">{{ cfg.aws_runner.customer_account_id if cfg.aws_runner.customer_account_id else 'n/a' }} / {{ cfg.aws_runner.aws_region }}</div>
+                  <div class="tiny">Launch mode: {{ cfg.aws_runner.launch_mode }}</div>
+                </div>
+                <div class="pair">
+                  <div class="pk">Assume Role + External ID</div>
+                  <div class="pv">{{ cfg.aws_runner.customer_assume_role_arn if cfg.aws_runner.customer_assume_role_arn else 'n/a' }}</div>
+                  <div class="tiny">{{ cfg.aws_runner.external_id if cfg.aws_runner.external_id else 'n/a' }}</div>
+                </div>
+                <div class="pair">
+                  <div class="pk">Network</div>
+                  <div class="pv">{{ cfg.aws_runner.vpc_id if cfg.aws_runner.vpc_id else 'n/a' }}</div>
+                  <div class="tiny">Subnet {{ cfg.aws_runner.subnet_id if cfg.aws_runner.subnet_id else 'n/a' }} | SG {{ cfg.aws_runner.security_group_id if cfg.aws_runner.security_group_id else 'n/a' }}</div>
+                </div>
+                <div class="pair">
+                  <div class="pk">Runner Guardrails</div>
+                  <div class="pv">Max instances: {{ cfg.aws_runner.max_instances_per_run }}</div>
+                  <div class="tiny">Types: {{ cfg.aws_runner.allowed_instance_types | join(', ') }}</div>
+                </div>
               </div>
-              <div class="pair">
-                <div class="pk">Assume Role + External ID</div>
-                <div class="pv">{{ cfg.aws_runner.customer_assume_role_arn if cfg.aws_runner.customer_assume_role_arn else 'n/a' }}</div>
-                <div class="tiny">{{ cfg.aws_runner.external_id if cfg.aws_runner.external_id else 'n/a' }}</div>
-              </div>
-              <div class="pair">
-                <div class="pk">Network</div>
-                <div class="pv">{{ cfg.aws_runner.vpc_id if cfg.aws_runner.vpc_id else 'n/a' }}</div>
-                <div class="tiny">Subnet {{ cfg.aws_runner.subnet_id if cfg.aws_runner.subnet_id else 'n/a' }} | SG {{ cfg.aws_runner.security_group_id if cfg.aws_runner.security_group_id else 'n/a' }}</div>
-              </div>
-              <div class="pair">
-                <div class="pk">Runner Guardrails</div>
-                <div class="pv">Max instances: {{ cfg.aws_runner.max_instances_per_run }}</div>
-                <div class="tiny">Types: {{ cfg.aws_runner.allowed_instance_types | join(', ') }}</div>
-              </div>
-            </div>
-            <div class="tiny">Security-sensitive AWS trust/network fields are locked for non-admin users.</div>
+              <div class="tiny">Security-sensitive AWS trust/network fields are locked for non-admin users.</div>
+            {% else %}
+              <div class="tiny">AWS trust, account, and network settings are managed by your admin.</div>
+            {% endif %}
             <div class="tiny">Save configuration before running AWS actions so the launch uses your latest values.</div>
 
             <div class="pair-grid">
@@ -2410,7 +2414,7 @@
                 </table>
               </div>
             {% endif %}
-            {% if aws_runner_state.details %}
+            {% if is_admin and aws_runner_state.details %}
               <div class="table-wrap">
                 <table>
                   <thead>
