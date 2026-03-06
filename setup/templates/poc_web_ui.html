@@ -2305,34 +2305,12 @@
                 <label class="check"><input type="checkbox" name="aws_runner_enabled" {% if cfg.aws_runner.enabled %}checked{% endif %} /> enabled</label>
               </div>
               <div class="field">
-                <label>Launch Mode</label>
-                <select name="aws_launch_mode">
-                  <option value="customer_assume_role" {% if cfg.aws_runner.launch_mode == 'customer_assume_role' %}selected{% endif %}>customer_assume_role</option>
-                </select>
-              </div>
-              <div class="field">
                 <label>Connectivity Mode</label>
                 <select name="aws_connectivity_mode">
                   <option value="private_endpoint" {% if cfg.aws_runner.connectivity_mode == 'private_endpoint' %}selected{% endif %}>private_endpoint</option>
                   <option value="public_endpoint" {% if cfg.aws_runner.connectivity_mode == 'public_endpoint' %}selected{% endif %}>public_endpoint</option>
                 </select>
               </div>
-              <div class="field"><label>AWS Region</label><input type="text" name="aws_region" value="{{ cfg.aws_runner.aws_region }}" /></div>
-            </div>
-            <div class="grid cols-4">
-              <div class="field"><label>Customer Account ID</label><input type="text" name="aws_customer_account_id" value="{{ cfg.aws_runner.customer_account_id }}" placeholder="219248915861" /></div>
-              <div class="field"><label>Assume Role ARN</label><input type="text" name="aws_customer_assume_role_arn" value="{{ cfg.aws_runner.customer_assume_role_arn }}" placeholder="arn:aws:iam::...:role/TidbPovCustomerRunnerLaunchRole" /></div>
-              <div class="field"><label>External ID</label><input type="text" name="aws_external_id" value="{{ cfg.aws_runner.external_id }}" placeholder="tidbpov-..." /></div>
-              <div class="field"><label>Runner Role ARN</label><input type="text" name="aws_runner_role_arn" value="{{ cfg.aws_runner.runner_role_arn }}" placeholder="arn:aws:iam::...:role/TidbPovRunnerInstanceRole" /></div>
-            </div>
-            <div class="grid cols-4">
-              <div class="field"><label>VPC ID</label><input type="text" name="aws_vpc_id" value="{{ cfg.aws_runner.vpc_id }}" placeholder="vpc-..." /></div>
-              <div class="field"><label>Subnet ID</label><input type="text" name="aws_subnet_id" value="{{ cfg.aws_runner.subnet_id }}" placeholder="subnet-..." /></div>
-              <div class="field"><label>Security Group ID</label><input type="text" name="aws_security_group_id" value="{{ cfg.aws_runner.security_group_id }}" placeholder="sg-..." /></div>
-              <div class="field"><label>Runner Instance Profile Name</label><input type="text" name="aws_runner_instance_profile_name" value="{{ cfg.aws_runner.runner_instance_profile_name }}" placeholder="TidbPovRunnerInstanceRole" /></div>
-            </div>
-            <div class="grid cols-4">
-              <div class="field"><label>AMI ID (optional)</label><input type="text" name="aws_ami_id" value="{{ cfg.aws_runner.ami_id }}" placeholder="Leave blank to auto-resolve Amazon Linux 2023" /></div>
               <div class="field">
                 <label>Runner Size Preset</label>
                 <select name="aws_instance_size">
@@ -2342,19 +2320,38 @@
                 </select>
               </div>
               <div class="field"><label>Instance Count</label><input type="number" min="1" name="aws_instance_count" value="{{ cfg.aws_runner.instance_count }}" /></div>
-              <div class="field"><label>Allowed Instance Types (csv)</label><input type="text" name="aws_allowed_instance_types" value="{{ cfg.aws_runner.allowed_instance_types | join(', ') }}" /></div>
-              <div class="field"><label>Max Instances Per Run</label><input type="number" min="1" name="aws_max_instances_per_run" value="{{ cfg.aws_runner.max_instances_per_run }}" /></div>
             </div>
-            <div class="grid cols-4">
+            <div class="grid cols-3">
+              <div class="field"><label>AMI ID (optional)</label><input type="text" name="aws_ami_id" value="{{ cfg.aws_runner.ami_id }}" placeholder="Leave blank to auto-resolve Amazon Linux 2023" /></div>
               <div class="field"><label>Run Timeout Minutes</label><input type="number" min="10" name="aws_run_timeout_minutes" value="{{ cfg.aws_runner.run_timeout_minutes }}" /></div>
               <div class="field"><label>Auto Shutdown Minutes</label><input type="number" min="0" name="aws_auto_shutdown_minutes" value="{{ cfg.aws_runner.auto_shutdown_minutes }}" /></div>
-              <div class="field"><label>Bootstrap Repo URL</label><input type="text" name="aws_bootstrap_repo_url" value="{{ cfg.aws_runner.bootstrap_repo_url }}" /></div>
-              <div class="field"><label>Bootstrap Repo Ref</label><input type="text" name="aws_bootstrap_repo_ref" value="{{ cfg.aws_runner.bootstrap_repo_ref }}" /></div>
             </div>
-            <div class="grid cols-2">
-              <div class="field"><label>Upload Summary Only</label><label class="check"><input type="checkbox" name="aws_summary_upload_only" {% if cfg.aws_runner.summary_upload_only %}checked{% endif %} /> enabled</label></div>
-              <div class="field"></div>
+
+            <div class="line"></div>
+            <h3 class="subhead">Managed By Admin (Locked)</h3>
+            <div class="pair-grid">
+              <div class="pair">
+                <div class="pk">Account + Region</div>
+                <div class="pv">{{ cfg.aws_runner.customer_account_id if cfg.aws_runner.customer_account_id else 'n/a' }} / {{ cfg.aws_runner.aws_region }}</div>
+                <div class="tiny">Launch mode: {{ cfg.aws_runner.launch_mode }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Assume Role + External ID</div>
+                <div class="pv">{{ cfg.aws_runner.customer_assume_role_arn if cfg.aws_runner.customer_assume_role_arn else 'n/a' }}</div>
+                <div class="tiny">{{ cfg.aws_runner.external_id if cfg.aws_runner.external_id else 'n/a' }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Network</div>
+                <div class="pv">{{ cfg.aws_runner.vpc_id if cfg.aws_runner.vpc_id else 'n/a' }}</div>
+                <div class="tiny">Subnet {{ cfg.aws_runner.subnet_id if cfg.aws_runner.subnet_id else 'n/a' }} | SG {{ cfg.aws_runner.security_group_id if cfg.aws_runner.security_group_id else 'n/a' }}</div>
+              </div>
+              <div class="pair">
+                <div class="pk">Runner Guardrails</div>
+                <div class="pv">Max instances: {{ cfg.aws_runner.max_instances_per_run }}</div>
+                <div class="tiny">Types: {{ cfg.aws_runner.allowed_instance_types | join(', ') }}</div>
+              </div>
             </div>
+            <div class="tiny">Security-sensitive AWS trust/network fields are locked for non-admin users.</div>
             <div class="tiny">Save configuration before running AWS actions so the launch uses your latest values.</div>
 
             <div class="pair-grid">

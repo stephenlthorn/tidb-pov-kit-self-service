@@ -873,53 +873,146 @@ def apply_comparison_advanced_from_form(comp: Dict, form, prefix: str = "") -> N
     comp["sqlserver_packet_size"] = max(512, to_int(g("comparison_sqlserver_packet_size"), int(comp.get("sqlserver_packet_size", 4096))))
 
 
-def apply_aws_runner_from_form(cfg: Dict, form) -> Dict:
+def apply_aws_runner_from_form(cfg: Dict, form, *, allow_locked_edit: bool = False) -> Dict:
     aws_runner = cfg.setdefault("aws_runner", {})
-    aws_runner["enabled"] = to_bool(form.get("aws_runner_enabled"), False)
-    aws_runner["launch_mode"] = form.get("aws_launch_mode", "customer_assume_role").strip().lower() or "customer_assume_role"
-    aws_runner["connectivity_mode"] = form.get("aws_connectivity_mode", "private_endpoint").strip().lower() or "private_endpoint"
-    aws_runner["aws_region"] = form.get("aws_region", "us-east-1").strip() or "us-east-1"
-    aws_runner["customer_account_id"] = form.get("aws_customer_account_id", "").strip()
-    aws_runner["customer_assume_role_arn"] = form.get("aws_customer_assume_role_arn", "").strip()
-    aws_runner["external_id"] = form.get("aws_external_id", "").strip()
-    aws_runner["vpc_id"] = form.get("aws_vpc_id", "").strip()
-    aws_runner["subnet_id"] = form.get("aws_subnet_id", "").strip()
-    aws_runner["security_group_id"] = form.get("aws_security_group_id", "").strip()
-    aws_runner["runner_instance_profile_name"] = (
-        form.get("aws_runner_instance_profile_name", "TidbPovRunnerInstanceRole").strip()
-        or "TidbPovRunnerInstanceRole"
+    existing = dict(DEFAULT_CFG["aws_runner"])
+    existing.update(aws_runner or {})
+
+    # Customer-editable fields.
+    aws_runner["enabled"] = to_bool(form.get("aws_runner_enabled"), bool(existing.get("enabled", False)))
+    aws_runner["connectivity_mode"] = (
+        form.get("aws_connectivity_mode", str(existing.get("connectivity_mode", "private_endpoint"))).strip().lower()
+        or str(existing.get("connectivity_mode", "private_endpoint"))
     )
-    aws_runner["runner_role_arn"] = form.get("aws_runner_role_arn", "").strip()
-    aws_runner["ami_id"] = form.get("aws_ami_id", "").strip()
-    aws_runner["instance_count"] = max(1, to_int(form.get("aws_instance_count"), 1))
-    aws_runner["instance_size"] = form.get("aws_instance_size", "medium").strip().lower() or "medium"
-    allowed_instance_types = [
-        part.strip()
-        for part in re.split(r"[\n,\s]+", form.get("aws_allowed_instance_types", "").strip())
-        if part.strip()
-    ]
-    aws_runner["allowed_instance_types"] = (
-        allowed_instance_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+    aws_runner["ami_id"] = form.get("aws_ami_id", str(existing.get("ami_id", ""))).strip()
+    aws_runner["instance_size"] = (
+        form.get("aws_instance_size", str(existing.get("instance_size", "medium"))).strip().lower()
+        or str(existing.get("instance_size", "medium"))
     )
-    aws_runner["max_instances_per_run"] = max(
+    aws_runner["instance_count"] = max(
         1,
         to_int(
-            form.get("aws_max_instances_per_run"),
-            int(DEFAULT_CFG["aws_runner"]["max_instances_per_run"]),
+            form.get("aws_instance_count"),
+            int(existing.get("instance_count", 1)),
         ),
     )
-    aws_runner["instance_count"] = min(aws_runner["instance_count"], aws_runner["max_instances_per_run"])
-    aws_runner["summary_upload_only"] = to_bool(form.get("aws_summary_upload_only"), True)
-    aws_runner["run_timeout_minutes"] = max(10, to_int(form.get("aws_run_timeout_minutes"), 180))
-    aws_runner["bootstrap_repo_url"] = (
-        form.get("aws_bootstrap_repo_url", DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]).strip()
-        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]
+    aws_runner["run_timeout_minutes"] = max(
+        10,
+        to_int(
+            form.get("aws_run_timeout_minutes"),
+            int(existing.get("run_timeout_minutes", 180)),
+        ),
     )
-    aws_runner["bootstrap_repo_ref"] = (
-        form.get("aws_bootstrap_repo_ref", DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]).strip()
-        or DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]
+    aws_runner["auto_shutdown_minutes"] = max(
+        0,
+        to_int(
+            form.get("aws_auto_shutdown_minutes"),
+            int(existing.get("auto_shutdown_minutes", 15)),
+        ),
     )
-    aws_runner["auto_shutdown_minutes"] = max(0, to_int(form.get("aws_auto_shutdown_minutes"), 15))
+
+    # Locked fields are editable by admins only; non-admin submissions cannot change them.
+    if allow_locked_edit:
+        aws_runner["launch_mode"] = (
+            form.get("aws_launch_mode", str(existing.get("launch_mode", "customer_assume_role"))).strip().lower()
+            or str(existing.get("launch_mode", "customer_assume_role"))
+        )
+        aws_runner["aws_region"] = (
+            form.get("aws_region", str(existing.get("aws_region", "us-east-1"))).strip()
+            or str(existing.get("aws_region", "us-east-1"))
+        )
+        aws_runner["customer_account_id"] = form.get(
+            "aws_customer_account_id",
+            str(existing.get("customer_account_id", "")),
+        ).strip()
+        aws_runner["customer_assume_role_arn"] = form.get(
+            "aws_customer_assume_role_arn",
+            str(existing.get("customer_assume_role_arn", "")),
+        ).strip()
+        aws_runner["external_id"] = form.get("aws_external_id", str(existing.get("external_id", ""))).strip()
+        aws_runner["vpc_id"] = form.get("aws_vpc_id", str(existing.get("vpc_id", ""))).strip()
+        aws_runner["subnet_id"] = form.get("aws_subnet_id", str(existing.get("subnet_id", ""))).strip()
+        aws_runner["security_group_id"] = form.get(
+            "aws_security_group_id",
+            str(existing.get("security_group_id", "")),
+        ).strip()
+        aws_runner["runner_instance_profile_name"] = (
+            form.get(
+                "aws_runner_instance_profile_name",
+                str(existing.get("runner_instance_profile_name", "TidbPovRunnerInstanceRole")),
+            ).strip()
+            or "TidbPovRunnerInstanceRole"
+        )
+        aws_runner["runner_role_arn"] = form.get("aws_runner_role_arn", str(existing.get("runner_role_arn", ""))).strip()
+        allowed_instance_types = [
+            part.strip()
+            for part in re.split(
+                r"[\n,\s]+",
+                form.get(
+                    "aws_allowed_instance_types",
+                    ",".join(existing.get("allowed_instance_types", list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"]))),
+                ).strip(),
+            )
+            if part.strip()
+        ]
+        aws_runner["allowed_instance_types"] = (
+            allowed_instance_types or list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+        )
+        aws_runner["max_instances_per_run"] = max(
+            1,
+            to_int(
+                form.get("aws_max_instances_per_run"),
+                int(existing.get("max_instances_per_run", DEFAULT_CFG["aws_runner"]["max_instances_per_run"])),
+            ),
+        )
+        aws_runner["summary_upload_only"] = to_bool(
+            form.get("aws_summary_upload_only"),
+            bool(existing.get("summary_upload_only", True)),
+        )
+        aws_runner["bootstrap_repo_url"] = (
+            form.get(
+                "aws_bootstrap_repo_url",
+                str(existing.get("bootstrap_repo_url", DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"])),
+            ).strip()
+            or DEFAULT_CFG["aws_runner"]["bootstrap_repo_url"]
+        )
+        aws_runner["bootstrap_repo_ref"] = (
+            form.get(
+                "aws_bootstrap_repo_ref",
+                str(existing.get("bootstrap_repo_ref", DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"])),
+            ).strip()
+            or DEFAULT_CFG["aws_runner"]["bootstrap_repo_ref"]
+        )
+    else:
+        for key in (
+            "launch_mode",
+            "aws_region",
+            "customer_account_id",
+            "customer_assume_role_arn",
+            "external_id",
+            "vpc_id",
+            "subnet_id",
+            "security_group_id",
+            "runner_instance_profile_name",
+            "runner_role_arn",
+            "allowed_instance_types",
+            "max_instances_per_run",
+            "summary_upload_only",
+            "bootstrap_repo_url",
+            "bootstrap_repo_ref",
+        ):
+            aws_runner[key] = existing.get(key)
+
+    if str(aws_runner.get("launch_mode", "")).strip().lower() not in {"customer_assume_role"}:
+        aws_runner["launch_mode"] = "customer_assume_role"
+    if str(aws_runner.get("connectivity_mode", "")).strip().lower() not in {"private_endpoint", "public_endpoint"}:
+        aws_runner["connectivity_mode"] = "private_endpoint"
+    if str(aws_runner.get("instance_size", "")).strip().lower() not in RUNNER_SIZE_PRESETS:
+        aws_runner["instance_size"] = "medium"
+    if not isinstance(aws_runner.get("allowed_instance_types"), list):
+        aws_runner["allowed_instance_types"] = list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
+    aws_runner["max_instances_per_run"] = max(1, int(aws_runner.get("max_instances_per_run", 1)))
+    aws_runner["instance_count"] = min(int(aws_runner.get("instance_count", 1)), int(aws_runner["max_instances_per_run"]))
     return aws_runner
 
 
@@ -2950,6 +3043,7 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/save-config")
     def save_config_route():
+        user = current_user()
         cfg = load_cfg(config_path)
 
         tidb = cfg.setdefault("tidb", {})
@@ -3028,7 +3122,7 @@ def create_app(config_path: Path) -> Flask:
         tco["engineer_annual_cost"] = to_int(request.form.get("tco_engineer_annual_cost"), 180000)
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
 
-        apply_aws_runner_from_form(cfg, request.form)
+        apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
 
         save_cfg(config_path, cfg)
         action = str(request.form.get("save_action", "save")).strip().lower()
@@ -3323,7 +3417,7 @@ def create_app(config_path: Path) -> Flask:
         user = current_user() or {}
         cfg = load_cfg(config_path)
         if request.form:
-            apply_aws_runner_from_form(cfg, request.form)
+            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
             save_cfg(config_path, cfg)
         state = aws_validate_runner_environment(cfg, user_email=str(user.get("email") or ""))
         save_aws_runner_state(state)
@@ -3349,7 +3443,7 @@ def create_app(config_path: Path) -> Flask:
         user = current_user() or {}
         cfg = load_cfg(config_path)
         if request.form:
-            apply_aws_runner_from_form(cfg, request.form)
+            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
             save_cfg(config_path, cfg)
         runner = cfg.get("aws_runner") or {}
         if not runner.get("enabled"):
