@@ -548,11 +548,23 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
             return na
         return f"{v:,.{decimals}f}"
 
+    display_latency = summary.get("warm_p99_ms")
+    display_tps = summary.get("warm_tps")
+    latency_label = "Warm p99 Latency"
+    tps_label = "Warm Throughput"
+    if summary.get("run_mode") == "performance":
+        if display_latency is None:
+            display_latency = summary.get("workload_p99_ms")
+        if display_tps is None:
+            display_tps = summary.get("workload_tps")
+        latency_label = "Current Run p99"
+        tps_label = "Current Run Throughput"
+
     cards = [
         ("Run Mode",            str(summary.get("run_mode") or "validation"), "",       (0, 128, 128)),
         ("Schema Mode",         str(summary.get("schema_mode") or "tidb_optimized"), "", (100, 100, 180)),
-        ("Warm p99 Latency",    _fmt(summary.get("warm_p99_ms"), 1), "ms",       BLUE),
-        ("Warm Throughput",     _fmt(summary.get("warm_tps"),    0), "TPS",      GREEN),
+        (latency_label,         _fmt(display_latency, 1), "ms",       BLUE),
+        (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
         ("HA Recovery (RTO)",   _fmt(summary.get("rto_sec"),     1), "seconds",  ORANGE),
@@ -576,16 +588,26 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     pdf.set_y(y0 + row_count * (col_h + 4) + 2)
 
     # Intro paragraph
-    pdf.body_text(
+    intro = (
         "This report summarises the results of a self-service Proof of Value "
         "conducted on TiDB Cloud. The tests were executed automatically using "
         "the TiDB Cloud PoV Kit and cover OLTP performance (including warm steady-state), elastic auto-scaling, "
         "high availability, write contention, HTAP, online DDL, MySQL compatibility, "
         "data import speed, and total cost of ownership. "
         f"Run mode: {summary.get('run_mode', 'validation')}. "
-        f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}.",
-        size=9,
+        f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}."
     )
+    if summary.get("workload_status"):
+        intro += (
+            f" Workload Generator: {summary.get('workload_status')} "
+            f"({summary.get('workload_mode') or 'rawsql'})"
+        )
+        if summary.get("workload_qps") is not None:
+            intro += f", achieved QPS {summary.get('workload_qps'):.2f}"
+        if summary.get("workload_p99_ms") is not None:
+            intro += f", p99 {summary.get('workload_p99_ms'):.2f} ms"
+        intro += "."
+    pdf.body_text(intro, size=9)
 
     # ── Page 2: Module status table ───────────────────────────────────────────
     pdf.add_page()

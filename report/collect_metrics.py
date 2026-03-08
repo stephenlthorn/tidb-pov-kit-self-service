@@ -7,12 +7,13 @@ Run standalone:
     python report/collect_metrics.py > results/metrics_summary.json
 """
 import sys, os, json, time, argparse, re
+from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import yaml
 from lib.result_store import (
     _conn, get_latency_stats, get_time_series,
-    DB_PATH
+    DB_PATH, init_db
 )
 
 MODULES = [
@@ -37,10 +38,12 @@ def collect() -> dict:
         "summary":      {},
         "data_manifest": _load_manifest(),
         "run_context": _load_run_context(),
+        "workload_generator": _load_workload_generator_summary(),
         "comparison_enabled": False,
         "comparison_label": "Comparison DB",
     }
 
+    init_db()
     with _conn() as c:
         # Module meta (status, duration)
         meta_rows = c.execute(
@@ -234,8 +237,17 @@ def _order_phases(mod: str, observed: list, defaults: list) -> list:
 def _build_summary(payload: dict) -> dict:
     """Derive top-level KPI cards for the executive summary page."""
     modules      = payload["modules"]
+    run_context = payload.get("run_context", {}) or {}
+    run_mode = str(run_context.get("run_mode") or "validation")
     total_mods   = len([m for m in MODULES if modules.get(m, {}).get("status") != "not_run"])
     passed_mods  = len([m for m in MODULES if modules.get(m, {}).get("status") == "passed"])
+
+    wg = payload.get("workload_generator") or {}
+    workload_qps = _maybe_float(wg.get("achieved_qps"))
+    workload_tps = _maybe_float(wg.get("achieved_tps"))
+    workload_p95 = _maybe_float(wg.get("p95_ms"))
+    workload_p99 = _maybe_float(wg.get("p99_ms"))
+    workload_error_rate = _maybe_float(wg.get("error_rate"))
 
     # Best p99 from baseline OLTP
     baseline = modules.get("01_baseline_perf", {}).get("tidb", {})
@@ -253,6 +265,19 @@ def _build_summary(payload: dict) -> dict:
     warm_p95 = warm_steady.get("p95_ms") if warm_count > 0 else None
     warm_p99 = warm_steady.get("p99_ms") if warm_count > 0 else None
     warm_tps = warm_steady.get("tps") if warm_count > 0 else None
+
+    if run_mode == "performance":
+        if warm_p95 is None:
+            warm_p95 = workload_p95
+        if warm_p99 is None:
+            warm_p99 = workload_p99
+        if warm_tps is None:
+            warm_tps = workload_tps
+
+    if best_p99 is None:
+        best_p99 = workload_p99
+    if best_tps is None:
+        best_tps = workload_tps
 
     # HA RTO
     ha = modules.get("03_high_availability", {})
@@ -278,8 +303,8 @@ def _build_summary(payload: dict) -> dict:
     return {
         "modules_run":          total_mods,
         "modules_passed":       passed_mods,
-        "run_mode":             payload.get("run_context", {}).get("run_mode"),
-        "schema_mode":          payload.get("run_context", {}).get("schema_mode"),
+        "run_mode":             run_context.get("run_mode"),
+        "schema_mode":          run_context.get("schema_mode"),
         "best_observed_p99_ms": best_p99,
         "best_p99_ms":          best_p99,
         "best_tps":             best_tps,
@@ -291,6 +316,14 @@ def _build_summary(payload: dict) -> dict:
         "hotspot_improvement_pct": hotspot_improvement,
         "mysql_compat_pct":     compat.get("pct"),
         "comparison_enabled":   payload["comparison_enabled"],
+        "workload_mode":        str(wg.get("mode") or ""),
+        "workload_status":      str(wg.get("status") or ""),
+        "workload_qps":         workload_qps,
+        "workload_tps":         workload_tps,
+        "workload_p95_ms":      workload_p95,
+        "workload_p99_ms":      workload_p99,
+        "workload_error_rate":  workload_error_rate,
+        "workload_run_dir":     str(wg.get("run_dir") or ""),
     }
 
 
@@ -334,6 +367,57 @@ def _load_run_context() -> dict:
         "schema_mode": "tidb_optimized",
         "source_config": "",
     }
+
+
+def _load_workload_generator_summary() -> dict:
+    root = Path(__file__).resolve().parents[1]
+    results_dir = root / "results"
+    runs_dir = root / "runs"
+
+    # Preferred: explicit copy made by run_all.sh after a performance run.
+    explicit = results_dir / "workload_generator_summary.json"
+    if explicit.exists():
+        try:
+            return json.loads(explicit.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Fallback: run pointer maintained by load/tidb_blaster.py.
+    last_run_file = results_dir / "blaster_last_run.txt"
+    if last_run_file.exists():
+        try:
+            raw = last_run_file.read_text(encoding="utf-8").strip()
+            if raw:
+                run_dir = Path(raw)
+                if not run_dir.is_absolute():
+                    run_dir = (root / run_dir).resolve()
+                summary_path = run_dir / "summary.json"
+                if summary_path.exists():
+                    return json.loads(summary_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    # Last fallback: newest run folder with summary.json.
+    if runs_dir.exists():
+        for candidate in sorted([p for p in runs_dir.iterdir() if p.is_dir()], reverse=True):
+            summary_path = candidate / "summary.json"
+            if not summary_path.exists():
+                continue
+            try:
+                return json.loads(summary_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+    return {}
+
+
+def _maybe_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 if __name__ == "__main__":

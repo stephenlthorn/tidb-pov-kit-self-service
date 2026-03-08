@@ -54,7 +54,36 @@ class Phase2SchemaModeTests(unittest.TestCase):
         self.assertEqual(summary["run_mode"], "performance")
         self.assertEqual(summary["schema_mode"], "tidb_optimized")
 
+    def test_summary_uses_workload_generator_metrics_in_performance_mode(self):
+        payload = {
+            "modules": {
+                "01_baseline_perf": {
+                    "status": "not_run",
+                    "tidb": {},
+                }
+            },
+            "compat_checks": {"pct": 0},
+            "comparison_enabled": False,
+            "run_context": {"run_mode": "performance", "schema_mode": "tidb_optimized"},
+            "workload_generator": {
+                "status": "completed",
+                "mode": "rawsql",
+                "achieved_qps": 123456.0,
+                "achieved_tps": 123456.0,
+                "p95_ms": 6.5,
+                "p99_ms": 9.9,
+                "error_rate": 0.0,
+                "run_dir": "runs/example",
+            },
+        }
+        summary = cm._build_summary(payload)
+        self.assertEqual(summary["workload_status"], "completed")
+        self.assertEqual(summary["workload_mode"], "rawsql")
+        self.assertEqual(summary["best_p99_ms"], 9.9)
+        self.assertEqual(summary["best_tps"], 123456.0)
+        self.assertEqual(summary["warm_p99_ms"], 9.9)
+        self.assertEqual(summary["warm_tps"], 123456.0)
+
 
 if __name__ == "__main__":
     unittest.main()
-

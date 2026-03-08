@@ -445,6 +445,71 @@ print(f"{run_mode}|{schema_mode}")
 PY
 }
 
+read_workload_generator_profile() {
+  "${PYTHON}" - <<PY
+import yaml
+with open("${CONFIG_EFFECTIVE}") as f:
+    cfg = yaml.safe_load(f) or {}
+blaster = (((cfg.get("workload_lab") or {}).get("blaster")) or {})
+mode = str(blaster.get("mode", "rawsql")).strip().lower() or "rawsql"
+if mode not in {"rawsql", "tpcc", "ycsb"}:
+    mode = "rawsql"
+tag = str(blaster.get("tag", "")).strip() or "performance"
+print(f"{mode}|{tag}")
+PY
+}
+
+sync_workload_generator_summary() {
+  "${PYTHON}" - <<'PY'
+import json
+from pathlib import Path
+
+root = Path(".").resolve()
+results_dir = root / "results"
+runs_dir = root / "runs"
+results_dir.mkdir(parents=True, exist_ok=True)
+
+summary = None
+run_dir = None
+
+last_run_file = results_dir / "blaster_last_run.txt"
+if last_run_file.exists():
+    raw = last_run_file.read_text(encoding="utf-8").strip()
+    if raw:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = (root / raw).resolve()
+        s = p / "summary.json"
+        if s.exists():
+            run_dir = p
+            summary = json.loads(s.read_text(encoding="utf-8"))
+
+if summary is None and runs_dir.exists():
+    for cand in sorted([p for p in runs_dir.iterdir() if p.is_dir()], reverse=True):
+        s = cand / "summary.json"
+        if not s.exists():
+            continue
+        try:
+            loaded = json.loads(s.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        mode = str(loaded.get("mode", "")).strip().lower()
+        if mode in {"rawsql", "tpcc", "ycsb"}:
+            run_dir = cand
+            summary = loaded
+            break
+
+if summary is not None and run_dir is not None:
+    (results_dir / "workload_generator_summary.json").write_text(
+        json.dumps(summary, indent=2), encoding="utf-8"
+    )
+    (results_dir / "workload_generator_last_run.txt").write_text(
+        str(run_dir), encoding="utf-8"
+    )
+    print(str(run_dir))
+PY
+}
+
 RUN_PROFILE="$(read_run_profile)"
 POV_RUN_MODE="${RUN_PROFILE%%|*}"
 POV_SCHEMA_MODE="${RUN_PROFILE#*|}"
@@ -710,6 +775,7 @@ ok "Data ready"
 MODULE_PASS=0
 MODULE_FAIL=0
 MODULE_SKIP=0
+RUN_STANDARD_MODULES="true"
 
 module_enabled() {
   local keys_csv="$1"
@@ -755,21 +821,83 @@ run_module() {
 # ─────────────────────────────────────────────────────────────────────────────
 # 5-9. Test Modules
 # ─────────────────────────────────────────────────────────────────────────────
-run_module "5" "M0 — Customer Query Validation" "tests/00_customer_queries/validate_queries.py" "customer_queries,customer_query_validation"
-run_module "5" "M1 — Baseline OLTP Performance" "tests/01_baseline_perf/run.py" "baseline_perf"
-run_module "6" "M2 — Elastic Auto-Scaling" "tests/02_elastic_scale/run.py" "elastic_scale"
-run_module "6" "M3 — High Availability" "tests/03_high_availability/run.py" "high_availability"
-run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention"
-run_module "7" "M4 — HTAP Concurrent" "tests/04_htap_concurrent/run.py" "htap"
-run_module "8" "M5 — Online DDL" "tests/05_online_ddl/run.py" "online_ddl"
-run_module "8" "M6 — MySQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
-run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import"
-run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search"
+if [[ "${POV_RUN_MODE}" == "performance" ]]; then
+  BLASTER_PROFILE="$(read_workload_generator_profile)"
+  BLASTER_MODE="${BLASTER_PROFILE%%|*}"
+  BLASTER_TAG="${BLASTER_PROFILE#*|}"
+  RUN_STANDARD_MODULES="false"
+
+  step "5/10" "Workload Generator validation (${BLASTER_MODE})"
+  if [[ ! -f "load/tidb_blaster_runner.py" ]]; then
+    warn "Workload Generator runner script not found."
+    warn "Falling back to standard validation module suite."
+    RUN_STANDARD_MODULES="true"
+  else
+    set +e
+    "${PYTHON}" load/tidb_blaster_runner.py \
+      --config "${CONFIG_EFFECTIVE}" \
+      --action validate \
+      --mode "${BLASTER_MODE}" \
+      --tag "${BLASTER_TAG}"
+    BLASTER_VALIDATE_RC=$?
+    set -e
+
+    if [[ ${BLASTER_VALIDATE_RC} -ne 0 ]]; then
+      warn "Workload Generator validation failed (exit ${BLASTER_VALIDATE_RC})."
+      warn "Falling back to standard validation module suite."
+      RUN_STANDARD_MODULES="true"
+    else
+      ok "Workload Generator validation passed"
+      step "6/10" "Executing Workload Generator (${BLASTER_MODE})"
+      set +e
+      "${PYTHON}" load/tidb_blaster_runner.py \
+        --config "${CONFIG_EFFECTIVE}" \
+        --action run \
+        --mode "${BLASTER_MODE}" \
+        --tag "${BLASTER_TAG}"
+      BLASTER_RUN_RC=$?
+      set -e
+
+      if [[ ${BLASTER_RUN_RC} -ne 0 ]]; then
+        warn "Workload Generator execution returned non-zero (exit ${BLASTER_RUN_RC})."
+        warn "Falling back to standard validation module suite."
+        RUN_STANDARD_MODULES="true"
+      else
+        MODULE_PASS=$((MODULE_PASS + 1))
+        WG_RUN_DIR="$(sync_workload_generator_summary || true)"
+        if [[ -n "${WG_RUN_DIR}" ]]; then
+          ok "Workload Generator summary synced from ${WG_RUN_DIR}"
+        else
+          warn "Workload Generator completed but summary artifact sync was not found."
+        fi
+      fi
+    fi
+  fi
+fi
+
+if [[ "${RUN_STANDARD_MODULES}" == "true" ]]; then
+  run_module "5" "M0 — Customer Query Validation" "tests/00_customer_queries/validate_queries.py" "customer_queries,customer_query_validation"
+  run_module "5" "M1 — Baseline OLTP Performance" "tests/01_baseline_perf/run.py" "baseline_perf"
+  run_module "6" "M2 — Elastic Auto-Scaling" "tests/02_elastic_scale/run.py" "elastic_scale"
+  run_module "6" "M3 — High Availability" "tests/03_high_availability/run.py" "high_availability"
+  run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention"
+  run_module "7" "M4 — HTAP Concurrent" "tests/04_htap_concurrent/run.py" "htap"
+  run_module "8" "M5 — Online DDL" "tests/05_online_ddl/run.py" "online_ddl"
+  run_module "8" "M6 — MySQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
+  run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import"
+  run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search"
+else
+  step "7/10" "Scenario module suite"
+  warn "Skipped M0-M8 module suite; performance mode executed via Workload Generator."
+  MODULE_SKIP=$((MODULE_SKIP + 10))
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 10. Generate report
 # ─────────────────────────────────────────────────────────────────────────────
 step "10/10" "Generating PDF report"
+"${PYTHON}" report/collect_metrics.py --quiet
+ok "Metrics JSON written to ${RESULTS_DIR}/metrics_summary.json"
 "${PYTHON}" report/generate_report.py "${CONFIG_EFFECTIVE}"
 ok "Report written to ${RESULTS_DIR}/tidb_pov_report.pdf"
 s3_upload_required "10b/10"
