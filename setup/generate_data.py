@@ -367,11 +367,17 @@ def main():
     args = parser.parse_args()
 
     with open(args.config) as f:
-        cfg = yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
 
-    scale = cfg["test"].get("data_scale", "medium")
+    test_cfg = cfg.get("test") or {}
+    scale = str(test_cfg.get("data_scale", "medium")).strip().lower()
+    if scale not in SCALE_CONFIG:
+        print(f"  Unknown data_scale '{scale}', defaulting to medium.")
+        scale = "medium"
     counts = SCALE_CONFIG[scale]
-    tidb_cfg = cfg["tidb"]
+    tidb_cfg = cfg.get("tidb") or {}
+    if not tidb_cfg:
+        raise ValueError("Missing required 'tidb' config block.")
 
     print(f"\n{'='*60}")
     print(f"  TiDB Cloud PoV Kit — Data Generator")

@@ -21,11 +21,12 @@ def run(cfg: dict):
     start_module(MODULE)
 
     counts = _get_counts(cfg)
-    concurrency_levels = cfg["test"].get("concurrency_levels", [16, 64, 256])
-    duration = cfg["test"].get("duration_seconds", 300)
-    warm_enabled = bool(cfg.get("test", {}).get("warm_phase_enabled", True))
-    warm_duration = max(30, int(cfg.get("test", {}).get("warm_phase_duration_seconds", max(300, duration))))
-    warm_concurrency = max(1, int(cfg.get("test", {}).get("warm_phase_concurrency", max(concurrency_levels or [16]))))
+    test_cfg = cfg.get("test") or {}
+    concurrency_levels = test_cfg.get("concurrency_levels", [16, 64, 256])
+    duration = test_cfg.get("duration_seconds", 300)
+    warm_enabled = bool(test_cfg.get("warm_phase_enabled", True))
+    warm_duration = max(30, int(test_cfg.get("warm_phase_duration_seconds", max(300, duration))))
+    warm_concurrency = max(1, int(test_cfg.get("warm_phase_concurrency", max(concurrency_levels or [16]))))
     customer_queries = cfg.get("customer_queries", [])
     customer_ratio = cfg.get("customer_query_ratio", 0.3)
 
@@ -55,9 +56,9 @@ def run(cfg: dict):
     print(f"  Duration per level: {duration}s")
     print(
         "  Workload profile: "
-        f"{cfg.get('test', {}).get('workload_mix', 'mixed')} "
-        f"(read x{cfg.get('test', {}).get('read_weight_multiplier', 1.0)}, "
-        f"write x{cfg.get('test', {}).get('write_weight_multiplier', 1.0)})"
+        f"{test_cfg.get('workload_mix', 'mixed')} "
+        f"(read x{test_cfg.get('read_weight_multiplier', 1.0)}, "
+        f"write x{test_cfg.get('write_weight_multiplier', 1.0)})"
     )
     if has_comparison:
         print(f"  Comparison DB: {comparison_label}")
@@ -140,7 +141,7 @@ def _get_counts(cfg):
     if os.path.exists(manifest):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
-    scale = cfg["test"].get("data_scale", "medium")
+    scale = (cfg.get("test") or {}).get("data_scale", "medium")
     from setup.generate_data import SCALE_CONFIG
     return SCALE_CONFIG.get(scale, SCALE_CONFIG["medium"])
 

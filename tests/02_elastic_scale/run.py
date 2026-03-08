@@ -20,9 +20,10 @@ def run(cfg: dict):
     start_module(MODULE)
 
     counts = _get_counts(cfg)
-    base_concurrency = cfg["test"].get("concurrency_levels", [16, 64, 256])[0]
+    test_cfg = cfg.get("test") or {}
+    base_concurrency = test_cfg.get("concurrency_levels", [16, 64, 256])[0]
     peak_concurrency = base_concurrency * 4
-    ramp_sec = cfg["test"].get("ramp_duration_seconds", 1200)
+    ramp_sec = test_cfg.get("ramp_duration_seconds", 1200)
     sustain_sec = 300
 
     print(f"\n{'='*60}")
@@ -77,7 +78,7 @@ def _get_counts(cfg):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get(cfg["test"].get("data_scale", "medium"), {})
+    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "medium"), {})
 
 
 if __name__ == "__main__":
