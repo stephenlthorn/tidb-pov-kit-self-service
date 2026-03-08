@@ -110,6 +110,67 @@ Script-only secure deployment guide (no Vercel/UI required):
 - `docs/aws/policies/pov_results_bucket_policy_template.json`
 - `docs/aws/policies/pov_uploader_role_policy_template.json`
 
+### EC2 Script-Only Fast Path (Recommended)
+
+If you're already on an EC2 instance and want the fastest path, use this.
+
+1. Install basics:
+
+```bash
+sudo yum install -y git python3 || sudo apt-get update && sudo apt-get install -y git python3 python3-pip
+```
+
+2. Create minimal TiDB config at `~/Documents/pingcap/config.yaml`:
+
+```bash
+mkdir -p ~/Documents/pingcap
+cat > ~/Documents/pingcap/config.yaml <<'YAML'
+tidb:
+  host: "gateway01.us-east-1.prod.aws.tidbcloud.com"
+  port: 4000
+  user: "<prefix>.root"
+  password: "<your-password>"
+  database: "test"
+  ssl: true
+YAML
+chmod 600 ~/Documents/pingcap/config.yaml
+```
+
+3. Create runner env file:
+
+```bash
+cat > ~/pov_vm.env <<'EOF'
+POV_REPO_URL=https://github.com/stephenlthorn/tidb-pov-kit-self-service.git
+POV_REPO_REF=main
+POV_CONFIG_SOURCE=~/Documents/pingcap/config.yaml
+POV_RUN_ARGS="--no-menu --no-wizard"
+POV_ENFORCE_S3_UPLOAD=true
+
+POV_S3_BUCKET=pingcap-tidb-pov-results-219248915861
+POV_S3_PREFIX=tidb-pov
+POV_S3_PROJECT=ec2-test
+POV_S3_REGION=us-east-1
+POV_S3_EXPECTED_BUCKET_OWNER=219248915861
+POV_S3_KMS_KEY_ID=<kms-key-arn>
+EOF
+```
+
+4. Run:
+
+```bash
+git clone https://github.com/stephenlthorn/tidb-pov-kit-self-service.git ~/tidb-pov-kit-self-service-runner || true
+cd ~/tidb-pov-kit-self-service-runner
+git pull --ff-only origin main
+export POV_ENV_FILE=~/pov_vm.env
+bash scripts/pov_pull_run_upload.sh
+```
+
+5. Verify S3 artifacts:
+
+```bash
+aws s3 ls s3://pingcap-tidb-pov-results-219248915861/tidb-pov/ec2-test/runs/ --recursive
+```
+
 S3 enforcement behavior:
 1. `run_all.sh` now defaults to `POV_ENFORCE_S3_UPLOAD=true`
 2. It runs an S3 write/read/delete preflight before running tests
@@ -291,9 +352,24 @@ tco:
 
 | Scale  | Schema A rows | Schema B events | Schema C tenants | Approx. size |
 |--------|--------------|-----------------|------------------|-------------|
-| small  | 100K users, 500K txns | 1M events | 100 tenants | ~2 GB |
-| medium | 500K users, 5M txns | 10M events | 500 tenants | ~20 GB |
-| large  | 2M users, 20M txns | 50M events | 2K tenants | ~100 GB |
+| small  | 50K users, 5M txns | 5M events | 1K tenants | multi-GB |
+| medium | 500K users, 50M txns | 50M events | 10K tenants | tens of GB |
+| large  | 2M users, 200M txns | 200M events | 50K tenants | 100GB+ |
+
+## PoC Sizing Guidance (EC2)
+
+Use these as practical starting points for load generators.
+
+| Profile | EC2 instance type | Runner count | Throughput target envelope | Recommended starting knobs |
+|--------|--------------------|--------------|----------------------------|-----------------------------|
+| Small  | `c7i.2xlarge`      | 1            | up to ~50k QPS             | `data_scale=small`, `concurrency_levels=[8,16,32]`, `duration_seconds=120` |
+| Medium | `c7i.4xlarge`      | 1-2          | up to ~200k QPS            | `data_scale=medium`, `concurrency_levels=[16,64,128]`, `duration_seconds=180-300` |
+| Large  | `c7i.8xlarge`      | 2-4          | up to ~1M QPS              | `data_scale=large`, `concurrency_levels=[64,128,256]`, longer warm phase + Workload Generator |
+
+Notes:
+1. These are targets, not guarantees. Final QPS depends on query shape, latency, network path, and cluster tier.
+2. For 500k+ QPS, use multi-loadgen Workload Generator mode (`rawsql`) and keep load generators in the same region/VPC path as TiDB.
+3. Keep `POV_ENFORCE_S3_UPLOAD=true` so runs fail closed if S3 write/read is not available.
 
 ---
 
