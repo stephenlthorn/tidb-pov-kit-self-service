@@ -2661,6 +2661,26 @@
               </div>
             </div>
             <div class="grid cols-4">
+              <div class="field">
+                <label>Run Mode</label>
+                <select name="test_run_mode">
+                  <option value="validation" {% if cfg.test.run_mode == 'validation' %}selected{% endif %}>validation</option>
+                  <option value="performance" {% if cfg.test.run_mode == 'performance' %}selected{% endif %}>performance</option>
+                </select>
+                <div class="tiny">Validation mode is the default broad PoC flow.</div>
+              </div>
+              <div class="field">
+                <label>Schema Mode</label>
+                <select name="test_schema_mode">
+                  <option value="tidb_optimized" {% if cfg.test.schema_mode == 'tidb_optimized' %}selected{% endif %}>tidb_optimized</option>
+                  <option value="mysql_compatible" {% if cfg.test.schema_mode == 'mysql_compatible' %}selected{% endif %}>mysql_compatible</option>
+                </select>
+                <div class="tiny">TiDB optimized mode applies TiDB-friendly key options.</div>
+              </div>
+              <div class="field"></div>
+              <div class="field"></div>
+            </div>
+            <div class="grid cols-4">
               <div class="field"><label>Duration Seconds</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
               <div class="field"><label>Concurrency Levels</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
               <div class="field"><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>

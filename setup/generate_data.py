@@ -77,7 +77,12 @@ BATCH = 1000  # rows per INSERT
 
 # ─── DDL ─────────────────────────────────────────────────────────────────────
 
-SCHEMA_A_DDL = """
+SCHEMA_MODE_DEFAULT = "tidb_optimized"
+SCHEMA_MODES = {"tidb_optimized", "mysql_compatible"}
+RUN_MODE_DEFAULT = "validation"
+RUN_MODES = {"validation", "performance"}
+
+SCHEMA_A_DDL_MYSQL = """
 CREATE TABLE IF NOT EXISTS users (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     external_id VARCHAR(36) NOT NULL,
@@ -139,6 +144,68 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 """
 
+SCHEMA_A_DDL_TIDB = """
+CREATE TABLE IF NOT EXISTS users (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY NONCLUSTERED,
+    external_id VARCHAR(36) NOT NULL,
+    email       VARCHAR(255) NOT NULL,
+    name        VARCHAR(255),
+    status      TINYINT DEFAULT 1,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at  DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    UNIQUE KEY uq_email (email),
+    INDEX idx_status (status),
+    INDEX idx_created (created_at)
+) SHARD_ROW_ID_BITS=4 PRE_SPLIT_REGIONS=4;
+
+CREATE TABLE IF NOT EXISTS accounts (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY NONCLUSTERED,
+    user_id     BIGINT NOT NULL,
+    type        VARCHAR(50) NOT NULL,
+    balance     DECIMAL(18,4) DEFAULT 0,
+    currency    CHAR(3) DEFAULT 'USD',
+    status      TINYINT DEFAULT 1,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_user (user_id),
+    INDEX idx_status_type (status, type)
+) SHARD_ROW_ID_BITS=4 PRE_SPLIT_REGIONS=4;
+
+CREATE TABLE IF NOT EXISTS transactions (
+    id              BIGINT AUTO_INCREMENT PRIMARY KEY NONCLUSTERED,
+    account_id      BIGINT NOT NULL,
+    type            VARCHAR(50) NOT NULL,
+    amount          DECIMAL(18,4) NOT NULL,
+    currency        CHAR(3) DEFAULT 'USD',
+    status          VARCHAR(20) DEFAULT 'completed',
+    reference_id    VARCHAR(64),
+    created_at      DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_account_created (account_id, created_at),
+    INDEX idx_status (status),
+    INDEX idx_created (created_at)
+) SHARD_ROW_ID_BITS=4 PRE_SPLIT_REGIONS=4;
+
+CREATE TABLE IF NOT EXISTS transaction_items (
+    id              BIGINT AUTO_RANDOM PRIMARY KEY,
+    transaction_id  BIGINT NOT NULL,
+    description     VARCHAR(255),
+    amount          DECIMAL(18,4) NOT NULL,
+    quantity        INT DEFAULT 1,
+    INDEX idx_txn (transaction_id)
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    id          BIGINT AUTO_RANDOM PRIMARY KEY,
+    entity_type VARCHAR(50),
+    entity_id   BIGINT,
+    action      VARCHAR(50),
+    actor_id    BIGINT,
+    payload     JSON,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_entity (entity_type, entity_id),
+    INDEX idx_created (created_at)
+);
+"""
+
 SCHEMA_B_DDL = """
 CREATE TABLE IF NOT EXISTS events (
     id          BIGINT AUTO_RANDOM PRIMARY KEY,
@@ -175,7 +242,7 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 """
 
-SCHEMA_C_DDL = """
+SCHEMA_C_DDL_MYSQL = """
 CREATE TABLE IF NOT EXISTS tenants (
     id          BIGINT AUTO_INCREMENT PRIMARY KEY,
     name        VARCHAR(255) NOT NULL,
@@ -204,6 +271,56 @@ CREATE TABLE IF NOT EXISTS tenant_data (
     INDEX idx_tenant_type (tenant_id, data_type)
 );
 """
+
+SCHEMA_C_DDL_TIDB = """
+CREATE TABLE IF NOT EXISTS tenants (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY NONCLUSTERED,
+    name        VARCHAR(255) NOT NULL,
+    plan        VARCHAR(50) DEFAULT 'starter',
+    status      TINYINT DEFAULT 1,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_plan (plan)
+) SHARD_ROW_ID_BITS=4 PRE_SPLIT_REGIONS=4;
+
+CREATE TABLE IF NOT EXISTS tenant_users (
+    id          BIGINT AUTO_INCREMENT PRIMARY KEY NONCLUSTERED,
+    tenant_id   BIGINT NOT NULL,
+    email       VARCHAR(255) NOT NULL,
+    role        VARCHAR(50) DEFAULT 'member',
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_tenant (tenant_id),
+    INDEX idx_email (email)
+) SHARD_ROW_ID_BITS=4 PRE_SPLIT_REGIONS=4;
+
+CREATE TABLE IF NOT EXISTS tenant_data (
+    id          BIGINT AUTO_RANDOM PRIMARY KEY,
+    tenant_id   BIGINT NOT NULL,
+    data_type   VARCHAR(100),
+    payload     JSON,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_tenant_type (tenant_id, data_type)
+);
+"""
+
+
+def resolve_schema_mode(test_cfg: dict) -> str:
+    raw = str((test_cfg or {}).get("schema_mode", SCHEMA_MODE_DEFAULT)).strip().lower()
+    if raw not in SCHEMA_MODES:
+        return SCHEMA_MODE_DEFAULT
+    return raw
+
+
+def resolve_run_mode(test_cfg: dict) -> str:
+    raw = str((test_cfg or {}).get("run_mode", RUN_MODE_DEFAULT)).strip().lower()
+    if raw not in RUN_MODES:
+        return RUN_MODE_DEFAULT
+    return raw
+
+
+def schema_ddls(schema_mode: str) -> tuple[str, str, str]:
+    if schema_mode == "mysql_compatible":
+        return SCHEMA_A_DDL_MYSQL, SCHEMA_B_DDL, SCHEMA_C_DDL_MYSQL
+    return SCHEMA_A_DDL_TIDB, SCHEMA_B_DDL, SCHEMA_C_DDL_TIDB
 
 
 # ─── Data generators ─────────────────────────────────────────────────────────
@@ -370,6 +487,8 @@ def main():
         cfg = yaml.safe_load(f) or {}
 
     test_cfg = cfg.get("test") or {}
+    run_mode = resolve_run_mode(test_cfg)
+    schema_mode = resolve_schema_mode(test_cfg)
     scale = str(test_cfg.get("data_scale", "medium")).strip().lower()
     if scale not in SCALE_CONFIG:
         print(f"  Unknown data_scale '{scale}', defaulting to medium.")
@@ -382,21 +501,23 @@ def main():
     print(f"\n{'='*60}")
     print(f"  TiDB Cloud PoV Kit — Data Generator")
     print(f"  Scale: {scale.upper()} | DB: {tidb_cfg['database']}")
+    print(f"  Run Mode: {run_mode} | Schema Mode: {schema_mode}")
     print(f"{'='*60}\n")
 
     print("[1/2] Creating database and schemas...")
     create_database_if_missing(tidb_cfg)
     conn = get_connection(tidb_cfg, autocommit=True)
     cur = conn.cursor()
-    for stmt in SCHEMA_A_DDL.strip().split(";"):
+    schema_a_ddl, schema_b_ddl, schema_c_ddl = schema_ddls(schema_mode)
+    for stmt in schema_a_ddl.strip().split(";"):
         s = stmt.strip()
         if s:
             cur.execute(s)
-    for stmt in SCHEMA_B_DDL.strip().split(";"):
+    for stmt in schema_b_ddl.strip().split(";"):
         s = stmt.strip()
         if s:
             cur.execute(s)
-    for stmt in SCHEMA_C_DDL.strip().split(";"):
+    for stmt in schema_c_ddl.strip().split(";"):
         s = stmt.strip()
         if s:
             cur.execute(s)
@@ -408,7 +529,7 @@ def main():
         if n > 0:
             print(f"  Tables already populated ({n:,} users). Skipping data generation.")
             conn.close()
-            _write_manifest(scale, counts)
+            _write_manifest(scale, counts, schema_mode=schema_mode, run_mode=run_mode)
             return
 
     print("\n[2/2] Inserting data...")
@@ -472,12 +593,20 @@ def main():
     conn.close()
     total_time = time.time() - t_start
     print(f"\n  All data inserted in {total_time:.1f}s")
-    _write_manifest(scale, counts, total_time)
+    _write_manifest(
+        scale,
+        counts,
+        total_time,
+        schema_mode=schema_mode,
+        run_mode=run_mode,
+    )
 
 
-def _write_manifest(scale, counts, duration_sec=0):
+def _write_manifest(scale, counts, duration_sec=0, schema_mode=SCHEMA_MODE_DEFAULT, run_mode=RUN_MODE_DEFAULT):
     manifest = {
         "scale": scale,
+        "schema_mode": schema_mode,
+        "run_mode": run_mode,
         "counts": counts,
         "generation_duration_sec": round(duration_sec, 1),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

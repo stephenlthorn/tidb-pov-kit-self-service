@@ -153,6 +153,8 @@ DEFAULT_CFG = {
         "selected": "serverless",
     },
     "test": {
+        "run_mode": "validation",
+        "schema_mode": "tidb_optimized",
         "data_scale": "small",
         "duration_seconds": 120,
         "concurrency_levels": [8, 16, 32],
@@ -627,6 +629,16 @@ def normalize_cfg(cfg: Dict) -> Dict:
     cl = cfg.get("test", {}).get("concurrency_levels", [8, 16, 32])
     if not isinstance(cl, list):
         cfg["test"]["concurrency_levels"] = [8, 16, 32]
+
+    run_mode = str(cfg.get("test", {}).get("run_mode", "validation")).strip().lower()
+    if run_mode not in {"validation", "performance"}:
+        run_mode = "validation"
+    cfg["test"]["run_mode"] = run_mode
+
+    schema_mode = str(cfg.get("test", {}).get("schema_mode", "tidb_optimized")).strip().lower()
+    if schema_mode not in {"tidb_optimized", "mysql_compatible"}:
+        schema_mode = "tidb_optimized"
+    cfg["test"]["schema_mode"] = schema_mode
 
     mix = str(cfg.get("test", {}).get("workload_mix", "mixed")).lower()
     if mix not in {"mixed", "read_heavy", "write_heavy"}:
@@ -1391,6 +1403,8 @@ def build_report_dashboard() -> Dict:
     best_p99 = parse_float(summary.get("best_p99_ms"), 0.0)
     warm_tps = parse_float(summary.get("warm_tps"), 0.0)
     warm_p99 = parse_float(summary.get("warm_p99_ms"), 0.0)
+    run_mode = str(summary.get("run_mode") or "validation")
+    schema_mode = str(summary.get("schema_mode") or "tidb_optimized")
     mysql_compat_pct = parse_float(summary.get("mysql_compat_pct"), parse_float(compat.get("pct"), 0.0))
     modules_passed = parse_int(summary.get("modules_passed"), status_counts["passed"])
     modules_run = parse_int(summary.get("modules_run"), status_total)
@@ -1398,6 +1412,8 @@ def build_report_dashboard() -> Dict:
     best_import = max(import_throughputs) if import_throughputs else 0.0
 
     out["summary_cards"] = [
+        {"label": "Run Mode", "value": run_mode, "sub": "Execution profile"},
+        {"label": "Schema Mode", "value": schema_mode, "sub": "Data model profile"},
         {"label": "Modules Passed", "value": f"{modules_passed}/{modules_run}", "sub": "Execution coverage"},
         {"label": "Warm TPS", "value": f"{warm_tps:,.1f}" if warm_tps > 0 else "n/a", "sub": "Steady-state throughput"},
         {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
@@ -3137,6 +3153,8 @@ def create_app(config_path: Path) -> Flask:
         cfg.setdefault("tier", {})["selected"] = chosen_tier if chosen_tier in TIERS else "serverless"
 
         test = cfg.setdefault("test", {})
+        test["run_mode"] = request.form.get("test_run_mode", "validation").strip().lower() or "validation"
+        test["schema_mode"] = request.form.get("test_schema_mode", "tidb_optimized").strip().lower() or "tidb_optimized"
         test["data_scale"] = request.form.get("test_data_scale", "small")
         test["duration_seconds"] = to_int(request.form.get("test_duration_seconds"), 120)
         test["concurrency_levels"] = parse_concurrency(request.form.get("test_concurrency_levels", "8,16,32"), [8, 16, 32])

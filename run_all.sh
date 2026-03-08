@@ -429,6 +429,31 @@ else
   fi
 fi
 
+read_run_profile() {
+  "${PYTHON}" - <<PY
+import yaml
+with open("${CONFIG_EFFECTIVE}") as f:
+    cfg = yaml.safe_load(f) or {}
+test = cfg.get("test") or {}
+run_mode = str(test.get("run_mode", "validation")).strip().lower() or "validation"
+if run_mode not in {"validation", "performance"}:
+    run_mode = "validation"
+schema_mode = str(test.get("schema_mode", "tidb_optimized")).strip().lower() or "tidb_optimized"
+if schema_mode not in {"tidb_optimized", "mysql_compatible"}:
+    schema_mode = "tidb_optimized"
+print(f"{run_mode}|{schema_mode}")
+PY
+}
+
+RUN_PROFILE="$(read_run_profile)"
+POV_RUN_MODE="${RUN_PROFILE%%|*}"
+POV_SCHEMA_MODE="${RUN_PROFILE#*|}"
+ok "Run profile: mode=${POV_RUN_MODE}, schema=${POV_SCHEMA_MODE}"
+if [[ "${POV_RUN_MODE}" == "performance" ]]; then
+  warn "Performance mode selected."
+  warn "For peak-throughput claims, use Workload Generator (tidb_blaster) and multi-loadgen orchestration."
+fi
+
 # Helpers for interactive connectivity recovery
 cfg_get_tidb_field() {
   local field="$1"

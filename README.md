@@ -317,6 +317,8 @@ aws_runner:
   run_timeout_minutes: 180
 
 test:
+  run_mode:            "validation"  # validation | performance
+  schema_mode:         "tidb_optimized"  # tidb_optimized | mysql_compatible
   data_scale:           "small"     # serverless default: small
   duration_seconds:     120         # seconds per phase
   concurrency_levels:   [8,16,32]
@@ -330,6 +332,11 @@ test:
   import_rows:          1000000
   import_into_source_uri: ""        # optional s3://bucket/path/file.csv
   import_source_size_gb: 0.0        # optional, for GB/min with remote import
+
+# Notes:
+# - validation mode keeps broad self-service defaults.
+# - performance mode is intended for high-throughput benchmarking workflows.
+# - tidb_optimized schema mode applies TiDB-friendly key/table options for write-heavy paths.
 
 # Your production queries (optional — validated and replayed in M0/M1)
 customer_queries:

@@ -549,6 +549,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         return f"{v:,.{decimals}f}"
 
     cards = [
+        ("Run Mode",            str(summary.get("run_mode") or "validation"), "",       (0, 128, 128)),
+        ("Schema Mode",         str(summary.get("schema_mode") or "tidb_optimized"), "", (100, 100, 180)),
         ("Warm p99 Latency",    _fmt(summary.get("warm_p99_ms"), 1), "ms",       BLUE),
         ("Warm Throughput",     _fmt(summary.get("warm_tps"),    0), "TPS",      GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
@@ -579,7 +581,9 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         "conducted on TiDB Cloud. The tests were executed automatically using "
         "the TiDB Cloud PoV Kit and cover OLTP performance (including warm steady-state), elastic auto-scaling, "
         "high availability, write contention, HTAP, online DDL, MySQL compatibility, "
-        "data import speed, and total cost of ownership.",
+        "data import speed, and total cost of ownership. "
+        f"Run mode: {summary.get('run_mode', 'validation')}. "
+        f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}.",
         size=9,
     )
 

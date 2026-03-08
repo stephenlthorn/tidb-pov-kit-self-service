@@ -9,6 +9,7 @@ Run standalone:
 import sys, os, json, time, argparse, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+import yaml
 from lib.result_store import (
     _conn, get_latency_stats, get_time_series,
     DB_PATH
@@ -35,6 +36,7 @@ def collect() -> dict:
         "modules":      {},
         "summary":      {},
         "data_manifest": _load_manifest(),
+        "run_context": _load_run_context(),
         "comparison_enabled": False,
         "comparison_label": "Comparison DB",
     }
@@ -276,6 +278,8 @@ def _build_summary(payload: dict) -> dict:
     return {
         "modules_run":          total_mods,
         "modules_passed":       passed_mods,
+        "run_mode":             payload.get("run_context", {}).get("run_mode"),
+        "schema_mode":          payload.get("run_context", {}).get("schema_mode"),
         "best_observed_p99_ms": best_p99,
         "best_p99_ms":          best_p99,
         "best_tps":             best_tps,
@@ -298,6 +302,38 @@ def _load_manifest() -> dict:
         with open(manifest_path) as f:
             return json.load(f)
     return {}
+
+
+def _load_run_context() -> dict:
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "results", "config.resolved.yaml"),
+        os.path.join(os.path.dirname(__file__), "..", "config.yaml"),
+    ]
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path) as f:
+                cfg = yaml.safe_load(f) or {}
+            test_cfg = cfg.get("test") or {}
+            run_mode = str(test_cfg.get("run_mode", "validation")).strip().lower() or "validation"
+            if run_mode not in {"validation", "performance"}:
+                run_mode = "validation"
+            schema_mode = str(test_cfg.get("schema_mode", "tidb_optimized")).strip().lower() or "tidb_optimized"
+            if schema_mode not in {"tidb_optimized", "mysql_compatible"}:
+                schema_mode = "tidb_optimized"
+            return {
+                "run_mode": run_mode,
+                "schema_mode": schema_mode,
+                "source_config": os.path.basename(path),
+            }
+        except Exception:
+            continue
+    return {
+        "run_mode": "validation",
+        "schema_mode": "tidb_optimized",
+        "source_config": "",
+    }
 
 
 if __name__ == "__main__":

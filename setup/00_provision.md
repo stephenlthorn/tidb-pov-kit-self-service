@@ -75,6 +75,10 @@ tidb:
   password: "YOUR_PASSWORD_HERE"
   database: "test"
   ssl:      true
+
+test:
+  run_mode: "validation"      # validation | performance
+  schema_mode: "tidb_optimized"  # tidb_optimized | mysql_compatible
 ```
 
 Optional: fill `comparison_db` for side-by-side benchmarking against MySQL-family targets (Aurora MySQL, MySQL, RDS MySQL, SingleStore) or to capture PostgreSQL/SQL Server comparison plans.
