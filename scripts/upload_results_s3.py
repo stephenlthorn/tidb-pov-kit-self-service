@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--project", default=os.environ.get("POV_S3_PROJECT") or os.environ.get("S3_ARTIFACTS_PROJECT") or "default")
     p.add_argument("--run-tag", default=os.environ.get("POV_RUN_TAG") or "")
     p.add_argument("--region", default=os.environ.get("POV_S3_REGION") or os.environ.get("S3_REGION") or os.environ.get("AWS_REGION") or "")
+    p.add_argument("--check-only", action="store_true", help="Only validate S3 read/write access and exit")
     return p.parse_args()
 
 
@@ -60,6 +61,20 @@ def upload_file(s3, bucket: str, local_path: Path, key: str) -> Dict:
     }
 
 
+def probe_bucket_access(s3, bucket: str, prefix: str, project: str) -> None:
+    probe_key = (
+        f"{prefix}/{project}/healthchecks/"
+        f"probe_{dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{socket.gethostname()}.txt"
+    )
+    probe_body = f"tidb-pov-s3-probe {dt.datetime.utcnow().isoformat()}Z".encode("utf-8")
+    s3.put_object(Bucket=bucket, Key=probe_key, Body=probe_body, ContentType="text/plain")
+    got = s3.get_object(Bucket=bucket, Key=probe_key)
+    body = got["Body"].read()
+    if body != probe_body:
+        raise RuntimeError("S3 read-back probe failed (content mismatch)")
+    s3.delete_object(Bucket=bucket, Key=probe_key)
+
+
 def main() -> int:
     args = parse_args()
     if not args.bucket:
@@ -76,6 +91,15 @@ def main() -> int:
     if args.region:
         s3_kwargs["region_name"] = args.region
     s3 = boto3.client("s3", **s3_kwargs)
+    try:
+        probe_bucket_access(s3, args.bucket, prefix, project)
+    except Exception as e:
+        print(f"[upload] s3 probe failed: {e}")
+        return 2
+
+    if args.check_only:
+        print(f"[upload] s3 probe ok for s3://{args.bucket}/{prefix}/{project}/healthchecks/")
+        return 0
 
     uploaded: List[Dict] = []
     skipped: List[str] = []

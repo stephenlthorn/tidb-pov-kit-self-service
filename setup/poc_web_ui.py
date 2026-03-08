@@ -1674,6 +1674,16 @@ def s3_enabled() -> bool:
     return bool(s3_bucket())
 
 
+def s3_required_for_runs() -> bool:
+    flag = str(os.environ.get("POV_ENFORCE_S3_UPLOAD", "")).strip().lower()
+    if flag in {"1", "true", "yes", "y", "on"}:
+        return True
+    if flag in {"0", "false", "no", "n", "off"}:
+        return False
+    # Default to required so official runs cannot proceed without archival.
+    return True
+
+
 def s3_client():
     if not s3_enabled() or not s3_bucket() or boto3 is None:
         return None
@@ -1751,6 +1761,33 @@ def sync_local_artifacts_to_s3() -> Tuple[bool, List[str]]:
     if not uploaded:
         return False, ["No local artifacts found to upload."]
     return True, uploaded
+
+
+def s3_run_preflight() -> Tuple[bool, str]:
+    if not s3_required_for_runs():
+        return True, "S3 archival requirement disabled."
+    if not s3_enabled():
+        return False, "S3 archival is required, but S3 artifacts are disabled."
+    bucket = s3_bucket()
+    if not bucket:
+        return False, "S3 archival is required, but S3_BUCKET is not configured."
+    client = s3_client()
+    if client is None:
+        return False, "S3 client unavailable (check boto3 and AWS credentials)."
+
+    probe_key = s3_artifact_key(
+        f"healthchecks/ui-run-preflight-{dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.txt"
+    )
+    probe_body = f"tidb-pov-ui-probe {dt.datetime.utcnow().isoformat()}Z".encode("utf-8")
+    try:
+        client.put_object(Bucket=bucket, Key=probe_key, Body=probe_body, ContentType="text/plain")
+        got = client.get_object(Bucket=bucket, Key=probe_key)
+        if got["Body"].read() != probe_body:
+            return False, "S3 probe failed: read-back mismatch."
+        client.delete_object(Bucket=bucket, Key=probe_key)
+        return True, f"S3 preflight ok: s3://{bucket}/{probe_key}"
+    except Exception as e:
+        return False, f"S3 preflight failed: {e}"
 
 
 def default_storage_health_state() -> Dict:
@@ -3140,6 +3177,10 @@ def create_app(config_path: Path) -> Flask:
             if not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
                 flash("Configuration saved, but run skipped: TiDB host/user/password are required.", "warning")
                 return redirect(url_for("index") + "#manual-config")
+            pre_ok, pre_msg = s3_run_preflight()
+            if not pre_ok:
+                flash(f"Run blocked: {pre_msg}", "error")
+                return redirect(url_for("index") + "#manual-config")
 
             cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
             if allow_blocked:
@@ -3264,6 +3305,10 @@ def create_app(config_path: Path) -> Flask:
             return redirect(url_for("index") + "#quickstart")
 
         if run_now:
+            pre_ok, pre_msg = s3_run_preflight()
+            if not pre_ok:
+                flash(f"Run blocked: {pre_msg}", "error")
+                return redirect(url_for("index") + "#quickstart")
             cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
             if allow_blocked:
                 cmd.append("--allow-blocked")
@@ -3384,6 +3429,10 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/run-defaults")
     def run_defaults_route():
+        pre_ok, pre_msg = s3_run_preflight()
+        if not pre_ok:
+            flash(f"Run blocked: {pre_msg}", "error")
+            return redirect(url_for("index") + "#dashboards")
         cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--no-wizard"]
         ok, msg = start_background(cmd, "run-defaults")
         flash(msg, "success" if ok else "error")
@@ -3391,6 +3440,10 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/build-report")
     def build_report_route():
+        pre_ok, pre_msg = s3_run_preflight()
+        if not pre_ok:
+            flash(f"Report build blocked: {pre_msg}", "error")
+            return redirect(url_for("index") + "#dashboards")
         cmd = [str(RUN_SCRIPT), str(config_path), "--no-menu", "--report-only"]
         ok, msg = start_background(cmd, "report-only")
         flash(msg, "success" if ok else "error")
@@ -3544,6 +3597,14 @@ def create_app(config_path: Path) -> Flask:
             flash("Workload tuning saved.", "success")
             return redirect(url_for("index") + "#workload-lab")
 
+        if s3_required_for_runs():
+            flash(
+                "Direct workload-lab execution is disabled while S3 archival enforcement is enabled. "
+                "Use Deployment Wizard or Manual Configuration run actions.",
+                "error",
+            )
+            return redirect(url_for("index") + "#workload-lab")
+
         script = WORKLOAD_TARGETS[target]["script"]
         if not Path(script).exists():
             flash(f"Workload runner not found: {script}", "error")
@@ -3668,6 +3729,14 @@ def create_app(config_path: Path) -> Flask:
         action = str(request.form.get("bl_action", "save")).strip().lower()
         if action == "save":
             flash("Workload Generator settings saved.", "success")
+            return redirect(url_for("index") + "#workload-lab")
+
+        if s3_required_for_runs():
+            flash(
+                "Workload Generator execution is disabled while S3 archival enforcement is enabled. "
+                "Run through Deployment Wizard/Manual Run so artifacts are archived automatically.",
+                "error",
+            )
             return redirect(url_for("index") + "#workload-lab")
 
         if action not in {"validate", "dry_run", "run", "report"}:

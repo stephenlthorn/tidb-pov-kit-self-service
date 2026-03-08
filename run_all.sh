@@ -133,6 +133,13 @@ LOG_FILE="${RESULTS_DIR}/run_all.log"
 INTAKE_JSON="${RESULTS_DIR}/pre_poc_intake.json"
 INTAKE_MD="${RESULTS_DIR}/pre_poc_checklist.md"
 RESOLVED_CONFIG="${RESULTS_DIR}/config.resolved.yaml"
+S3_ENFORCE_RAW="${POV_ENFORCE_S3_UPLOAD:-${S3_ARTIFACTS_REQUIRED:-true}}"
+S3_BUCKET="${POV_S3_BUCKET:-${S3_BUCKET:-${S3_ARTIFACTS_BUCKET:-}}}"
+S3_PREFIX="${POV_S3_PREFIX:-${S3_PREFIX:-${S3_ARTIFACTS_PREFIX:-tidb-pov}}}"
+S3_PROJECT="${POV_S3_PROJECT:-${S3_ARTIFACTS_PROJECT:-default}}"
+S3_REGION="${POV_S3_REGION:-${S3_REGION:-${AWS_REGION:-}}}"
+S3_RUN_TAG_DEFAULT="$(date -u +%Y%m%d_%H%M%S)_$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-')"
+S3_RUN_TAG="${POV_RUN_TAG:-${S3_RUN_TAG_DEFAULT}}"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -149,6 +156,82 @@ err()    { echo -e "  ${RED}✗${NC} $1"; }
 step()   { echo -e "\n${BOLD}[$1]${NC} $2"; }
 
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
+
+is_true() {
+  local v
+  v="$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')"
+  [[ "${v}" == "1" || "${v}" == "true" || "${v}" == "yes" || "${v}" == "y" || "${v}" == "on" ]]
+}
+
+if is_true "${S3_ENFORCE_RAW}"; then
+  S3_ENFORCED="true"
+else
+  S3_ENFORCED="false"
+fi
+
+s3_preflight_required() {
+  if [[ "${S3_ENFORCED}" != "true" ]]; then
+    warn "S3 enforcement disabled (POV_ENFORCE_S3_UPLOAD=false)."
+    return 0
+  fi
+
+  if [[ -z "${S3_BUCKET}" ]]; then
+    err "S3 enforcement is enabled but bucket is not configured."
+    echo "  Set POV_S3_BUCKET (or S3_BUCKET / S3_ARTIFACTS_BUCKET)."
+    exit 1
+  fi
+
+  if [[ ! -f "scripts/upload_results_s3.py" ]]; then
+    err "Missing scripts/upload_results_s3.py; cannot enforce S3 archival."
+    exit 1
+  fi
+
+  set +e
+  "${PYTHON}" scripts/upload_results_s3.py \
+    --bucket "${S3_BUCKET}" \
+    --prefix "${S3_PREFIX}" \
+    --project "${S3_PROJECT}" \
+    --run-tag "${S3_RUN_TAG}" \
+    --region "${S3_REGION}" \
+    --check-only
+  local rc=$?
+  set -e
+
+  if [[ ${rc} -ne 0 ]]; then
+    err "S3 preflight failed. Run blocked to prevent unarchived execution."
+    echo "  Verify AWS credentials and bucket write access for s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/"
+    exit 1
+  fi
+  ok "S3 archival preflight passed: s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/"
+}
+
+s3_upload_required() {
+  local step_label="$1"
+  if [[ "${S3_ENFORCED}" != "true" ]]; then
+    return 0
+  fi
+
+  step "${step_label}" "Uploading artifacts to S3 (required)"
+  set +e
+  "${PYTHON}" scripts/upload_results_s3.py \
+    --results-dir "${RESULTS_DIR}" \
+    --runs-dir "runs" \
+    --bucket "${S3_BUCKET}" \
+    --prefix "${S3_PREFIX}" \
+    --project "${S3_PROJECT}" \
+    --run-tag "${S3_RUN_TAG}" \
+    --region "${S3_REGION}"
+  local rc=$?
+  set -e
+
+  if [[ ${rc} -ne 0 ]]; then
+    err "Required S3 upload failed. Marking run as failed."
+    echo "  No successful archival confirmation for run tag: ${S3_RUN_TAG}"
+    exit 1
+  fi
+
+  ok "Artifacts archived to s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/runs/${S3_RUN_TAG}/"
+}
 
 if ! command -v "${PYTHON}" &>/dev/null; then
   echo "Python 3 not found. Install Python 3.9+ and retry."
@@ -193,6 +276,12 @@ fi
 echo "  Mode             : ${MODE_LABEL}"
 echo "  Started          : $(date)"
 echo "  Log              : ${LOG_FILE}"
+if [[ "${S3_ENFORCED}" == "true" ]]; then
+  echo "  S3 archive       : required"
+  echo "  S3 target        : s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/runs/${S3_RUN_TAG}/"
+else
+  echo "  S3 archive       : optional"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 0. Basic checks
@@ -217,6 +306,7 @@ if ! "${PYTHON}" -c "import yaml" &>/dev/null; then
   "${PYTHON}" -m pip install -q pyyaml
 fi
 ok "PyYAML available"
+s3_preflight_required
 
 if [[ "${REPORT_ONLY}" == "true" || "${REPORT_JSON_ONLY}" == "true" ]]; then
   CONFIG_EFFECTIVE="${CONFIG}"
@@ -253,12 +343,14 @@ PY
     ok "Metrics JSON written to ${RESULTS_DIR}/metrics_summary.json"
     echo ""
     echo "  To view the JSON, open: ${RESULTS_DIR}/metrics_summary.json"
+    s3_upload_required "R4/4"
   else
     step "R3/3" "Generating PDF report from existing results"
     "${PYTHON}" report/generate_report.py "${CONFIG_EFFECTIVE}"
     ok "Report written to ${RESULTS_DIR}/tidb_pov_report.pdf"
     echo ""
     echo "  To view the report, open: ${RESULTS_DIR}/tidb_pov_report.pdf"
+    s3_upload_required "R4/4"
   fi
   exit 0
 fi
@@ -603,6 +695,7 @@ run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py"
 step "10/10" "Generating PDF report"
 "${PYTHON}" report/generate_report.py "${CONFIG_EFFECTIVE}"
 ok "Report written to ${RESULTS_DIR}/tidb_pov_report.pdf"
+s3_upload_required "10b/10"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Done

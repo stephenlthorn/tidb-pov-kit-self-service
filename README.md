@@ -63,7 +63,8 @@ Vercel deployment note:
 4. Configure env vars from `.env.example` in Vercel project settings
 5. Attach Vercel Postgres (or set `DATABASE_URL`) for persistent users/invites/config state
 6. Configure S3 env vars (`S3_BUCKET`, `S3_PREFIX`, `S3_ARTIFACTS_ENABLED=true`) to persist PDF/metrics/log artifacts
-7. For cross-account AWS runner launch, set control credentials that can call `sts:AssumeRole`:
+7. Keep `POV_ENFORCE_S3_UPLOAD=true` (default) so runs are blocked unless S3 probe + upload succeed
+8. For cross-account AWS runner launch, set control credentials that can call `sts:AssumeRole`:
    - preferred: `AWS_CONTROL_ACCESS_KEY_ID` + `AWS_CONTROL_SECRET_ACCESS_KEY`
    - fallback: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`
 
@@ -94,6 +95,12 @@ This flow:
 2. Runs PoV using `run_all.sh`
 3. Uploads `results/*` + latest workload summary into S3
 4. Writes an upload manifest in both local `results/` and S3
+
+S3 enforcement behavior:
+1. `run_all.sh` now defaults to `POV_ENFORCE_S3_UPLOAD=true`
+2. It runs an S3 write/read/delete preflight before running tests
+3. It hard-fails the run if final S3 upload does not complete
+4. You can disable this only by explicitly setting `POV_ENFORCE_S3_UPLOAD=false` (not recommended)
 
 `run_all.sh` opens an interactive control panel by default in terminal sessions.
 From that parent menu you can:
