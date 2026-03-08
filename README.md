@@ -12,7 +12,7 @@ TCO comparison.
 | Module | What it proves |
 |--------|---------------|
 | M0 — Customer Query Validation | Your SQL queries run on TiDB without changes |
-| M1 — Baseline OLTP Performance | Raw throughput and latency under concurrent load |
+| M1 — Baseline OLTP Performance | Raw throughput and latency under concurrent load, including pre-warm + warm steady-state phase |
 | M2 — Elastic Auto-Scaling | TiDB Cloud adds capacity automatically; p99 stays flat |
 | M3 — High Availability | Sub-30s RTO after a node failure with zero manual intervention |
 | M3b — Write Contention | AUTO_RANDOM eliminates hot-region bottlenecks vs AUTO_INCREMENT |
@@ -109,6 +109,14 @@ Script-only secure deployment guide (no Vercel/UI required):
 - `docs/script_only_secure_s3_runner.md`
 - `docs/aws/policies/pov_results_bucket_policy_template.json`
 - `docs/aws/policies/pov_uploader_role_policy_template.json`
+
+Warm workload + S3 dataset support:
+1. Baseline module includes:
+   - pre-warm phase (`test.pre_warm_*`) before measured concurrency steps
+   - warm steady-state phase (`test.warm_phase_*`) after baseline steps
+2. Data import module supports remote source for TiDB Cloud:
+   - set `test.import_into_source_uri: "s3://.../file.csv"`
+   - optionally set `test.import_source_size_gb` for accurate GB/min metrics
 
 ### EC2 Script-Only Fast Path (Recommended)
 
@@ -312,8 +320,16 @@ test:
   data_scale:           "small"     # serverless default: small
   duration_seconds:     120         # seconds per phase
   concurrency_levels:   [8,16,32]
+  pre_warm_enabled:     true
+  pre_warm_duration_seconds: 120
+  pre_warm_concurrency: 16
+  warm_phase_enabled:   true
+  warm_phase_duration_seconds: 300
+  warm_phase_concurrency: 32
   ramp_duration_seconds: 300
   import_rows:          1000000
+  import_into_source_uri: ""        # optional s3://bucket/path/file.csv
+  import_source_size_gb: 0.0        # optional, for GB/min with remote import
 
 # Your production queries (optional — validated and replayed in M0/M1)
 customer_queries:

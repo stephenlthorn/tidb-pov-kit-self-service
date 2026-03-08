@@ -24,6 +24,9 @@ def run(cfg: dict):
     test_cfg = cfg.get("test") or {}
     concurrency_levels = test_cfg.get("concurrency_levels", [16, 64, 256])
     duration = test_cfg.get("duration_seconds", 300)
+    pre_warm_enabled = bool(test_cfg.get("pre_warm_enabled", True))
+    pre_warm_duration = max(30, int(test_cfg.get("pre_warm_duration_seconds", 120)))
+    pre_warm_concurrency = max(1, int(test_cfg.get("pre_warm_concurrency", (concurrency_levels or [16])[0])))
     warm_enabled = bool(test_cfg.get("warm_phase_enabled", True))
     warm_duration = max(30, int(test_cfg.get("warm_phase_duration_seconds", max(300, duration))))
     warm_concurrency = max(1, int(test_cfg.get("warm_phase_concurrency", max(concurrency_levels or [16]))))
@@ -64,6 +67,10 @@ def run(cfg: dict):
         print(f"  Comparison DB: {comparison_label}")
     elif comparison_cfg.get("enabled"):
         print(f"  Comparison DB disabled for run: {comparison_reason(comparison_cfg)}")
+    if pre_warm_enabled:
+        print(f"  Pre-warm phase: enabled ({pre_warm_concurrency} threads, {pre_warm_duration}s)")
+    else:
+        print("  Pre-warm phase: disabled")
     if warm_enabled:
         print(f"  Warm workload phase: enabled ({warm_concurrency} threads, {warm_duration}s)")
     else:
@@ -72,6 +79,16 @@ def run(cfg: dict):
 
     summary = {}
     any_success = False
+    if pre_warm_enabled:
+        print(f"\n  Pre-warming dataset: concurrency={pre_warm_concurrency}, duration={pre_warm_duration}s")
+        runner.run(
+            pool,
+            concurrency=pre_warm_concurrency,
+            duration_sec=pre_warm_duration,
+            phase="pre_warm",
+            customer_queries=customer_queries,
+            customer_ratio=customer_ratio,
+        )
     for c in concurrency_levels:
         phase = f"c{c}"
         runner.run(pool, concurrency=c, duration_sec=duration, phase=phase,

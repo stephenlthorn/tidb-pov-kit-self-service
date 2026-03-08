@@ -48,6 +48,8 @@ def run(cfg: dict):
     methods = [str(m).strip().lower() for m in methods]
     if not methods:
         methods = ["batched_insert", "load_data_infile", "import_into"]
+    import_into_source_uri = str(test_cfg.get("import_into_source_uri", "") or "").strip()
+    import_source_size_gb = float(test_cfg.get("import_source_size_gb", 0.0) or 0.0)
 
     print(f"\n{'='*60}")
     print(f"  Module 7: Data Import Speed")
@@ -59,10 +61,20 @@ def run(cfg: dict):
     conn = get_connection(cfg["tidb"])
     cur  = conn.cursor()
 
-    # Generate a local CSV file
-    print(f"\n  Generating {import_rows:,} row CSV...")
-    csv_path, file_size_gb = _generate_csv(import_rows)
-    print(f"    CSV size: {file_size_gb*1024:.1f} MB at {csv_path}")
+    need_local_csv = any(m in methods for m in ["batched_insert", "load_data_infile"])
+    if "import_into" in methods and not import_into_source_uri:
+        need_local_csv = True
+
+    csv_path = None
+    file_size_gb = import_source_size_gb
+    if need_local_csv:
+        print(f"\n  Generating {import_rows:,} row CSV...")
+        csv_path, file_size_gb = _generate_csv(import_rows)
+        print(f"    CSV size: {file_size_gb*1024:.1f} MB at {csv_path}")
+    elif import_into_source_uri:
+        print(f"\n  Using remote import source URI: {import_into_source_uri}")
+        if import_source_size_gb <= 0:
+            print("    Note: import_source_size_gb not set; GB/min will be 0 for this method.")
 
     results = {}
 
@@ -71,12 +83,16 @@ def run(cfg: dict):
         print(f"\n  Method C — Batched INSERT (batch={batch_size:,})...")
         _drop_and_create(cur, conn, "import_test_insert")
         t0 = time.time()
-        rows_c = _batched_insert(cur, conn, "import_test_insert", csv_path, import_rows, batch_size)
-        dur_c = time.time() - t0
-        results["batched_insert"] = _metrics(rows_c, file_size_gb, dur_c)
-        log_import_stat(rows_c, file_size_gb, dur_c,
-                        file_size_gb / dur_c * 60 if dur_c > 0 else 0)
-        _print_result("Batched INSERT", results["batched_insert"])
+        if csv_path:
+            rows_c = _batched_insert(cur, conn, "import_test_insert", csv_path, import_rows, batch_size)
+            dur_c = time.time() - t0
+            results["batched_insert"] = _metrics(rows_c, file_size_gb, dur_c)
+            log_import_stat(rows_c, file_size_gb, dur_c,
+                            file_size_gb / dur_c * 60 if dur_c > 0 else 0)
+            _print_result("Batched INSERT", results["batched_insert"])
+        else:
+            results["batched_insert"] = {"skipped": True, "reason": "local CSV not generated"}
+            print("    Skipped: local CSV not available.")
     else:
         print("\n  Method C — Batched INSERT skipped by config.")
         results["batched_insert"] = {"skipped": True, "reason": "disabled"}
@@ -87,6 +103,8 @@ def run(cfg: dict):
         _drop_and_create(cur, conn, "import_test_load")
         try:
             t0 = time.time()
+            if not csv_path:
+                raise RuntimeError("local CSV not available")
             rows_b = _load_data_infile(cfg["tidb"], "import_test_load", csv_path)
             dur_b = time.time() - t0
             results["load_data_infile"] = _metrics(rows_b, file_size_gb, dur_b)
@@ -105,12 +123,16 @@ def run(cfg: dict):
         print(f"\n  Method A — IMPORT INTO (TiDB native loader)...")
         _drop_and_create(cur, conn, "import_test_native")
         try:
+            source_uri = import_into_source_uri
+            if not source_uri:
+                source_uri = f"file://{csv_path}"
             t0 = time.time()
-            rows_a = _import_into(cur, conn, "import_test_native", csv_path)
+            rows_a = _import_into(cur, conn, "import_test_native", source_uri)
             dur_a = time.time() - t0
-            results["import_into"] = _metrics(rows_a, file_size_gb, dur_a)
-            log_import_stat(rows_a, file_size_gb, dur_a,
-                            file_size_gb / dur_a * 60 if dur_a > 0 else 0)
+            import_size_gb = max(file_size_gb, import_source_size_gb)
+            results["import_into"] = _metrics(rows_a, import_size_gb, dur_a)
+            log_import_stat(rows_a, import_size_gb, dur_a,
+                            import_size_gb / dur_a * 60 if dur_a > 0 else 0)
             _print_result("IMPORT INTO", results["import_into"])
         except Exception as e:
             print(f"    Skipped (requires TiDB >= 7.2 or accessible file path): {e}")
@@ -127,10 +149,11 @@ def run(cfg: dict):
             pass
     conn.commit()
     conn.close()
-    try:
-        os.unlink(csv_path)
-    except Exception:
-        pass
+    if csv_path:
+        try:
+            os.unlink(csv_path)
+        except Exception:
+            pass
 
     # Best method
     best = max(
@@ -230,7 +253,7 @@ def _load_data_infile(tidb_cfg: dict, table: str, csv_path: str) -> int:
     return rows
 
 
-def _import_into(cur, conn, table: str, csv_path: str) -> int:
+def _import_into(cur, conn, table: str, source_uri: str) -> int:
     """
     Use TiDB IMPORT INTO statement (TiDB >= 7.2).
     Requires the CSV to be accessible from TiDB server or an S3/GCS URI.
@@ -239,7 +262,7 @@ def _import_into(cur, conn, table: str, csv_path: str) -> int:
     # IMPORT INTO supports 'file://' URIs for local dev; real deployments use S3
     sql = f"""
         IMPORT INTO {table} (source, event_type, user_id, session_id)
-        FROM 'file://{csv_path}'
+        FROM '{source_uri}'
         FORMAT 'CSV'
     """
     cur.execute(sql)
