@@ -269,7 +269,7 @@ To regenerate only `results/metrics_summary.json` from existing artifacts:
 tidb:
   host:     "your-cluster.tidbcloud.com"
   port:     4000
-  user:     "root"
+  user:     "<prefix>.root"
   password: "your-password"
   database: "test"
   ssl:      true

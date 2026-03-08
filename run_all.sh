@@ -551,12 +551,59 @@ sys.exit(0 if ok else 1)
 PY
 }
 
+check_tidb_username_format() {
+  "${PYTHON}" - <<PY
+import yaml, sys
+sys.path.insert(0, '.')
+with open('${CONFIG_EFFECTIVE}') as f:
+    cfg = yaml.safe_load(f) or {}
+from lib.tidb_cloud import validate_tidb_cloud_username
+tier = (cfg.get('tier') or {}).get('selected')
+msg = validate_tidb_cloud_username(cfg.get('tidb', {}), tier=tier)
+if msg:
+    print(msg)
+    sys.exit(1)
+print("ok")
+PY
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. DB connectivity check
 # ─────────────────────────────────────────────────────────────────────────────
 step "2/10" "TiDB connectivity check"
 
 while true; do
+  set +e
+  USER_FMT_CHECK="$(check_tidb_username_format)"
+  USER_FMT_RC=$?
+  set -e
+  if [[ ${USER_FMT_RC} -ne 0 ]]; then
+    err "Invalid TiDB username format: ${USER_FMT_CHECK}"
+    echo "  Use the exact TiDB Cloud username from Connect, for example: <prefix>.root"
+    if [[ ! -t 0 ]]; then
+      echo "  Non-interactive mode: cannot prompt for connection details."
+      exit 1
+    fi
+    echo ""
+    echo "  Choose next action:"
+    echo "    1) Update connection settings and retry"
+    echo "    2) Abort"
+    read -r -p "  Selection [1/2] (default: 1): " conn_action
+    case "${conn_action:-1}" in
+      1)
+        prompt_tidb_connection_update
+        ;;
+      2)
+        err "Aborted by user."
+        exit 1
+        ;;
+      *)
+        warn "Unknown selection; retrying username check."
+        ;;
+    esac
+    continue
+  fi
+
   set +e
   CONN_CHECK="$(check_tidb_connection)"
   CONN_RC=$?

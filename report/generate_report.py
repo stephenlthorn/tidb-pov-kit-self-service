@@ -346,7 +346,10 @@ def _chart_ha(metrics) -> plt.Figure:
     mod = metrics["modules"].get("03_high_availability", {})
     ts  = mod.get("time_series", {})
     all_ts = []
-    for ph in ["warmup", "during_failure", "recovery"]:
+    for ph in ["warmup", "failure", "recovery"]:
+        if ph == "failure" and ph not in ts and "during_failure" in ts:
+            all_ts.extend(ts["during_failure"])
+            continue
         if ph in ts:
             all_ts.extend(ts[ph])
     if not all_ts:
@@ -546,7 +549,9 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         return f"{v:,.{decimals}f}"
 
     cards = [
-        ("Best p99 Latency",    _fmt(summary.get("best_p99_ms"), 1), "ms",       BLUE),
+        ("Warm p99 Latency",    _fmt(summary.get("warm_p99_ms"), 1), "ms",       BLUE),
+        ("Warm Throughput",     _fmt(summary.get("warm_tps"),    0), "TPS",      GREEN),
+        ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
         ("HA Recovery (RTO)",   _fmt(summary.get("rto_sec"),     1), "seconds",  ORANGE),
         ("Hotspot Reduction",   _fmt(summary.get("hotspot_improvement_pct"), 0), "%",   RED),
@@ -557,20 +562,22 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     ]
     col_w = 28
     col_h = 26
+    cols_per_row = 6
     start_x = pdf.l_margin
     y0 = pdf.get_y()
     for i, (label, value, unit, color) in enumerate(cards):
-        col = i % 6
-        row = i // 6
+        col = i % cols_per_row
+        row = i // cols_per_row
         pdf.kpi_card(start_x + col * (col_w + 3), y0 + row * (col_h + 4),
                      col_w, col_h, label, value, unit, color)
-    pdf.set_y(y0 + col_h + 10)
+    row_count = max(1, (len(cards) + cols_per_row - 1) // cols_per_row)
+    pdf.set_y(y0 + row_count * (col_h + 4) + 2)
 
     # Intro paragraph
     pdf.body_text(
         "This report summarises the results of a self-service Proof of Value "
         "conducted on TiDB Cloud. The tests were executed automatically using "
-        "the TiDB Cloud PoV Kit and cover OLTP performance, elastic auto-scaling, "
+        "the TiDB Cloud PoV Kit and cover OLTP performance (including warm steady-state), elastic auto-scaling, "
         "high availability, write contention, HTAP, online DDL, MySQL compatibility, "
         "data import speed, and total cost of ownership.",
         size=9,

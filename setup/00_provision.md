@@ -71,7 +71,7 @@ The wizard writes:
 tidb:
   host:     "gateway01.us-west-2.prod.aws.tidbcloud.com"
   port:     4000
-  user:     "root"
+  user:     "<prefix>.root"
   password: "YOUR_PASSWORD_HERE"
   database: "test"
   ssl:      true

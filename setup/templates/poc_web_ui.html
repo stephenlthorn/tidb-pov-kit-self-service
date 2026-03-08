@@ -2481,7 +2481,7 @@
                   id="comparison_runner_note"
                   class="target-note {% if comparison_runner_supported %}ok{% else %}warn{% endif %}"
                   data-message-supported="Automated side-by-side runner is available for this target family."
-                  data-message-unsupported="This target is configurable now, but automated side-by-side execution is not yet available in the current runner."
+                  data-message-unsupported="Planning-only target: configuration is saved, but automated side-by-side execution is not available in the current runner."
                 >
                   {{ comparison_runner_reason }}
                 </div>
@@ -2588,7 +2588,7 @@
                 </div>
               </div>
             </details>
-            <div class="tiny">Targets available: Starter support now for MySQL family (Aurora/MySQL/RDS MySQL/SingleStore). Postgres and SQL Server targets are captured for planning and future runner support.</div>
+            <div class="tiny">Automated side-by-side execution currently supports MySQL-family targets (Aurora/MySQL/RDS MySQL/SingleStore). PostgreSQL and SQL Server targets are planning-only and remain saved in configuration.</div>
           </div>
 
           <div class="config-section" id="manual-tests">

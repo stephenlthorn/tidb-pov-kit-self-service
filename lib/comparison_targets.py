@@ -162,7 +162,7 @@ def comparison_reason(cfg: Dict) -> str:
     target = str(cfg.get("target", DEFAULT_TARGET))
     if not is_runner_supported(target):
         return (
-            f"Configured target {target_label(target)} is not yet supported by the automated "
-            "MySQL-dialect side-by-side runner."
+            f"Configured target {target_label(target)} is captured for planning, but automated "
+            "side-by-side execution is not available in the current runner."
         )
     return "Comparison target ready."

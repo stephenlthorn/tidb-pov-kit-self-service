@@ -132,7 +132,7 @@ def dsn_from_tidb_cfg(tidb_cfg: Dict) -> str:
     if not host:
         return ""
     port = _to_int((tidb_cfg or {}).get("port"), 4000, 1)
-    user = str((tidb_cfg or {}).get("user") or "root")
+    user = str((tidb_cfg or {}).get("user") or "<prefix>.root")
     password = str((tidb_cfg or {}).get("password") or "")
     database = str((tidb_cfg or {}).get("database") or "test")
     user_enc = quote(user, safe="")

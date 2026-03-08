@@ -79,11 +79,12 @@ from setup.pre_poc_intake import (  # type: ignore  # noqa: E402
 )
 from lib.comparison_targets import (  # type: ignore  # noqa: E402
     TARGET_DEFINITIONS,
-    comparison_can_run,
     comparison_reason,
+    is_runner_supported,
     normalize_comparison_cfg,
     target_label,
 )
+from lib.tidb_cloud import validate_tidb_cloud_username  # type: ignore  # noqa: E402
 from load.tidb_blaster import (  # type: ignore  # noqa: E402
     latest_run_dir,
     list_recent_runs,
@@ -793,6 +794,11 @@ def to_float(raw: str | None, default: float) -> float:
         return default
 
 
+def tidb_username_format_warning(cfg: Dict) -> str | None:
+    tier = str((cfg.get("tier") or {}).get("selected") or "").strip().lower()
+    return validate_tidb_cloud_username(cfg.get("tidb") or {}, tier=tier)
+
+
 def parse_concurrency(raw: str, default: List[int]) -> List[int]:
     if not raw.strip():
         return default
@@ -1383,6 +1389,8 @@ def build_report_dashboard() -> Dict:
 
     best_tps = parse_float(summary.get("best_tps"), 0.0)
     best_p99 = parse_float(summary.get("best_p99_ms"), 0.0)
+    warm_tps = parse_float(summary.get("warm_tps"), 0.0)
+    warm_p99 = parse_float(summary.get("warm_p99_ms"), 0.0)
     mysql_compat_pct = parse_float(summary.get("mysql_compat_pct"), parse_float(compat.get("pct"), 0.0))
     modules_passed = parse_int(summary.get("modules_passed"), status_counts["passed"])
     modules_run = parse_int(summary.get("modules_run"), status_total)
@@ -1391,8 +1399,10 @@ def build_report_dashboard() -> Dict:
 
     out["summary_cards"] = [
         {"label": "Modules Passed", "value": f"{modules_passed}/{modules_run}", "sub": "Execution coverage"},
+        {"label": "Warm TPS", "value": f"{warm_tps:,.1f}" if warm_tps > 0 else "n/a", "sub": "Steady-state throughput"},
+        {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
         {"label": "Best TPS", "value": f"{best_tps:,.1f}", "sub": "Higher is better"},
-        {"label": "Best P99 (ms)", "value": f"{best_p99:,.2f}", "sub": "Lower is better"},
+        {"label": "Best P99 (ms)", "value": f"{best_p99:,.2f}", "sub": "Best observed across phases"},
         {"label": "MySQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "Syntax/behavior checks"},
         {"label": "Best Import GB/min", "value": f"{best_import:.4f}", "sub": "Data import throughput"},
     ]
@@ -3072,7 +3082,7 @@ def create_app(config_path: Path) -> Flask:
             enabled_module_count=sum(1 for key in MODULE_ORDER if cfg.get("modules", {}).get(key)),
             comparison_targets=TARGET_DEFINITIONS,
             comparison_target_label=target_label(cfg["comparison_db"]["target"]),
-            comparison_runner_supported=comparison_can_run(cfg["comparison_db"]),
+            comparison_runner_supported=is_runner_supported(cfg["comparison_db"]["target"]),
             comparison_runner_reason=comparison_reason(cfg["comparison_db"]),
             blaster_insights=blaster_insights,
             runner_size_presets=RUNNER_SIZE_PRESETS,
@@ -3168,10 +3178,15 @@ def create_app(config_path: Path) -> Flask:
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
 
         apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
+        username_warning = tidb_username_format_warning(cfg)
 
         save_cfg(config_path, cfg)
         action = str(request.form.get("save_action", "save")).strip().lower()
         allow_blocked = to_bool(request.form.get("manual_allow_blocked"), False)
+
+        if action == "save_and_run" and username_warning:
+            flash(f"Run blocked: {username_warning}", "error")
+            return redirect(url_for("index") + "#manual-config")
 
         if action == "save_and_run":
             if not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
@@ -3189,7 +3204,10 @@ def create_app(config_path: Path) -> Flask:
             flash(msg, "success" if ok else "error")
             return redirect(url_for("index") + "#dashboards")
 
-        flash("Configuration saved.", "success")
+        if username_warning:
+            flash(f"Configuration saved with warning: {username_warning}", "warning")
+        else:
+            flash("Configuration saved.", "success")
         return redirect(url_for("index") + "#manual-config")
 
     @app.post("/quickstart-deploy")
@@ -3294,11 +3312,16 @@ def create_app(config_path: Path) -> Flask:
         if company_name:
             report["company_name"] = company_name
 
+        username_warning = tidb_username_format_warning(cfg)
         save_cfg(config_path, cfg)
 
         wiz_action = str(request.form.get("wiz_action", "save")).strip().lower()
         run_now = wiz_action == "run"
         allow_blocked = to_bool(request.form.get("wiz_allow_blocked"), False)
+
+        if run_now and username_warning:
+            flash(f"Run blocked: {username_warning}", "error")
+            return redirect(url_for("index") + "#quickstart")
 
         if run_now and not all([tidb.get("host"), tidb.get("user"), tidb.get("password")]):
             flash("Quickstart saved, but run skipped: TiDB host/user/password are required.", "warning")
@@ -3316,7 +3339,10 @@ def create_app(config_path: Path) -> Flask:
             flash(msg, "success" if ok else "error")
             return redirect(url_for("index") + "#dashboards")
 
-        flash("Quickstart configuration saved.", "success")
+        if username_warning:
+            flash(f"Quickstart configuration saved with warning: {username_warning}", "warning")
+        else:
+            flash("Quickstart configuration saved.", "success")
         return redirect(url_for("index") + "#quickstart")
 
     @app.post("/apply-module-suite")
@@ -3429,6 +3455,11 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/run-defaults")
     def run_defaults_route():
+        cfg = load_cfg(config_path)
+        username_warning = tidb_username_format_warning(cfg)
+        if username_warning:
+            flash(f"Run blocked: {username_warning}", "error")
+            return redirect(url_for("index") + "#dashboards")
         pre_ok, pre_msg = s3_run_preflight()
         if not pre_ok:
             flash(f"Run blocked: {pre_msg}", "error")

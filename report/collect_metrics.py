@@ -85,7 +85,7 @@ def collect() -> dict:
         # Per-phase latency stats for TiDB
         phases = _get_phases_for_module(mod)
         for phase in phases:
-            stats = get_latency_stats(mod, phase=phase, db_label="tidb")
+            stats = _phase_latency_stats(mod, phase=phase, db_label="tidb")
             if stats:
                 entry["tidb"][phase] = stats
 
@@ -100,14 +100,14 @@ def collect() -> dict:
             entry["comparison"] = {}
             comp_label = payload["comparison_label"]
             for phase in phases:
-                stats = get_latency_stats(mod, phase=phase, db_label=comp_label)
+                stats = _phase_latency_stats(mod, phase=phase, db_label=comp_label)
                 if stats:
                     entry["comparison"][phase] = stats
 
         # Time-series data (for chart rendering)
         entry["time_series"] = {}
         for phase in (phases or [None]):
-            ts_data = get_time_series(mod, bucket_sec=10, phase=phase)
+            ts_data = _phase_time_series(mod, phase=phase, bucket_sec=10)
             if ts_data:
                 entry["time_series"][phase or "overall"] = ts_data
 
@@ -139,7 +139,7 @@ def _get_phases_for_module(mod: str) -> list:
     phase_map = {
         "01_baseline_perf": ["c8", "c16", "c32", "c64", "warm_steady"],
         "02_elastic_scale": ["ramp_up", "sustain", "ramp_down"],
-        "03_high_availability": ["warmup", "during_failure", "recovery"],
+        "03_high_availability": ["warmup", "failure", "recovery"],
         "03b_write_contention": ["sequential", "autorand"],
         "04_htap_concurrent": ["oltp_only", "htap", "analytics"],
         "05_online_ddl": [],  # phases are dynamic DDL step names
@@ -160,7 +160,50 @@ def _get_observed_phases(mod: str) -> list:
             "SELECT DISTINCT phase FROM results WHERE module=? AND phase IS NOT NULL AND TRIM(phase) <> ''",
             (mod,),
         ).fetchall()
-    return [str(r["phase"]) for r in rows if r["phase"] is not None]
+    out = []
+    seen = set()
+    for row in rows:
+        raw = row["phase"]
+        if raw is None:
+            continue
+        canonical = _canonical_phase(mod, str(raw))
+        if canonical in seen:
+            continue
+        out.append(canonical)
+        seen.add(canonical)
+    return out
+
+
+def _canonical_phase(mod: str, phase: str) -> str:
+    p = str(phase or "")
+    if mod == "03_high_availability" and p == "during_failure":
+        return "failure"
+    return p
+
+
+def _phase_candidates(mod: str, phase: str | None) -> list:
+    if phase is None:
+        return [None]
+    p = _canonical_phase(mod, str(phase))
+    if mod == "03_high_availability" and p == "failure":
+        return ["failure", "during_failure"]
+    return [p]
+
+
+def _phase_latency_stats(mod: str, phase: str | None, db_label: str) -> dict:
+    for candidate in _phase_candidates(mod, phase):
+        stats = get_latency_stats(mod, phase=candidate, db_label=db_label)
+        if stats and stats.get("count", 0) > 0:
+            return stats
+    return {}
+
+
+def _phase_time_series(mod: str, phase: str | None, bucket_sec: int) -> list:
+    for candidate in _phase_candidates(mod, phase):
+        ts_data = get_time_series(mod, bucket_sec=bucket_sec, phase=candidate)
+        if ts_data:
+            return ts_data
+    return []
 
 
 def _order_phases(mod: str, observed: list, defaults: list) -> list:
@@ -202,6 +245,12 @@ def _build_summary(payload: dict) -> dict:
         (v.get("tps", 0) for v in baseline.values() if isinstance(v, dict)),
         default=None
     )
+    warm_steady = baseline.get("warm_steady", {}) if isinstance(baseline, dict) else {}
+    warm_count = int(warm_steady.get("count", 0)) if isinstance(warm_steady, dict) else 0
+    warm_p50 = warm_steady.get("p50_ms") if warm_count > 0 else None
+    warm_p95 = warm_steady.get("p95_ms") if warm_count > 0 else None
+    warm_p99 = warm_steady.get("p99_ms") if warm_count > 0 else None
+    warm_tps = warm_steady.get("tps") if warm_count > 0 else None
 
     # HA RTO
     ha = modules.get("03_high_availability", {})
@@ -227,8 +276,13 @@ def _build_summary(payload: dict) -> dict:
     return {
         "modules_run":          total_mods,
         "modules_passed":       passed_mods,
+        "best_observed_p99_ms": best_p99,
         "best_p99_ms":          best_p99,
         "best_tps":             best_tps,
+        "warm_p50_ms":          warm_p50,
+        "warm_p95_ms":          warm_p95,
+        "warm_p99_ms":          warm_p99,
+        "warm_tps":             warm_tps,
         "rto_sec":              rto_sec,
         "hotspot_improvement_pct": hotspot_improvement,
         "mysql_compat_pct":     compat.get("pct"),
