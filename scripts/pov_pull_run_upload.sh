@@ -7,8 +7,11 @@ if [[ -n "${POV_ENV_FILE}" ]]; then
     echo "[runner] env file not found: ${POV_ENV_FILE}"
     exit 2
   fi
+  # Export everything loaded from env file so child processes (run_all.sh) can read it.
+  set -a
   # shellcheck disable=SC1090
   source "${POV_ENV_FILE}"
+  set +a
 fi
 
 POV_REPO_URL="${POV_REPO_URL:-https://github.com/stephenlthorn/tidb-pov-kit-self-service.git}"
@@ -25,6 +28,10 @@ POV_S3_REGION="${POV_S3_REGION:-${S3_REGION:-${AWS_REGION:-}}}"
 POV_S3_ROLE_ARN="${POV_S3_ROLE_ARN:-${S3_ROLE_ARN:-}}"
 POV_S3_EXTERNAL_ID="${POV_S3_EXTERNAL_ID:-${S3_EXTERNAL_ID:-}}"
 POV_S3_SESSION_NAME="${POV_S3_SESSION_NAME:-tidb-pov-runner}"
+
+# Ensure required S3 vars are visible to child commands.
+export POV_S3_BUCKET POV_S3_PREFIX POV_S3_PROJECT POV_S3_REGION POV_RUN_TAG
+export POV_ENFORCE_S3_UPLOAD POV_S3_EXPECTED_BUCKET_OWNER POV_S3_KMS_KEY_ID
 
 if [[ -n "${POV_S3_ROLE_ARN}" ]]; then
   if ! command -v aws >/dev/null 2>&1; then
@@ -107,6 +114,8 @@ python3 scripts/upload_results_s3.py \
   --prefix "${POV_S3_PREFIX}" \
   --project "${POV_S3_PROJECT}" \
   --run-tag "${POV_RUN_TAG}" \
-  --region "${POV_S3_REGION}"
+  --region "${POV_S3_REGION}" \
+  --expected-bucket-owner "${POV_S3_EXPECTED_BUCKET_OWNER:-}" \
+  --kms-key-id "${POV_S3_KMS_KEY_ID:-}"
 
 echo "[runner] done"
