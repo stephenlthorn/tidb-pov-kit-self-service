@@ -60,6 +60,8 @@ This exports short-lived AWS credentials for the current shell.
 
 1. Copy `scripts/pov_vm.env.example` to your own env file.
 2. Fill required values (bucket, project, config path, owner account, kms key).
+   - Keep multi-word args quoted, for example:
+     - `POV_RUN_ARGS="--no-menu --no-wizard"`
 3. Run:
 
 ```bash
