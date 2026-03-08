@@ -74,6 +74,27 @@ chmod +x run_all.sh
 ./run_all.sh
 ```
 
+### Scripted Pull + Run + S3 Archive
+
+If you want a pure script workflow (no UI), use:
+
+```bash
+export POV_S3_BUCKET=<your-bucket>
+export POV_S3_PREFIX=tidb-pov
+export POV_S3_PROJECT=<customer-or-project-slug>
+export AWS_ACCESS_KEY_ID=<key-with-s3-put-access>
+export AWS_SECRET_ACCESS_KEY=<secret>
+export POV_CONFIG_SOURCE=/absolute/path/to/config.yaml
+
+curl -fsSL https://raw.githubusercontent.com/stephenlthorn/tidb-pov-kit-self-service/main/scripts/pov_pull_run_upload.sh | bash
+```
+
+This flow:
+1. Clones/pulls latest GitHub repo
+2. Runs PoV using `run_all.sh`
+3. Uploads `results/*` + latest workload summary into S3
+4. Writes an upload manifest in both local `results/` and S3
+
 `run_all.sh` opens an interactive control panel by default in terminal sessions.
 From that parent menu you can:
 1. Run PoC with defaults
