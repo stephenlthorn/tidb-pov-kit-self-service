@@ -90,11 +90,25 @@ export POV_CONFIG_SOURCE=/absolute/path/to/config.yaml
 curl -fsSL https://raw.githubusercontent.com/stephenlthorn/tidb-pov-kit-self-service/main/scripts/pov_pull_run_upload.sh | bash
 ```
 
+Or keep all VM vars in an env file and run with:
+
+```bash
+cp scripts/pov_vm.env.example /tmp/pov_vm.env
+# edit /tmp/pov_vm.env
+export POV_ENV_FILE=/tmp/pov_vm.env
+curl -fsSL https://raw.githubusercontent.com/stephenlthorn/tidb-pov-kit-self-service/main/scripts/pov_pull_run_upload.sh | bash
+```
+
 This flow:
 1. Clones/pulls latest GitHub repo
 2. Runs PoV using `run_all.sh`
 3. Uploads `results/*` + latest workload summary into S3
 4. Writes an upload manifest in both local `results/` and S3
+
+Script-only secure deployment guide (no Vercel/UI required):
+- `docs/script_only_secure_s3_runner.md`
+- `docs/aws/policies/pov_results_bucket_policy_template.json`
+- `docs/aws/policies/pov_uploader_role_policy_template.json`
 
 S3 enforcement behavior:
 1. `run_all.sh` now defaults to `POV_ENFORCE_S3_UPLOAD=true`

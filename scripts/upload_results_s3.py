@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import boto3
+from botocore.exceptions import ClientError
 
 DEFAULT_FILES = [
     "tidb_pov_report.pdf",
@@ -33,6 +34,16 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--project", default=os.environ.get("POV_S3_PROJECT") or os.environ.get("S3_ARTIFACTS_PROJECT") or "default")
     p.add_argument("--run-tag", default=os.environ.get("POV_RUN_TAG") or "")
     p.add_argument("--region", default=os.environ.get("POV_S3_REGION") or os.environ.get("S3_REGION") or os.environ.get("AWS_REGION") or "")
+    p.add_argument(
+        "--expected-bucket-owner",
+        default=os.environ.get("POV_S3_EXPECTED_BUCKET_OWNER") or os.environ.get("S3_EXPECTED_BUCKET_OWNER") or "",
+        help="Expected AWS account ID that owns the bucket",
+    )
+    p.add_argument(
+        "--kms-key-id",
+        default=os.environ.get("POV_S3_KMS_KEY_ID") or os.environ.get("S3_KMS_KEY_ID") or "",
+        help="Optional KMS key ARN/ID for SSE-KMS",
+    )
     p.add_argument("--check-only", action="store_true", help="Only validate S3 read/write access and exit")
     return p.parse_args()
 
@@ -46,13 +57,34 @@ def build_run_tag(given: str) -> str:
     return f"{stamp}_{safe_host}"
 
 
-def upload_file(s3, bucket: str, local_path: Path, key: str) -> Dict:
+def upload_file(
+    s3,
+    bucket: str,
+    local_path: Path,
+    key: str,
+    expected_bucket_owner: str = "",
+    kms_key_id: str = "",
+) -> Dict:
     content_type = "application/octet-stream"
     if local_path.suffix.lower() == ".pdf":
         content_type = "application/pdf"
-    elif local_path.suffix.lower() in {".json", ".yaml", ".yml", ".md", ".log", ".txt"}:
+    elif local_path.suffix.lower() == ".json":
+        content_type = "application/json"
+    elif local_path.suffix.lower() in {".yaml", ".yml", ".md", ".log", ".txt"}:
         content_type = "text/plain"
-    s3.upload_file(str(local_path), bucket, key, ExtraArgs={"ContentType": content_type})
+    put_args = {
+        "Bucket": bucket,
+        "Key": key,
+        "ContentType": content_type,
+    }
+    if expected_bucket_owner:
+        put_args["ExpectedBucketOwner"] = expected_bucket_owner
+    if kms_key_id:
+        put_args["ServerSideEncryption"] = "aws:kms"
+        put_args["SSEKMSKeyId"] = kms_key_id
+
+    with local_path.open("rb") as f:
+        s3.put_object(Body=f, **put_args)
     return {
         "local": str(local_path),
         "key": key,
@@ -61,18 +93,50 @@ def upload_file(s3, bucket: str, local_path: Path, key: str) -> Dict:
     }
 
 
-def probe_bucket_access(s3, bucket: str, prefix: str, project: str) -> None:
+def probe_bucket_access(
+    s3,
+    bucket: str,
+    prefix: str,
+    project: str,
+    expected_bucket_owner: str = "",
+    kms_key_id: str = "",
+) -> None:
     probe_key = (
         f"{prefix}/{project}/healthchecks/"
         f"probe_{dt.datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_{socket.gethostname()}.txt"
     )
     probe_body = f"tidb-pov-s3-probe {dt.datetime.utcnow().isoformat()}Z".encode("utf-8")
-    s3.put_object(Bucket=bucket, Key=probe_key, Body=probe_body, ContentType="text/plain")
-    got = s3.get_object(Bucket=bucket, Key=probe_key)
+    put_args = {
+        "Bucket": bucket,
+        "Key": probe_key,
+        "Body": probe_body,
+        "ContentType": "text/plain",
+    }
+    if expected_bucket_owner:
+        put_args["ExpectedBucketOwner"] = expected_bucket_owner
+    if kms_key_id:
+        put_args["ServerSideEncryption"] = "aws:kms"
+        put_args["SSEKMSKeyId"] = kms_key_id
+
+    s3.put_object(**put_args)
+
+    get_args = {"Bucket": bucket, "Key": probe_key}
+    if expected_bucket_owner:
+        get_args["ExpectedBucketOwner"] = expected_bucket_owner
+    got = s3.get_object(**get_args)
     body = got["Body"].read()
     if body != probe_body:
         raise RuntimeError("S3 read-back probe failed (content mismatch)")
-    s3.delete_object(Bucket=bucket, Key=probe_key)
+    del_args = {"Bucket": bucket, "Key": probe_key}
+    if expected_bucket_owner:
+        del_args["ExpectedBucketOwner"] = expected_bucket_owner
+    try:
+        s3.delete_object(**del_args)
+    except ClientError as e:
+        # Deletion is optional; some least-privilege roles intentionally deny it.
+        code = str(e.response.get("Error", {}).get("Code", ""))
+        if code not in {"AccessDenied", "UnauthorizedOperation"}:
+            raise
 
 
 def main() -> int:
@@ -92,7 +156,14 @@ def main() -> int:
         s3_kwargs["region_name"] = args.region
     s3 = boto3.client("s3", **s3_kwargs)
     try:
-        probe_bucket_access(s3, args.bucket, prefix, project)
+        probe_bucket_access(
+            s3,
+            args.bucket,
+            prefix,
+            project,
+            expected_bucket_owner=args.expected_bucket_owner,
+            kms_key_id=args.kms_key_id,
+        )
     except Exception as e:
         print(f"[upload] s3 probe failed: {e}")
         return 2
@@ -110,7 +181,16 @@ def main() -> int:
             skipped.append(str(path))
             continue
         key = f"{prefix}/{project}/runs/{run_tag}/results/{name}"
-        uploaded.append(upload_file(s3, args.bucket, path, key))
+        uploaded.append(
+            upload_file(
+                s3,
+                args.bucket,
+                path,
+                key,
+                expected_bucket_owner=args.expected_bucket_owner,
+                kms_key_id=args.kms_key_id,
+            )
+        )
 
     if runs_dir.exists() and runs_dir.is_dir():
         run_dirs = sorted([p for p in runs_dir.iterdir() if p.is_dir()])
@@ -120,7 +200,16 @@ def main() -> int:
                 p = latest / file_name
                 if p.exists():
                     key = f"{prefix}/{project}/runs/{run_tag}/workload/{file_name}"
-                    uploaded.append(upload_file(s3, args.bucket, p, key))
+                    uploaded.append(
+                        upload_file(
+                            s3,
+                            args.bucket,
+                            p,
+                            key,
+                            expected_bucket_owner=args.expected_bucket_owner,
+                            kms_key_id=args.kms_key_id,
+                        )
+                    )
 
     manifest = {
         "uploaded_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
@@ -138,7 +227,14 @@ def main() -> int:
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
     manifest_key = f"{prefix}/{project}/runs/{run_tag}/manifest.json"
-    upload_file(s3, args.bucket, manifest_path, manifest_key)
+    upload_file(
+        s3,
+        args.bucket,
+        manifest_path,
+        manifest_key,
+        expected_bucket_owner=args.expected_bucket_owner,
+        kms_key_id=args.kms_key_id,
+    )
 
     print(f"[upload] uploaded_count={len(uploaded)}")
     print(f"[upload] manifest={manifest_path}")
