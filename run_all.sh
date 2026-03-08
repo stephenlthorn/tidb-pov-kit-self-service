@@ -306,6 +306,11 @@ if ! "${PYTHON}" -c "import yaml" &>/dev/null; then
   "${PYTHON}" -m pip install -q pyyaml
 fi
 ok "PyYAML available"
+if ! "${PYTHON}" -c "import boto3" &>/dev/null; then
+  warn "boto3 not found. Installing bootstrap dependency for S3 archival checks..."
+  "${PYTHON}" -m pip install -q boto3
+fi
+ok "boto3 available"
 s3_preflight_required
 
 if [[ "${REPORT_ONLY}" == "true" || "${REPORT_JSON_ONLY}" == "true" ]]; then
