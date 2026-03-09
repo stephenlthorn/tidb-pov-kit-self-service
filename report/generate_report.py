@@ -62,6 +62,16 @@ MODULE_DISPLAY = {
     "08_vector_search":       "M8 — Vector Search (AI Track)",
 }
 
+KPI_THRESHOLDS = {
+    "01_baseline_perf": {"p99_ms_warn": 80.0, "p99_ms_fail": 200.0, "tps_warn": 500.0},
+    "02_elastic_scale": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0, "tps_warn": 300.0},
+    "03_high_availability": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
+    "03b_write_contention": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
+    "04_htap_concurrent": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
+    "05_online_ddl": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
+    "07_data_import": {"tps_warn": 100.0},
+}
+
 
 # ── PDF helper class ──────────────────────────────────────────────────────────
 
@@ -652,8 +662,98 @@ def _add_run_coverage_page(pdf, metrics):
     )
 
 
+def _kpi_eval(module_key: str, stats: dict) -> tuple[str, str]:
+    rule = KPI_THRESHOLDS.get(module_key, {})
+    p99 = _maybe_float(stats.get("p99_ms"))
+    tps = _maybe_float(stats.get("tps"))
+
+    if p99 is not None:
+        fail_cut = _maybe_float(rule.get("p99_ms_fail"))
+        warn_cut = _maybe_float(rule.get("p99_ms_warn"))
+        if fail_cut is not None and p99 >= fail_cut:
+            return "FAIL", f"p99 {p99:.1f}ms >= {fail_cut:.0f}ms"
+        if warn_cut is not None and p99 >= warn_cut:
+            return "WARN", f"p99 {p99:.1f}ms >= {warn_cut:.0f}ms"
+
+    if tps is not None:
+        warn_tps = _maybe_float(rule.get("tps_warn"))
+        if warn_tps is not None and tps < warn_tps:
+            return "WARN", f"TPS {tps:.0f} < {warn_tps:.0f}"
+
+    if p99 is None and tps is None:
+        return "NO DATA", "No latency/throughput points captured"
+    return "PASS", "Within baseline target band"
+
+
+def _add_kpi_appendix_page(pdf, metrics):
+    pdf.add_page()
+    pdf.section_title("Appendix — KPI Threshold Evaluation")
+    pdf.body_text(
+        "Thresholds are PoV guidance bands for quick interpretation, not strict SLA commitments. "
+        "Use this page to identify phases that need rerun or tuning.",
+        size=8,
+    )
+
+    col_w = [48, 24, 18, 18, 18, 18, 20, 36]
+    hdrs = ["Module / Phase", "Status", "Count", "p50", "p95", "p99", "TPS", "Evaluation"]
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_fill_color(*RED)
+    pdf.set_text_color(*WHITE)
+    for w, h in zip(col_w, hdrs):
+        pdf.cell(w, 6, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 7)
+
+    for mod_key in MODULE_DISPLAY:
+        mod = (metrics.get("modules", {}) or {}).get(mod_key, {}) or {}
+        tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
+        if not tidb:
+            pdf.set_fill_color(*LIGHT_GREY)
+            row = [mod_key, "NO DATA", "-", "-", "-", "-", "-", "Module not run or no rows"]
+            for w, cell in zip(col_w, row):
+                pdf.cell(w, 5, str(cell)[:60], border=1, fill=True)
+            pdf.ln()
+            continue
+
+        for phase, s in tidb.items():
+            if not isinstance(s, dict):
+                continue
+            verdict, note = _kpi_eval(mod_key, s)
+            if verdict == "PASS":
+                color = GREEN
+            elif verdict == "WARN":
+                color = ORANGE
+            elif verdict == "FAIL":
+                color = RED
+            else:
+                color = DARK_GREY
+
+            pdf.set_fill_color(*LIGHT_GREY)
+            pdf.cell(col_w[0], 5, f"{mod_key[:14]}/{str(phase)[:20]}", border=1, fill=True)
+            pdf.set_text_color(*color)
+            pdf.cell(col_w[1], 5, verdict, border=1, fill=True)
+            pdf.set_text_color(0, 0, 0)
+            pdf.cell(col_w[2], 5, str(int(s.get("count", 0) or 0)), border=1, fill=True)
+            pdf.cell(col_w[3], 5, f"{float(s.get('p50_ms', 0) or 0):.1f}", border=1, fill=True)
+            pdf.cell(col_w[4], 5, f"{float(s.get('p95_ms', 0) or 0):.1f}", border=1, fill=True)
+            pdf.cell(col_w[5], 5, f"{float(s.get('p99_ms', 0) or 0):.1f}", border=1, fill=True)
+            pdf.cell(col_w[6], 5, f"{float(s.get('tps', 0) or 0):.0f}", border=1, fill=True)
+            pdf.cell(col_w[7], 5, note[:80], border=1, fill=True)
+            pdf.ln()
+
+
 def _rgb(color_tuple):
     return tuple(c / 255 for c in color_tuple)
+
+
+def _maybe_float(value):
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ── Main report assembler ─────────────────────────────────────────────────────
@@ -877,6 +977,9 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                         _chart_vector(ann),
                         "ANN search latency (cosine distance, HNSW index) "
                         "at increasing concurrency levels.")
+
+    # ── Appendix: raw latency table ───────────────────────────────────────────
+    _add_kpi_appendix_page(pdf, metrics)
 
     # ── Appendix: raw latency table ───────────────────────────────────────────
     pdf.add_page()
