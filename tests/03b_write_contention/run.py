@@ -180,7 +180,7 @@ def _get_counts(cfg):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "medium"), {})
+    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "small"), {})
 
 
 if __name__ == "__main__":

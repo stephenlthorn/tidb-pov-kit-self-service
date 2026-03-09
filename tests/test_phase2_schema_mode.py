@@ -48,11 +48,12 @@ class Phase2SchemaModeTests(unittest.TestCase):
             },
             "compat_checks": {"pct": 95.0},
             "comparison_enabled": False,
-            "run_context": {"run_mode": "performance", "schema_mode": "tidb_optimized"},
+            "run_context": {"run_mode": "performance", "schema_mode": "tidb_optimized", "industry": "banking"},
         }
         summary = cm._build_summary(payload)
         self.assertEqual(summary["run_mode"], "performance")
         self.assertEqual(summary["schema_mode"], "tidb_optimized")
+        self.assertEqual(summary["industry"], "banking")
 
     def test_summary_uses_workload_generator_metrics_in_performance_mode(self):
         payload = {

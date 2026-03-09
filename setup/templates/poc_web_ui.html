@@ -1431,7 +1431,7 @@
           <form method="post" action="/quickstart-deploy" id="quickstart_form">
             <div class="wizard-step-pane active" data-wizard-step="1">
               <h3 class="wizard-step-title">Scope, Preset, and Test Selection</h3>
-              <div class="grid cols-2">
+              <div class="grid cols-3">
                 <div class="field">
                   <label>Company Name (for report)</label>
                   <input id="wiz_company_name" type="text" name="wiz_company_name" value="{{ cfg.report.company_name }}" placeholder="Acme Corp" />
@@ -1444,9 +1444,33 @@
                     {% endfor %}
                   </select>
                 </div>
+                <div class="field">
+                  <label>Industry</label>
+                  <select id="wiz_industry" name="wiz_industry">
+                    {% for key, meta in industry_profiles.items() %}
+                      <option value="{{ key }}" {% if cfg.industry.selected == key %}selected{% endif %}>{{ meta.label }}</option>
+                    {% endfor %}
+                  </select>
+                </div>
               </div>
 
               <input type="hidden" name="wiz_tests_menu_present" value="1" />
+              <input type="hidden" name="wiz_tests_touched" id="wiz_tests_touched" value="0" />
+
+              <div class="pair-grid">
+                <div class="pair review-pair tone-blue">
+                  <div class="pk">Industry Description</div>
+                  <div class="pv" id="wiz_industry_desc">n/a</div>
+                </div>
+                <div class="pair review-pair tone-indigo">
+                  <div class="pk">Primary Focus</div>
+                  <div class="pv" id="wiz_industry_focus">n/a</div>
+                </div>
+                <div class="pair review-pair tone-violet">
+                  <div class="pk">Recommended Tests</div>
+                  <div class="pv" id="wiz_industry_modules">n/a</div>
+                </div>
+              </div>
 
               <div class="field">
                 <label>Workload Preset</label>
@@ -1650,6 +1674,7 @@
               <div class="pair-grid">
                 <div class="pair review-pair tone-blue"><div class="pk">Company</div><div class="pv" id="wiz_summary_company">n/a</div></div>
                 <div class="pair review-pair tone-indigo"><div class="pk">Tier</div><div class="pv" id="wiz_summary_tier">n/a</div></div>
+                <div class="pair review-pair tone-violet"><div class="pk">Industry</div><div class="pv" id="wiz_summary_industry">n/a</div></div>
                 <div class="pair review-pair tone-violet"><div class="pk">Preset</div><div class="pv" id="wiz_summary_preset">n/a</div></div>
                 <div class="pair review-pair tone-cyan"><div class="pk">Selected Tests</div><div class="pv" id="wiz_summary_tests_count">0</div></div>
                 <div class="pair review-pair tone-blue"><div class="pk">TiDB Target</div><div class="pv" id="wiz_summary_tidb">n/a</div></div>
@@ -3040,6 +3065,8 @@
   const wizardNextBtn = document.querySelector('[data-wizard-next]');
   const quickstartPresetModules = {{ quickstart_preset_modules | tojson }};
   const quickstartPresetMeta = {{ quickstart_workload_presets | tojson }};
+  const quickstartIndustryMeta = {{ industry_profiles | tojson }};
+  const quickstartScenarioLabels = {{ scenarios | tojson }};
   const quickstartTierLabels = {{ tier_labels | tojson }};
   const quickstartModuleLabels = {{ module_labels | tojson }};
   const wizardPresetRadios = Array.from(document.querySelectorAll('input[name="wiz_workload_preset"]'));
@@ -3048,6 +3075,8 @@
   const wizardTestsActionBtns = Array.from(document.querySelectorAll('[data-tests-action]'));
   const wizCompanyEl = document.getElementById('wiz_company_name');
   const wizTierEl = document.getElementById('wiz_tier');
+  const wizIndustryEl = document.getElementById('wiz_industry');
+  const wizTestsTouchedEl = document.getElementById('wiz_tests_touched');
   const wizTidbHostEl = document.getElementById('wiz_tidb_host');
   const wizTidbPortEl = document.getElementById('wiz_tidb_port');
   const wizTidbUserEl = document.getElementById('wiz_tidb_user');
@@ -3062,13 +3091,18 @@
   const wizComparisonSchemaEl = document.querySelector('input[name="wiz_comparison_schema"]');
   const wizSummaryCompanyEl = document.getElementById('wiz_summary_company');
   const wizSummaryTierEl = document.getElementById('wiz_summary_tier');
+  const wizSummaryIndustryEl = document.getElementById('wiz_summary_industry');
   const wizSummaryPresetEl = document.getElementById('wiz_summary_preset');
   const wizSummaryTestsCountEl = document.getElementById('wiz_summary_tests_count');
   const wizSummaryTestsListEl = document.getElementById('wiz_summary_tests_list');
   const wizSummaryTidbEl = document.getElementById('wiz_summary_tidb');
   const wizSummaryComparisonEl = document.getElementById('wiz_summary_comparison');
+  const wizIndustryDescEl = document.getElementById('wiz_industry_desc');
+  const wizIndustryFocusEl = document.getElementById('wiz_industry_focus');
+  const wizIndustryModulesEl = document.getElementById('wiz_industry_modules');
   let wizardStep = 1;
   let updateWizardRunSummary = () => {};
+  let isPresetApplying = false;
 
   function setWizardStep(nextStep) {
     const total = wizardStepPanes.length;
@@ -3130,10 +3164,27 @@
       wizardSelectedTestsEl.value = `${selectedCount} / ${wizardModuleChecks.length}`;
     }
 
+    function updateWizardIndustryPanel() {
+      const industryKey = (wizIndustryEl && wizIndustryEl.value) || 'general_auto';
+      const meta = quickstartIndustryMeta[industryKey] || quickstartIndustryMeta.general_auto || {};
+      const desc = meta.description || 'n/a';
+      const focus = meta.primary_focus || 'n/a';
+      const recKeys = Array.isArray(meta.recommended_modules) ? meta.recommended_modules : [];
+      const recLabels = recKeys.map((key) => quickstartModuleLabels[key] || key);
+      if (wizIndustryDescEl) wizIndustryDescEl.textContent = desc;
+      if (wizIndustryFocusEl) wizIndustryFocusEl.textContent = focus;
+      if (wizIndustryModulesEl) {
+        wizIndustryModulesEl.textContent = recLabels.length ? recLabels.join(', ') : 'n/a';
+      }
+    }
+
     updateWizardRunSummary = function () {
       const companyName = (wizCompanyEl && wizCompanyEl.value.trim()) || 'n/a';
       const tierKey = (wizTierEl && wizTierEl.value) || '';
       const tierLabel = quickstartTierLabels[tierKey] || tierKey || 'n/a';
+      const industryKey = (wizIndustryEl && wizIndustryEl.value) || 'general_auto';
+      const industryMeta = quickstartIndustryMeta[industryKey] || quickstartIndustryMeta.general_auto || {};
+      const industryLabel = industryMeta.label || industryKey || 'n/a';
       const presetKey = getWizardPresetSelection();
       const presetLabel = (quickstartPresetMeta[presetKey] && quickstartPresetMeta[presetKey].label) || presetKey || 'n/a';
       const selectedModuleKeys = wizardModuleChecks
@@ -3161,6 +3212,7 @@
 
       if (wizSummaryCompanyEl) wizSummaryCompanyEl.textContent = companyName;
       if (wizSummaryTierEl) wizSummaryTierEl.textContent = tierLabel;
+      if (wizSummaryIndustryEl) wizSummaryIndustryEl.textContent = industryLabel;
       if (wizSummaryPresetEl) wizSummaryPresetEl.textContent = presetLabel;
       if (wizSummaryTestsCountEl) wizSummaryTestsCountEl.textContent = `${selectedModuleKeys.length} / ${wizardModuleChecks.length}`;
       if (wizSummaryTestsListEl) wizSummaryTestsListEl.textContent = selectedModuleLabels.length ? selectedModuleLabels.join(', ') : 'None selected';
@@ -3170,9 +3222,12 @@
 
     function applyPresetModules(presetKey) {
       const selectedKeys = new Set(quickstartPresetModules[presetKey] || []);
+      isPresetApplying = true;
       wizardModuleChecks.forEach((check) => {
         check.checked = selectedKeys.has(check.dataset.moduleKey || '');
       });
+      isPresetApplying = false;
+      if (wizTestsTouchedEl) wizTestsTouchedEl.value = '0';
       syncWizardTestItems();
       updateWizardSelectedCount();
       updateWizardRunSummary();
@@ -3185,8 +3240,19 @@
       });
     });
 
+    if (wizIndustryEl) {
+      wizIndustryEl.addEventListener('change', () => {
+        if (wizTestsTouchedEl) wizTestsTouchedEl.value = '0';
+        updateWizardIndustryPanel();
+        updateWizardRunSummary();
+      });
+    }
+
     wizardModuleChecks.forEach((check) => {
       check.addEventListener('change', () => {
+        if (!isPresetApplying && wizTestsTouchedEl) {
+          wizTestsTouchedEl.value = '1';
+        }
         syncWizardTestItems();
         updateWizardSelectedCount();
         updateWizardRunSummary();
@@ -3204,11 +3270,13 @@
           wizardModuleChecks.forEach((check) => {
             check.checked = true;
           });
+          if (wizTestsTouchedEl) wizTestsTouchedEl.value = '1';
         }
         if (action === 'none') {
           wizardModuleChecks.forEach((check) => {
             check.checked = false;
           });
+          if (wizTestsTouchedEl) wizTestsTouchedEl.value = '1';
         }
         syncWizardTestItems();
         updateWizardSelectedCount();
@@ -3216,7 +3284,7 @@
       });
     });
 
-    [wizCompanyEl, wizTierEl, wizTidbHostEl, wizTidbPortEl, wizTidbUserEl, wizTidbDatabaseEl, wizTidbSslEl, wizComparisonEnabledEl, wizComparisonTargetEl, wizComparisonHostEl, wizComparisonPortValueEl, wizComparisonDatabaseEl]
+    [wizCompanyEl, wizTierEl, wizIndustryEl, wizTidbHostEl, wizTidbPortEl, wizTidbUserEl, wizTidbDatabaseEl, wizTidbSslEl, wizComparisonEnabledEl, wizComparisonTargetEl, wizComparisonHostEl, wizComparisonPortValueEl, wizComparisonDatabaseEl]
       .filter((el) => !!el)
       .forEach((el) => {
         el.addEventListener('input', updateWizardRunSummary);
@@ -3225,6 +3293,7 @@
 
     syncWizardPresetCards();
     syncWizardTestItems();
+    updateWizardIndustryPanel();
     updateWizardSelectedCount();
     if (wizardModuleChecks.length > 0 && !wizardModuleChecks.some((check) => check.checked)) {
       applyPresetModules(getWizardPresetSelection());

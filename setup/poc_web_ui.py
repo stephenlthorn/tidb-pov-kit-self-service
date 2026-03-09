@@ -85,6 +85,13 @@ from lib.comparison_targets import (  # type: ignore  # noqa: E402
     target_label,
 )
 from lib.tidb_cloud import validate_tidb_cloud_username  # type: ignore  # noqa: E402
+from lib.industry_profiles import (  # type: ignore  # noqa: E402
+    INDUSTRY_DEFAULT,
+    INDUSTRY_PROFILES,
+    get_industry_profile,
+    industry_labels,
+    normalize_industry_key,
+)
 from load.tidb_blaster import (  # type: ignore  # noqa: E402
     latest_run_dir,
     list_recent_runs,
@@ -151,6 +158,9 @@ DEFAULT_CFG = {
     },
     "tier": {
         "selected": "serverless",
+    },
+    "industry": {
+        "selected": INDUSTRY_DEFAULT,
     },
     "test": {
         "run_mode": "validation",
@@ -221,7 +231,7 @@ DEFAULT_CFG = {
         "runner_role_arn": os.environ.get("AWS_RUNNER_ROLE_ARN", ""),
         "ami_id": "",
         "instance_count": 1,
-        "instance_size": "medium",
+        "instance_size": "small",
         "allowed_instance_types": ["c7i.2xlarge", "c7i.4xlarge", "c7i.8xlarge"],
         "max_instances_per_run": 8,
         "summary_upload_only": True,
@@ -521,6 +531,8 @@ RUNNER_SIZE_PRESETS = {
     },
 }
 
+INDUSTRY_LABELS = industry_labels()
+
 QUICKSTART_WORKLOAD_PRESETS = {
     "fast_validation": {
         "label": "Fast Validation",
@@ -623,12 +635,20 @@ def normalize_cfg(cfg: Dict) -> Dict:
     if tier not in TIERS:
         cfg["tier"]["selected"] = "serverless"
 
+    cfg.setdefault("industry", {})
+    cfg["industry"]["selected"] = normalize_industry_key((cfg.get("industry") or {}).get("selected"))
+
     for key in MODULE_ORDER:
         cfg["modules"][key] = bool(cfg.get("modules", {}).get(key, DEFAULT_CFG["modules"][key]))
 
     cl = cfg.get("test", {}).get("concurrency_levels", [8, 16, 32])
     if not isinstance(cl, list):
         cfg["test"]["concurrency_levels"] = [8, 16, 32]
+
+    scale = str(cfg.get("test", {}).get("data_scale", "small")).strip().lower()
+    if scale not in {"small", "medium", "large"}:
+        scale = "small"
+    cfg["test"]["data_scale"] = scale
 
     run_mode = str(cfg.get("test", {}).get("run_mode", "validation")).strip().lower()
     if run_mode not in {"validation", "performance"}:
@@ -711,9 +731,9 @@ def normalize_cfg(cfg: Dict) -> Dict:
     runner["runner_role_arn"] = str(runner.get("runner_role_arn", "")).strip()
     runner["ami_id"] = str(runner.get("ami_id", "")).strip()
     runner["instance_count"] = _to_int_safe(runner.get("instance_count"), 1, 1)
-    runner["instance_size"] = str(runner.get("instance_size", "medium")).strip().lower()
+    runner["instance_size"] = str(runner.get("instance_size", "small")).strip().lower()
     if runner["instance_size"] not in RUNNER_SIZE_PRESETS:
-        runner["instance_size"] = "medium"
+        runner["instance_size"] = "small"
 
     allowed = runner.get("allowed_instance_types", [])
     if isinstance(allowed, str):
@@ -904,8 +924,8 @@ def apply_aws_runner_from_form(cfg: Dict, form, *, allow_locked_edit: bool = Fal
     )
     aws_runner["ami_id"] = form.get("aws_ami_id", str(existing.get("ami_id", ""))).strip()
     aws_runner["instance_size"] = (
-        form.get("aws_instance_size", str(existing.get("instance_size", "medium"))).strip().lower()
-        or str(existing.get("instance_size", "medium"))
+        form.get("aws_instance_size", str(existing.get("instance_size", "small"))).strip().lower()
+        or str(existing.get("instance_size", "small"))
     )
     aws_runner["instance_count"] = max(
         1,
@@ -1026,7 +1046,7 @@ def apply_aws_runner_from_form(cfg: Dict, form, *, allow_locked_edit: bool = Fal
     if str(aws_runner.get("connectivity_mode", "")).strip().lower() not in {"private_endpoint", "public_endpoint"}:
         aws_runner["connectivity_mode"] = "private_endpoint"
     if str(aws_runner.get("instance_size", "")).strip().lower() not in RUNNER_SIZE_PRESETS:
-        aws_runner["instance_size"] = "medium"
+        aws_runner["instance_size"] = "small"
     if not isinstance(aws_runner.get("allowed_instance_types"), list):
         aws_runner["allowed_instance_types"] = list(DEFAULT_CFG["aws_runner"]["allowed_instance_types"])
     aws_runner["max_instances_per_run"] = max(1, int(aws_runner.get("max_instances_per_run", 1)))
@@ -1146,7 +1166,11 @@ def query_activity(limit: int = 25) -> List[Dict]:
 
 def build_workload_insights(cfg: Dict) -> Dict:
     try:
-        from load.workload_definitions import apply_workload_profile, classify_query_kind, schema_a_workload
+        from load.workload_definitions import (
+            apply_workload_profile,
+            classify_query_kind,
+            transactional_workload_for_cfg,
+        )
     except Exception:
         return {"ready": False, "queries": [], "activity": [], "customer_queries": []}
 
@@ -1156,7 +1180,7 @@ def build_workload_insights(cfg: Dict) -> Dict:
     write_mult = parse_float(test_cfg.get("write_weight_multiplier", 1.0), 1.0)
 
     counts = load_counts_for_preview(cfg)
-    base_workload = schema_a_workload(counts)
+    base_workload = transactional_workload_for_cfg(cfg, counts)
     tuned = apply_workload_profile(
         base_workload,
         mix=mix,
@@ -1405,6 +1429,7 @@ def build_report_dashboard() -> Dict:
     warm_p99 = parse_float(summary.get("warm_p99_ms"), 0.0)
     run_mode = str(summary.get("run_mode") or "validation")
     schema_mode = str(summary.get("schema_mode") or "tidb_optimized")
+    industry = str(summary.get("industry") or "general_auto")
     mysql_compat_pct = parse_float(summary.get("mysql_compat_pct"), parse_float(compat.get("pct"), 0.0))
     modules_passed = parse_int(summary.get("modules_passed"), status_counts["passed"])
     modules_run = parse_int(summary.get("modules_run"), status_total)
@@ -1414,6 +1439,7 @@ def build_report_dashboard() -> Dict:
     out["summary_cards"] = [
         {"label": "Run Mode", "value": run_mode, "sub": "Execution profile"},
         {"label": "Schema Mode", "value": schema_mode, "sub": "Data model profile"},
+        {"label": "Industry", "value": industry, "sub": "Workload family"},
         {"label": "Modules Passed", "value": f"{modules_passed}/{modules_run}", "sub": "Execution coverage"},
         {"label": "Warm TPS", "value": f"{warm_tps:,.1f}" if warm_tps > 0 else "n/a", "sub": "Steady-state throughput"},
         {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
@@ -2040,9 +2066,9 @@ def aws_runner_required_fields(runner: Dict) -> List[str]:
 
 
 def aws_resolve_instance_type(runner: Dict) -> str:
-    preset_key = str(runner.get("instance_size") or "medium").strip().lower()
+    preset_key = str(runner.get("instance_size") or "small").strip().lower()
     if preset_key not in RUNNER_SIZE_PRESETS:
-        preset_key = "medium"
+        preset_key = "small"
     preferred = str(RUNNER_SIZE_PRESETS[preset_key]["default_instance_type"])
     allowed = [str(v).strip() for v in (runner.get("allowed_instance_types") or []) if str(v).strip()]
     if allowed:
@@ -3054,6 +3080,7 @@ def create_app(config_path: Path) -> Flask:
 
         selected_tier = str(cfg.get("tier", {}).get("selected", "serverless"))
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
+        selected_industry = normalize_industry_key((cfg.get("industry") or {}).get("selected"))
         tiers_for_ui = visible_tiers_for_ui(selected_tier)
         users = list_users(250) if is_admin else []
         invites = list_invites(250) if is_admin else []
@@ -3082,6 +3109,7 @@ def create_app(config_path: Path) -> Flask:
             config_path=str(config_path),
             selected_tier_label=ui_tier_label(selected_tier),
             selected_scenario_label=SCENARIOS.get(selected_scenario, selected_scenario),
+            selected_industry_label=INDUSTRY_LABELS.get(selected_industry, INDUSTRY_LABELS[INDUSTRY_DEFAULT]),
             tier_chip_class=TIER_CHIP_CLASSES.get(selected_tier, "chip-tier-starter"),
             scenario_chip_class=SCENARIO_CHIP_CLASSES.get(selected_scenario, "chip-scenario-oltp"),
             report_chip_class="chip-report-ready" if report_ready else "chip-report-missing",
@@ -3091,6 +3119,8 @@ def create_app(config_path: Path) -> Flask:
             quickstart_workload_presets=QUICKSTART_WORKLOAD_PRESETS,
             quickstart_preset_suites=QUICKSTART_PRESET_SUITES,
             quickstart_preset_modules=QUICKSTART_PRESET_MODULES,
+            industry_profiles=INDUSTRY_PROFILES,
+            industry_labels=INDUSTRY_LABELS,
             quickstart_test_categories=QUICKSTART_TEST_CATEGORIES,
             module_insights=MODULE_INSIGHTS,
             module_detail_notes=MODULE_DETAIL_NOTES,
@@ -3235,6 +3265,8 @@ def create_app(config_path: Path) -> Flask:
         selected_tier = request.form.get("wiz_tier", "serverless").strip().lower()
         if selected_tier not in TIERS:
             selected_tier = "serverless"
+        selected_industry = normalize_industry_key(request.form.get("wiz_industry", INDUSTRY_DEFAULT))
+        industry_profile = get_industry_profile(selected_industry)
 
         apply_profile = True
         workload_preset = request.form.get("wiz_workload_preset", "balanced_poc").strip().lower()
@@ -3245,14 +3277,34 @@ def create_app(config_path: Path) -> Flask:
         cfg.setdefault("test", {})
         cfg.setdefault("tier", {})
         cfg.setdefault("pre_poc", {})
+        cfg.setdefault("industry", {})
         preset_suite = QUICKSTART_PRESET_SUITES.get(workload_preset, "oltp_migration")
 
         selected_modules = {key: (request.form.get(f"wiz_mod_{key}") == "on") for key in MODULE_ORDER}
         tests_menu_present = request.form.get("wiz_tests_menu_present") == "1"
+        tests_touched = request.form.get("wiz_tests_touched", "0") == "1"
 
         if tests_menu_present:
-            cfg["modules"] = selected_modules
-            module_source_note = "Quickstart tests selected manually from wizard menu."
+            if tests_touched:
+                cfg["modules"] = selected_modules
+                module_source_note = "Quickstart tests selected manually from wizard menu."
+            else:
+                base_modules = modules_from_suite(
+                    preset_suite,
+                    tier=selected_tier,
+                    scenario="oltp_migration",
+                    run_ha_sim=False,
+                    enable_optional_advanced=False,
+                    existing=cfg.get("modules", {}),
+                )
+                overlay_keys = set(industry_profile.get("recommended_modules") or [])
+                cfg["modules"] = {
+                    key: bool(base_modules.get(key)) or (key in overlay_keys)
+                    for key in MODULE_ORDER
+                }
+                module_source_note = (
+                    "Quickstart tests auto-derived from preset + industry recommendation."
+                )
         else:
             cfg["modules"] = modules_from_suite(
                 preset_suite,
@@ -3270,9 +3322,17 @@ def create_app(config_path: Path) -> Flask:
         preset_overrides = QUICKSTART_WORKLOAD_PRESETS[workload_preset]["overrides"]
         if preset_overrides:
             cfg["test"].update(preset_overrides)
+        if not tests_touched:
+            cfg["test"]["workload_mix"] = str(
+                industry_profile.get("default_workload_mix", cfg["test"].get("workload_mix", "mixed"))
+            )
+            cfg["test"]["schema_mode"] = str(
+                industry_profile.get("schema_recommendation", cfg["test"].get("schema_mode", "tidb_optimized"))
+            )
 
         enabled_module_count = sum(1 for key in MODULE_ORDER if cfg["modules"].get(key))
         scenario = infer_scenario_from_modules(cfg["modules"])
+        cfg["industry"]["selected"] = selected_industry
 
         cfg["tier"].update(
             {
@@ -3281,6 +3341,7 @@ def create_app(config_path: Path) -> Flask:
                 "decision_tree_version": "quickstart-wizard",
                 "decision_notes": [
                     f"Quickstart wizard profile: {workload_preset}",
+                    f"Quickstart industry: {industry_profile.get('label', selected_industry)}",
                     f"Quickstart preset suite: {preset_suite}",
                     f"Quickstart selected tests: {enabled_module_count}/{len(MODULE_ORDER)}",
                     module_source_note,

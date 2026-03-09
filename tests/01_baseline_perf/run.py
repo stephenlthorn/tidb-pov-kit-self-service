@@ -11,7 +11,11 @@ import yaml
 from lib.comparison_targets import comparison_can_run, comparison_reason, normalize_comparison_cfg, target_label
 from lib.result_store import init_db, start_module, end_module, get_latency_stats
 from load.load_runner import LoadRunner
-from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
+from load.workload_definitions import (
+    apply_workload_profile,
+    build_weighted_pool,
+    transactional_workload_for_cfg,
+)
 
 MODULE = "01_baseline_perf"
 
@@ -46,7 +50,7 @@ def run(cfg: dict):
     )
 
     workload = apply_workload_profile(
-        schema_a_workload(counts),
+        transactional_workload_for_cfg(cfg, counts),
         mix=cfg.get("test", {}).get("workload_mix", "mixed"),
         read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
         write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
@@ -158,9 +162,9 @@ def _get_counts(cfg):
     if os.path.exists(manifest):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
-    scale = (cfg.get("test") or {}).get("data_scale", "medium")
+    scale = (cfg.get("test") or {}).get("data_scale", "small")
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get(scale, SCALE_CONFIG["medium"])
+    return SCALE_CONFIG.get(scale, SCALE_CONFIG["small"])
 
 
 if __name__ == "__main__":

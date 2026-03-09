@@ -305,6 +305,7 @@ def _build_summary(payload: dict) -> dict:
         "modules_passed":       passed_mods,
         "run_mode":             run_context.get("run_mode"),
         "schema_mode":          run_context.get("schema_mode"),
+        "industry":             run_context.get("industry"),
         "best_observed_p99_ms": best_p99,
         "best_p99_ms":          best_p99,
         "best_tps":             best_tps,
@@ -355,9 +356,12 @@ def _load_run_context() -> dict:
             schema_mode = str(test_cfg.get("schema_mode", "tidb_optimized")).strip().lower() or "tidb_optimized"
             if schema_mode not in {"tidb_optimized", "mysql_compatible"}:
                 schema_mode = "tidb_optimized"
+            industry_cfg = cfg.get("industry") or {}
+            industry = str(industry_cfg.get("selected", "general_auto")).strip().lower() or "general_auto"
             return {
                 "run_mode": run_mode,
                 "schema_mode": schema_mode,
+                "industry": industry,
                 "source_config": os.path.basename(path),
             }
         except Exception:
@@ -365,6 +369,7 @@ def _load_run_context() -> dict:
     return {
         "run_mode": "validation",
         "schema_mode": "tidb_optimized",
+        "industry": "general_auto",
         "source_config": "",
     }
 

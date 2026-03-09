@@ -14,10 +14,16 @@ import sys, os, time, threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.industry_profiles import resolve_industry_from_cfg
 from lib.result_store import init_db, start_module, end_module, get_latency_stats, log_result
 from lib.db_utils import get_connection, execute_timed
 from load.load_runner import LoadRunner
-from load.workload_definitions import apply_workload_profile, schema_a_workload, analytical_workload, build_weighted_pool
+from load.workload_definitions import (
+    analytical_workload_for_cfg,
+    apply_workload_profile,
+    build_weighted_pool,
+    transactional_workload_for_cfg,
+)
 
 MODULE      = "04_htap_concurrent"
 OLTP_CONC   = 32
@@ -38,20 +44,21 @@ def run(cfg: dict):
 
     conn = get_connection(cfg["tidb"])
     cur  = conn.cursor()
+    industry = resolve_industry_from_cfg(cfg)
 
     # Ensure TiFlash replica exists (best-effort — may need a few minutes to replicate)
-    _ensure_tiflash_replicas(cur)
+    _ensure_tiflash_replicas(cur, industry.get("htap_tables") or [])
     conn.close()
 
     oltp_pool = build_weighted_pool(
         apply_workload_profile(
-            schema_a_workload(counts),
+            transactional_workload_for_cfg(cfg, counts),
             mix=cfg.get("test", {}).get("workload_mix", "mixed"),
             read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
             write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
         )
     )
-    anal_pool = build_weighted_pool(analytical_workload(counts))
+    anal_pool = build_weighted_pool(analytical_workload_for_cfg(cfg, counts))
     runner    = LoadRunner(tidb_cfg=cfg["tidb"], counts=counts, module=MODULE)
 
     # ── Phase 1: OLTP-only baseline ──────────────────────────────────────────
@@ -110,10 +117,14 @@ def run(cfg: dict):
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _ensure_tiflash_replicas(cur):
+def _ensure_tiflash_replicas(cur, industry_tables):
     """Best-effort: set TiFlash replica for the main tables."""
-    tables = ["transactions", "transaction_items", "events", "metrics"]
+    tables = list(industry_tables) + ["events", "metrics"]
+    seen = set()
     for t in tables:
+        if t in seen:
+            continue
+        seen.add(t)
         try:
             cur.execute(f"ALTER TABLE `{t}` SET TIFLASH REPLICA 1")
             print(f"    TiFlash replica requested for {t}")
@@ -186,7 +197,7 @@ def _get_counts(cfg):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "medium"), {})
+    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "small"), {})
 
 
 if __name__ == "__main__":

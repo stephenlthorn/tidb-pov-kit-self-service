@@ -14,10 +14,15 @@ import sys, os, time, threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.industry_profiles import resolve_industry_from_cfg
 from lib.result_store import init_db, start_module, end_module, get_latency_stats
 from lib.db_utils import get_connection
 from load.load_runner import LoadRunner
-from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
+from load.workload_definitions import (
+    apply_workload_profile,
+    build_weighted_pool,
+    transactional_workload_for_cfg,
+)
 
 MODULE    = "05_online_ddl"
 OLTP_CONC = 24
@@ -25,43 +30,49 @@ WARMUP_SEC = 30
 POST_DDL_SEC = 30   # observation window after each DDL
 
 
-DDL_STEPS = [
-    {
-        "name":  "ADD COLUMN (nullable)",
-        "sql":   "ALTER TABLE transactions ADD COLUMN extra_meta VARCHAR(255) DEFAULT NULL",
-        "revert":"ALTER TABLE transactions DROP COLUMN extra_meta",
-    },
-    {
-        "name":  "ADD INDEX",
-        "sql":   "ALTER TABLE transactions ADD INDEX idx_ddl_test (reference_id, status)",
-        "revert":"ALTER TABLE transactions DROP INDEX idx_ddl_test",
-    },
-    {
-        "name":  "MODIFY COLUMN (widen)",
-        "sql":   "ALTER TABLE transactions MODIFY COLUMN reference_id VARCHAR(128)",
-        "revert":"ALTER TABLE transactions MODIFY COLUMN reference_id VARCHAR(64)",
-    },
-    {
-        "name":  "ADD COLUMN + DEFAULT",
-        "sql":   "ALTER TABLE transactions ADD COLUMN pov_flag TINYINT NOT NULL DEFAULT 0",
-        "revert":"ALTER TABLE transactions DROP COLUMN pov_flag",
-    },
-]
+def build_ddl_steps(table: str, ref_col: str) -> list[dict]:
+    return [
+        {
+            "name": "ADD COLUMN (nullable)",
+            "sql": f"ALTER TABLE `{table}` ADD COLUMN extra_meta VARCHAR(255) DEFAULT NULL",
+            "revert": f"ALTER TABLE `{table}` DROP COLUMN extra_meta",
+        },
+        {
+            "name": "ADD INDEX",
+            "sql": f"ALTER TABLE `{table}` ADD INDEX idx_ddl_test (`{ref_col}`, status)",
+            "revert": f"ALTER TABLE `{table}` DROP INDEX idx_ddl_test",
+        },
+        {
+            "name": "MODIFY COLUMN (widen)",
+            "sql": f"ALTER TABLE `{table}` MODIFY COLUMN `{ref_col}` VARCHAR(128)",
+            "revert": f"ALTER TABLE `{table}` MODIFY COLUMN `{ref_col}` VARCHAR(64)",
+        },
+        {
+            "name": "ADD COLUMN + DEFAULT",
+            "sql": f"ALTER TABLE `{table}` ADD COLUMN pov_flag TINYINT NOT NULL DEFAULT 0",
+            "revert": f"ALTER TABLE `{table}` DROP COLUMN pov_flag",
+        },
+    ]
 
 
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
     counts = _get_counts(cfg)
+    industry = resolve_industry_from_cfg(cfg)
+    ddl_table = str(industry.get("ddl_target_table") or "transactions")
+    ddl_ref_col = str(industry.get("ddl_reference_column") or "reference_id")
+    ddl_steps = build_ddl_steps(ddl_table, ddl_ref_col)
 
     print(f"\n{'='*60}")
     print(f"  Module 5: Online DDL — Zero-Downtime Schema Changes")
-    print(f"  OLTP concurrency: {OLTP_CONC} | DDL steps: {len(DDL_STEPS)}")
+    print(f"  OLTP concurrency: {OLTP_CONC} | DDL steps: {len(ddl_steps)}")
+    print(f"  Industry table: {ddl_table} ({ddl_ref_col})")
     print(f"{'='*60}")
 
     oltp_pool = build_weighted_pool(
         apply_workload_profile(
-            schema_a_workload(counts),
+            transactional_workload_for_cfg(cfg, counts),
             mix=cfg.get("test", {}).get("workload_mix", "mixed"),
             read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
             write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
@@ -78,7 +89,7 @@ def run(cfg: dict):
     print(f"    Baseline p99: {baseline.get('p99_ms', 0):.1f}ms")
 
     # ── Execute each DDL step while load is running ───────────────────────────
-    for step in DDL_STEPS:
+    for step in ddl_steps:
         print(f"\n  DDL: {step['name']}...")
         stop_event = threading.Event()
         phase_name = step["name"].lower().replace(" ", "_").replace("(", "").replace(")", "")
@@ -109,7 +120,7 @@ def run(cfg: dict):
     end_module(
         MODULE,
         "passed" if all_passed else "warning",
-        f"{len(results)} DDL ops executed; "
+        f"{len(results)} DDL ops on {ddl_table}; "
         f"{sum(1 for r in results if r['error'] is None)} succeeded online"
     )
 
@@ -185,7 +196,7 @@ def _get_counts(cfg):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "medium"), {})
+    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "small"), {})
 
 
 if __name__ == "__main__":

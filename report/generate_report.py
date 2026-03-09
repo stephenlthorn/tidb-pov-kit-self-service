@@ -563,6 +563,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     cards = [
         ("Run Mode",            str(summary.get("run_mode") or "validation"), "",       (0, 128, 128)),
         ("Schema Mode",         str(summary.get("schema_mode") or "tidb_optimized"), "", (100, 100, 180)),
+        ("Industry",            str(summary.get("industry") or "general_auto"), "", (120, 120, 160)),
         (latency_label,         _fmt(display_latency, 1), "ms",       BLUE),
         (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
@@ -595,7 +596,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         "high availability, write contention, HTAP, online DDL, MySQL compatibility, "
         "data import speed, and total cost of ownership. "
         f"Run mode: {summary.get('run_mode', 'validation')}. "
-        f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}."
+        f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}. "
+        f"Industry: {summary.get('industry', 'general_auto')}."
     )
     if summary.get("workload_status"):
         intro += (

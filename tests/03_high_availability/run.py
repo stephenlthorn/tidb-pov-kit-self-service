@@ -33,11 +33,15 @@ def run(cfg: dict):
     print(f"{'='*60}")
 
     from load.load_runner import LoadRunner
-    from load.workload_definitions import apply_workload_profile, schema_a_workload, build_weighted_pool
+    from load.workload_definitions import (
+        apply_workload_profile,
+        build_weighted_pool,
+        transactional_workload_for_cfg,
+    )
     counts = _get_counts(cfg)
     pool = build_weighted_pool(
         apply_workload_profile(
-            schema_a_workload(counts),
+            transactional_workload_for_cfg(cfg, counts),
             mix=cfg.get("test", {}).get("workload_mix", "mixed"),
             read_multiplier=cfg.get("test", {}).get("read_weight_multiplier", 1.0),
             write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
@@ -132,7 +136,7 @@ def _get_counts(cfg):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
     from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "medium"), {})
+    return SCALE_CONFIG.get((cfg.get("test") or {}).get("data_scale", "small"), {})
 
 
 if __name__ == "__main__":

@@ -208,12 +208,28 @@ Direct-run shortcuts:
 ./run_all.sh --web-ui
 ```
 
+Safe small end-to-end run (clean DB + EC2 cleanup before/after):
+
+```bash
+chmod +x scripts/pov_safe_small_e2e.sh
+./scripts/pov_safe_small_e2e.sh config.small.yaml
+```
+
+What it enforces:
+1. Terminates any `tidb-pov-managed=true` EC2 instances in `AWS_REGION`
+2. Drops and recreates the configured TiDB database
+3. Forces `test.data_scale=small` and `aws_runner.instance_size=small`
+4. Runs `run_all.sh`
+5. Terminates leftover `tidb-pov-managed=true` EC2 instances again
+
 Dark web UI:
 1. Open with `./run_all.sh --web-ui` (or `python setup/poc_web_ui.py`)
 2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
-3. Use Test Planner to view per-module test insights and choose all/some suites before execution
-4. Run security screener, run defaults, build report-only, and clear/reset data
-5. In Manual Config -> AWS Runner, use:
+3. Quickstart includes an `Industry` dropdown (`General/Auto`, Banking, Healthcare, Gaming, Retail/Ecommerce, SaaS, IoT/Telemetry, AdTech, Logistics) that shapes workload/schema defaults
+4. New-run defaults are `small` scale and `small` runner size unless explicitly changed
+5. Use Test Planner to view per-module test insights and choose all/some suites before execution
+6. Run security screener, run defaults, build report-only, and clear/reset data
+7. In Manual Config -> AWS Runner, use:
    - `Validate AWS Runner` (AssumeRole + subnet/SG/AMI + DryRun check)
    - `Launch AWS Runner` (boots Amazon Linux if AMI is blank, installs deps, runs Workload Generator)
    - `Refresh Runner Status` / `Terminate Runner`
@@ -296,6 +312,10 @@ comparison_db:
 tier:
   selected: "serverless"   # serverless | essential | premium | dedicated | byoc
 
+# Industry profile (Quickstart dropdown)
+industry:
+  selected: "general_auto"  # general_auto | banking | healthcare | gaming | retail_ecommerce | saas | iot_telemetry | adtech | logistics
+
 # Optional: launch workload generators in customer AWS account (AssumeRole)
 aws_runner:
   enabled: false
@@ -310,7 +330,7 @@ aws_runner:
   security_group_id: "sg-..."
   runner_instance_profile_name: "TidbPovRunnerInstanceRole"
   runner_role_arn: "arn:aws:iam::219248915861:role/TidbPovRunnerInstanceRole"
-  instance_size: "medium"                  # small | medium | large
+  instance_size: "small"                   # small | medium | large
   allowed_instance_types: ["c7i.2xlarge","c7i.4xlarge","c7i.8xlarge"]
   max_instances_per_run: 8
   summary_upload_only: true

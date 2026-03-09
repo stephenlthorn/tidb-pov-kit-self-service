@@ -17,6 +17,7 @@ import sys, os, time, csv, io, random, tempfile, math
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.industry_profiles import resolve_industry_from_cfg
 from lib.result_store import init_db, start_module, end_module, log_import_stat
 from lib.db_utils import get_connection
 
@@ -53,6 +54,9 @@ def run(cfg: dict):
 
     print(f"\n{'='*60}")
     print(f"  Module 7: Data Import Speed")
+    industry = resolve_industry_from_cfg(cfg)
+    industry_key = str(industry.get("key", "general_auto"))
+    print(f"  Industry: {industry.get('label', industry_key)}")
     print(f"  Target rows: {import_rows:,}")
     print(f"  Batched INSERT size: {batch_size:,}")
     print(f"  Enabled methods: {', '.join(methods)}")
@@ -69,7 +73,7 @@ def run(cfg: dict):
     file_size_gb = import_source_size_gb
     if need_local_csv:
         print(f"\n  Generating {import_rows:,} row CSV...")
-        csv_path, file_size_gb = _generate_csv(import_rows)
+        csv_path, file_size_gb = _generate_csv(import_rows, industry_key)
         print(f"    CSV size: {file_size_gb*1024:.1f} MB at {csv_path}")
     elif import_into_source_uri:
         print(f"\n  Using remote import source URI: {import_into_source_uri}")
@@ -81,10 +85,10 @@ def run(cfg: dict):
     # ── Method C: Batched INSERT (always available, baseline) ─────────────────
     if "batched_insert" in methods:
         print(f"\n  Method C — Batched INSERT (batch={batch_size:,})...")
-        _drop_and_create(cur, conn, "import_test_insert")
+        _drop_and_create(cur, conn, f"import_test_insert_{industry_key}")
         t0 = time.time()
         if csv_path:
-            rows_c = _batched_insert(cur, conn, "import_test_insert", csv_path, import_rows, batch_size)
+            rows_c = _batched_insert(cur, conn, f"import_test_insert_{industry_key}", csv_path, import_rows, batch_size)
             dur_c = time.time() - t0
             results["batched_insert"] = _metrics(rows_c, file_size_gb, dur_c)
             log_import_stat(rows_c, file_size_gb, dur_c,
@@ -100,12 +104,12 @@ def run(cfg: dict):
     # ── Method B: LOAD DATA LOCAL INFILE ─────────────────────────────────────
     if "load_data_infile" in methods:
         print(f"\n  Method B — LOAD DATA LOCAL INFILE...")
-        _drop_and_create(cur, conn, "import_test_load")
+        _drop_and_create(cur, conn, f"import_test_load_{industry_key}")
         try:
             t0 = time.time()
             if not csv_path:
                 raise RuntimeError("local CSV not available")
-            rows_b = _load_data_infile(cfg["tidb"], "import_test_load", csv_path)
+            rows_b = _load_data_infile(cfg["tidb"], f"import_test_load_{industry_key}", csv_path)
             dur_b = time.time() - t0
             results["load_data_infile"] = _metrics(rows_b, file_size_gb, dur_b)
             log_import_stat(rows_b, file_size_gb, dur_b,
@@ -121,13 +125,13 @@ def run(cfg: dict):
     # ── Method A: IMPORT INTO ─────────────────────────────────────────────────
     if "import_into" in methods:
         print(f"\n  Method A — IMPORT INTO (TiDB native loader)...")
-        _drop_and_create(cur, conn, "import_test_native")
+        _drop_and_create(cur, conn, f"import_test_native_{industry_key}")
         try:
             source_uri = import_into_source_uri
             if not source_uri:
                 source_uri = f"file://{csv_path}"
             t0 = time.time()
-            rows_a = _import_into(cur, conn, "import_test_native", source_uri)
+            rows_a = _import_into(cur, conn, f"import_test_native_{industry_key}", source_uri)
             dur_a = time.time() - t0
             import_size_gb = max(file_size_gb, import_source_size_gb)
             results["import_into"] = _metrics(rows_a, import_size_gb, dur_a)
@@ -142,7 +146,11 @@ def run(cfg: dict):
         results["import_into"] = {"skipped": True, "reason": "disabled"}
 
     # Cleanup
-    for t in ["import_test_insert", "import_test_load", "import_test_native"]:
+    for t in [
+        f"import_test_insert_{industry_key}",
+        f"import_test_load_{industry_key}",
+        f"import_test_native_{industry_key}",
+    ]:
         try:
             cur.execute(f"DROP TABLE IF EXISTS {t}")
         except Exception:
@@ -170,11 +178,10 @@ def run(cfg: dict):
 
 # ── Import method implementations ─────────────────────────────────────────────
 
-def _generate_csv(n: int) -> tuple:
+def _generate_csv(n: int, industry_key: str) -> tuple:
     """Write n rows to a temp CSV. Returns (path, size_gb)."""
     fd, path = tempfile.mkstemp(suffix=".csv", prefix="tidb_import_")
-    sources    = ["web", "mobile", "api", "batch"]
-    evt_types  = ["page_view", "click", "purchase", "signup", "error"]
+    sources, evt_types = _import_value_sets(industry_key)
     with os.fdopen(fd, "w", newline="") as fh:
         w = csv.writer(fh)
         for _ in range(n):
@@ -200,6 +207,20 @@ def _drop_and_create(cur, conn, table: str):
         )
     """)
     conn.commit()
+
+
+def _import_value_sets(industry_key: str) -> tuple[list, list]:
+    mapping = {
+        "banking": (["atm", "mobile", "branch", "api"], ["transfer", "payment", "withdrawal", "deposit"]),
+        "healthcare": (["ehr", "portal", "lab", "api"], ["claim", "encounter", "lab_result", "prior_auth"]),
+        "gaming": (["game_client", "matchmaker", "store", "api"], ["session", "purchase", "match", "reward"]),
+        "retail_ecommerce": (["web", "mobile", "marketplace", "batch"], ["cart", "checkout", "order", "refund"]),
+        "saas": (["workspace", "api", "scheduler", "billing"], ["api_call", "job_run", "sync", "invoice"]),
+        "iot_telemetry": (["edge", "gateway", "collector", "api"], ["telemetry", "alert", "heartbeat", "status"]),
+        "adtech": (["rtb", "exchange", "sdk", "api"], ["impression", "click", "conversion", "budget_update"]),
+        "logistics": (["scanner", "fleet_app", "ops_console", "api"], ["pickup", "in_transit", "arrival", "delivery"]),
+    }
+    return mapping.get(industry_key, (["web", "mobile", "api", "batch"], ["event", "update", "action", "status"]))
 
 
 def _batched_insert(cur, conn, table: str, csv_path: str, total: int, batch_size: int) -> int:

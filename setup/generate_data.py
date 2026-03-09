@@ -25,6 +25,8 @@ from faker import Faker
 # Allow imports from project root
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.db_utils import get_connection, create_database_if_missing
+from lib.industry_profiles import INDUSTRY_DEFAULT, resolve_industry_from_cfg
+from setup.industry_data import industry_primary_table, industry_schema_sql, industry_seed_specs
 
 fake = Faker()
 random.seed(42)
@@ -489,11 +491,13 @@ def main():
     test_cfg = cfg.get("test") or {}
     run_mode = resolve_run_mode(test_cfg)
     schema_mode = resolve_schema_mode(test_cfg)
-    scale = str(test_cfg.get("data_scale", "medium")).strip().lower()
+    scale = str(test_cfg.get("data_scale", "small")).strip().lower()
     if scale not in SCALE_CONFIG:
-        print(f"  Unknown data_scale '{scale}', defaulting to medium.")
-        scale = "medium"
+        print(f"  Unknown data_scale '{scale}', defaulting to small.")
+        scale = "small"
     counts = SCALE_CONFIG[scale]
+    industry = resolve_industry_from_cfg(cfg)
+    industry_key = str(industry.get("key", INDUSTRY_DEFAULT))
     tidb_cfg = cfg.get("tidb") or {}
     if not tidb_cfg:
         raise ValueError("Missing required 'tidb' config block.")
@@ -501,6 +505,7 @@ def main():
     print(f"\n{'='*60}")
     print(f"  TiDB Cloud PoV Kit — Data Generator")
     print(f"  Scale: {scale.upper()} | DB: {tidb_cfg['database']}")
+    print(f"  Industry: {industry.get('label', industry_key)}")
     print(f"  Run Mode: {run_mode} | Schema Mode: {schema_mode}")
     print(f"{'='*60}\n")
 
@@ -509,27 +514,43 @@ def main():
     conn = get_connection(tidb_cfg, autocommit=True)
     cur = conn.cursor()
     schema_a_ddl, schema_b_ddl, schema_c_ddl = schema_ddls(schema_mode)
-    for stmt in schema_a_ddl.strip().split(";"):
-        s = stmt.strip()
-        if s:
-            cur.execute(s)
+
+    # Schema B is always present because write-contention and telemetry tests use it.
     for stmt in schema_b_ddl.strip().split(";"):
         s = stmt.strip()
         if s:
             cur.execute(s)
-    for stmt in schema_c_ddl.strip().split(";"):
-        s = stmt.strip()
-        if s:
-            cur.execute(s)
+
+    if industry_key == INDUSTRY_DEFAULT:
+        for stmt in schema_a_ddl.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                cur.execute(s)
+        for stmt in schema_c_ddl.strip().split(";"):
+            s = stmt.strip()
+            if s:
+                cur.execute(s)
+    else:
+        for stmt in industry_schema_sql(industry_key, schema_mode):
+            s = stmt.strip()
+            if s:
+                cur.execute(s)
     print("  Schemas created.")
 
-    if args.skip_if_exists and table_exists(conn, "users"):
-        cur.execute("SELECT COUNT(*) FROM users")
+    primary_table = "users" if industry_key == INDUSTRY_DEFAULT else industry_primary_table(industry_key)
+    if args.skip_if_exists and table_exists(conn, primary_table):
+        cur.execute(f"SELECT COUNT(*) FROM {primary_table}")
         n = cur.fetchone()[0]
         if n > 0:
-            print(f"  Tables already populated ({n:,} users). Skipping data generation.")
+            print(f"  Tables already populated ({n:,} rows in {primary_table}). Skipping data generation.")
             conn.close()
-            _write_manifest(scale, counts, schema_mode=schema_mode, run_mode=run_mode)
+            _write_manifest(
+                scale,
+                counts,
+                schema_mode=schema_mode,
+                run_mode=run_mode,
+                industry=industry_key,
+            )
             return
 
     print("\n[2/2] Inserting data...")
@@ -541,27 +562,42 @@ def main():
     tenant_count = counts["tenants"]
     session_count = counts["sessions"]
 
-    bulk_insert(conn, "users",
-                ["external_id", "email", "name", "status"],
-                gen_users(user_count), user_count, "users")
+    manifest_counts = dict(counts)
 
-    bulk_insert(conn, "accounts",
-                ["user_id", "type", "balance", "currency"],
-                gen_accounts(acct_count, user_count), acct_count, "accounts")
+    if industry_key == INDUSTRY_DEFAULT:
+        bulk_insert(conn, "users",
+                    ["external_id", "email", "name", "status"],
+                    gen_users(user_count), user_count, "users")
 
-    bulk_insert(conn, "transactions",
-                ["account_id", "type", "amount", "status", "reference_id"],
-                gen_transactions(txn_count, acct_count), txn_count, "transactions")
+        bulk_insert(conn, "accounts",
+                    ["user_id", "type", "balance", "currency"],
+                    gen_accounts(acct_count, user_count), acct_count, "accounts")
 
-    bulk_insert(conn, "transaction_items",
-                ["transaction_id", "description", "amount", "quantity"],
-                gen_transaction_items(counts["transaction_items"], txn_count),
-                counts["transaction_items"], "transaction_items")
+        bulk_insert(conn, "transactions",
+                    ["account_id", "type", "amount", "status", "reference_id"],
+                    gen_transactions(txn_count, acct_count), txn_count, "transactions")
 
-    bulk_insert(conn, "audit_log",
-                ["entity_type", "entity_id", "action", "actor_id", "payload"],
-                gen_audit_log(counts["audit_log"], user_count),
-                counts["audit_log"], "audit_log")
+        bulk_insert(conn, "transaction_items",
+                    ["transaction_id", "description", "amount", "quantity"],
+                    gen_transaction_items(counts["transaction_items"], txn_count),
+                    counts["transaction_items"], "transaction_items")
+
+        bulk_insert(conn, "audit_log",
+                    ["entity_type", "entity_id", "action", "actor_id", "payload"],
+                    gen_audit_log(counts["audit_log"], user_count),
+                    counts["audit_log"], "audit_log")
+    else:
+        industry_counts, seed_specs = industry_seed_specs(industry_key, counts, fake)
+        manifest_counts.update(industry_counts)
+        for spec in seed_specs:
+            bulk_insert(
+                conn,
+                spec["table"],
+                spec["cols"],
+                spec["gen"],
+                spec["total"],
+                spec["label"],
+            )
 
     bulk_insert(conn, "sessions",
                 ["user_id", "duration_sec", "page_views"],
@@ -595,18 +631,27 @@ def main():
     print(f"\n  All data inserted in {total_time:.1f}s")
     _write_manifest(
         scale,
-        counts,
+        manifest_counts,
         total_time,
         schema_mode=schema_mode,
         run_mode=run_mode,
+        industry=industry_key,
     )
 
 
-def _write_manifest(scale, counts, duration_sec=0, schema_mode=SCHEMA_MODE_DEFAULT, run_mode=RUN_MODE_DEFAULT):
+def _write_manifest(
+    scale,
+    counts,
+    duration_sec=0,
+    schema_mode=SCHEMA_MODE_DEFAULT,
+    run_mode=RUN_MODE_DEFAULT,
+    industry=INDUSTRY_DEFAULT,
+):
     manifest = {
         "scale": scale,
         "schema_mode": schema_mode,
         "run_mode": run_mode,
+        "industry": industry,
         "counts": counts,
         "generation_duration_sec": round(duration_sec, 1),
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),

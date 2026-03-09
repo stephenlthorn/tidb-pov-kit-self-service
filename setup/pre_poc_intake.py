@@ -540,7 +540,7 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_concurrency": 32,
         },
         "essential": {
-            "data_scale": "medium",
+            "data_scale": "small",
             "duration_seconds": 180,
             "concurrency_levels": [16, 32, 64],
             "ramp_duration_seconds": 600,
@@ -549,7 +549,7 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_concurrency": 64,
         },
         "premium": {
-            "data_scale": "medium",
+            "data_scale": "small",
             "duration_seconds": 180,
             "concurrency_levels": [16, 32, 64],
             "ramp_duration_seconds": 600,
@@ -558,7 +558,7 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_concurrency": 64,
         },
         "dedicated": {
-            "data_scale": "medium",
+            "data_scale": "small",
             "duration_seconds": 300,
             "concurrency_levels": [16, 64, 256],
             "ramp_duration_seconds": 1200,
@@ -567,7 +567,7 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_concurrency": 256,
         },
         "byoc": {
-            "data_scale": "medium",
+            "data_scale": "small",
             "duration_seconds": 300,
             "concurrency_levels": [16, 64, 256],
             "ramp_duration_seconds": 1200,
