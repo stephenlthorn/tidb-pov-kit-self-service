@@ -215,6 +215,13 @@ chmod +x scripts/pov_safe_small_e2e.sh
 ./scripts/pov_safe_small_e2e.sh config.small.yaml
 ```
 
+Laptop/CLI bootstrap (install deps first):
+
+```bash
+chmod +x scripts/bootstrap_cli.sh
+bash scripts/bootstrap_cli.sh
+```
+
 What it enforces:
 1. Terminates any `tidb-pov-managed=true` EC2 instances in `AWS_REGION`
 2. Drops and recreates the configured TiDB database
