@@ -713,8 +713,8 @@ def _normalize_tier_key(raw: str | None) -> str:
     return t
 
 
-def _kpi_eval(module_key: str, stats: dict, tier_key: str) -> tuple[str, str]:
-    tier_rules = KPI_THRESHOLDS_BY_TIER.get(_normalize_tier_key(tier_key), KPI_THRESHOLDS_BY_TIER["serverless"])
+def _kpi_eval(module_key: str, stats: dict, tier_key: str, thresholds_by_tier: dict) -> tuple[str, str]:
+    tier_rules = thresholds_by_tier.get(_normalize_tier_key(tier_key), thresholds_by_tier["serverless"])
     rule = tier_rules.get(module_key, {})
     p99 = _maybe_float(stats.get("p99_ms"))
     tps = _maybe_float(stats.get("tps"))
@@ -737,7 +737,59 @@ def _kpi_eval(module_key: str, stats: dict, tier_key: str) -> tuple[str, str]:
     return "PASS", "Within baseline target band"
 
 
-def _add_kpi_appendix_page(pdf, metrics, tier_key: str):
+def _coerce_numeric(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        if value is None or value == "":
+            return None
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _effective_kpi_thresholds(cfg: dict) -> dict:
+    merged = {}
+    for tier, rule_map in KPI_THRESHOLDS_BY_TIER.items():
+        merged[tier] = {m: dict(v) for m, v in rule_map.items()}
+
+    report_cfg = (cfg or {}).get("report", {}) or {}
+    overrides = report_cfg.get("kpi_threshold_overrides") or {}
+    if not isinstance(overrides, dict):
+        return merged
+
+    # Global overrides applied to every tier.
+    global_overrides = overrides.get("all_tiers") or {}
+    if isinstance(global_overrides, dict):
+        for tier in merged:
+            for module_key, module_over in global_overrides.items():
+                if not isinstance(module_over, dict):
+                    continue
+                merged[tier].setdefault(module_key, {})
+                for k, v in module_over.items():
+                    nv = _coerce_numeric(v)
+                    if nv is not None:
+                        merged[tier][module_key][str(k)] = nv
+
+    # Tier-specific overrides.
+    for raw_tier, tier_overrides in overrides.items():
+        tkey = _normalize_tier_key(raw_tier)
+        if tkey == "serverless" and str(raw_tier).strip().lower() not in {"serverless", "starter"}:
+            continue
+        if not isinstance(tier_overrides, dict):
+            continue
+        for module_key, module_over in tier_overrides.items():
+            if not isinstance(module_over, dict):
+                continue
+            merged[tkey].setdefault(module_key, {})
+            for k, v in module_over.items():
+                nv = _coerce_numeric(v)
+                if nv is not None:
+                    merged[tkey][module_key][str(k)] = nv
+    return merged
+
+
+def _add_kpi_appendix_page(pdf, metrics, tier_key: str, thresholds_by_tier: dict):
     pdf.add_page()
     pdf.section_title("Appendix — KPI Threshold Evaluation")
     pdf.body_text(
@@ -772,7 +824,7 @@ def _add_kpi_appendix_page(pdf, metrics, tier_key: str):
         for phase, s in tidb.items():
             if not isinstance(s, dict):
                 continue
-            verdict, note = _kpi_eval(mod_key, s, tier_key)
+            verdict, note = _kpi_eval(mod_key, s, tier_key, thresholds_by_tier)
             if verdict == "PASS":
                 color = GREEN
             elif verdict == "WARN":
@@ -817,6 +869,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     tco_data  = compute_tco(cfg)
     summary   = metrics.get("summary", {})
     selected_tier = _normalize_tier_key((cfg.get("tier", {}) or {}).get("selected"))
+    thresholds_by_tier = _effective_kpi_thresholds(cfg)
     customer  = cfg.get("report", {}).get("customer_name", "Customer")
     se_name   = cfg.get("report", {}).get("se_name", "PingCAP Sales Engineering")
 
@@ -1033,7 +1086,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                         "at increasing concurrency levels.")
 
     # ── Appendix: raw latency table ───────────────────────────────────────────
-    _add_kpi_appendix_page(pdf, metrics, selected_tier)
+    _add_kpi_appendix_page(pdf, metrics, selected_tier, thresholds_by_tier)
 
     # ── Appendix: raw latency table ───────────────────────────────────────────
     pdf.add_page()

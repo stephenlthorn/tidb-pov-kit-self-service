@@ -32,140 +32,98 @@ TCO comparison.
 
 ---
 
-## Quick Start
+## Start Here (Easy)
 
-### Step 1 — Provision a cluster
+### 1) Provision TiDB Cloud
 
-Follow **`setup/00_provision.md`** and start with **Serverless (Starter)**
-unless your requirements gate you to Essential/Premium/Dedicated/BYOC.
+Start with **Serverless/Starter** unless you already know you need Essential, Premium, Dedicated, or BYOC.
+Provisioning guide: `setup/00_provision.md`.
 
-### Step 2 — Configure
+### 2) Configure Connection
 
 ```bash
 cp config.yaml.example config.yaml
-# Open config.yaml and fill in host, port, user, password
+# fill tidb.host, tidb.user, tidb.password, tidb.database
 ```
 
-Optional: preload AWS runner defaults for cross-account execution in UI/config:
+### 3) Choose How You Run
+
+#### Path A — Web UI (recommended for first run)
 
 ```bash
-cp .env.example .env
-# export vars from .env into your shell before launching web UI
+bash scripts/bootstrap_cli.sh
+./run_all.sh --web-ui
 ```
 
-Optionally add your own SQL queries under `customer_queries:` to validate them
-in Module 0 and include them in the OLTP workload.
+Then:
+1. Use **Deployment Wizard** for guided setup (Industry + tests + tier).
+2. Save and run.
+3. Open report from `results/tidb_pov_report.pdf` (or S3 if enforced).
 
-Vercel deployment note:
-1. Import repo `stephenlthorn/tidb-pov-kit-self-service`
-2. Set project root directory to repo root (`.`)
-3. Vercel uses root Flask entrypoint `app.py`
-4. Configure env vars from `.env.example` in Vercel project settings
-5. Attach Vercel Postgres (or set `DATABASE_URL`) for persistent users/invites/config state
-6. Configure S3 env vars (`S3_BUCKET`, `S3_PREFIX`, `S3_ARTIFACTS_ENABLED=true`) to persist PDF/metrics/log artifacts
-7. Keep `POV_ENFORCE_S3_UPLOAD=true` (default) so runs are blocked unless S3 probe + upload succeed
-8. For cross-account AWS runner launch, set control credentials that can call `sts:AssumeRole`:
-   - preferred: `AWS_CONTROL_ACCESS_KEY_ID` + `AWS_CONTROL_SECRET_ACCESS_KEY`
-   - fallback: `AWS_ACCESS_KEY_ID` + `AWS_SECRET_ACCESS_KEY`
+#### Path B — CLI (recommended for repeatable automation)
 
-### Step 3 — Run
+Local CLI run:
 
 ```bash
-chmod +x run_all.sh
-./run_all.sh
+bash scripts/bootstrap_cli.sh
+./run_all.sh config.yaml --no-menu --no-wizard
 ```
+
+Safe small run (clean DB + EC2 cleanup before/after):
+
+```bash
+bash scripts/pov_safe_small_e2e.sh config.yaml
+```
+
+### 4) Enforce S3 Upload (recommended)
+
+```bash
+export POV_ENFORCE_S3_UPLOAD=true
+export POV_S3_BUCKET=<bucket>
+export POV_S3_PREFIX=tidb-pov
+export POV_S3_PROJECT=<project-slug>
+export POV_S3_REGION=us-east-1
+```
+
+With enforcement enabled, the run hard-fails if artifacts cannot be archived to S3.
+
+### 5) Output Locations
+
+Local:
+- `results/tidb_pov_report.pdf`
+- `results/metrics_summary.json`
+- `results/results.db`
+- `results/run_all.log`
+
+S3:
+- `s3://<bucket>/<prefix>/<project>/runs/<run_tag>/...`
+
+### Useful Shortcuts
+
+```bash
+./run_all.sh --menu
+./run_all.sh --report-only
+./run_all.sh --report-json-only
+```
+
+---
+
+## Advanced Runtime Paths
 
 ### Scripted Pull + Run + S3 Archive
-
-If you want a pure script workflow (no UI), use:
 
 ```bash
 export POV_S3_BUCKET=<your-bucket>
 export POV_S3_PREFIX=tidb-pov
-export POV_S3_PROJECT=<customer-or-project-slug>
-export AWS_ACCESS_KEY_ID=<key-with-s3-put-access>
-export AWS_SECRET_ACCESS_KEY=<secret>
+export POV_S3_PROJECT=<project-slug>
 export POV_CONFIG_SOURCE=/absolute/path/to/config.yaml
-
 curl -fsSL https://raw.githubusercontent.com/stephenlthorn/tidb-pov-kit-self-service/main/scripts/pov_pull_run_upload.sh | bash
 ```
 
-Or keep all VM vars in an env file and run with:
-
-```bash
-cp scripts/pov_vm.env.example /tmp/pov_vm.env
-# edit /tmp/pov_vm.env
-export POV_ENV_FILE=/tmp/pov_vm.env
-curl -fsSL https://raw.githubusercontent.com/stephenlthorn/tidb-pov-kit-self-service/main/scripts/pov_pull_run_upload.sh | bash
-```
-
-This flow:
-1. Clones/pulls latest GitHub repo
-2. Runs PoV using `run_all.sh`
-3. Uploads `results/*` + latest workload summary into S3
-4. Writes an upload manifest in both local `results/` and S3
-
-Script-only secure deployment guide (no Vercel/UI required):
-- `docs/script_only_secure_s3_runner.md`
-- `docs/aws/policies/pov_results_bucket_policy_template.json`
-- `docs/aws/policies/pov_uploader_role_policy_template.json`
-
-Warm workload + S3 dataset support:
-1. Baseline module includes:
-   - pre-warm phase (`test.pre_warm_*`) before measured concurrency steps
-   - warm steady-state phase (`test.warm_phase_*`) after baseline steps
-2. Data import module supports remote source for TiDB Cloud:
-   - set `test.import_into_source_uri: "s3://.../file.csv"`
-   - optionally set `test.import_source_size_gb` for accurate GB/min metrics
-
-### EC2 Script-Only Fast Path (Recommended)
-
-If you're already on an EC2 instance and want the fastest path, use this.
-
-1. Install basics:
+### EC2 Script-Only Fast Path
 
 ```bash
 sudo yum install -y git python3 || sudo apt-get update && sudo apt-get install -y git python3 python3-pip
-```
-
-2. Create minimal TiDB config at `~/Documents/pingcap/config.yaml`:
-
-```bash
-mkdir -p ~/Documents/pingcap
-cat > ~/Documents/pingcap/config.yaml <<'YAML'
-tidb:
-  host: "gateway01.us-east-1.prod.aws.tidbcloud.com"
-  port: 4000
-  user: "<prefix>.root"
-  password: "<your-password>"
-  database: "test"
-  ssl: true
-YAML
-chmod 600 ~/Documents/pingcap/config.yaml
-```
-
-3. Create runner env file:
-
-```bash
-cat > ~/pov_vm.env <<'EOF'
-POV_REPO_URL=https://github.com/stephenlthorn/tidb-pov-kit-self-service.git
-POV_REPO_REF=main
-POV_CONFIG_SOURCE=~/Documents/pingcap/config.yaml
-POV_RUN_ARGS="--no-menu --no-wizard"
-POV_ENFORCE_S3_UPLOAD=true
-
-POV_S3_BUCKET=pingcap-tidb-pov-results-219248915861
-POV_S3_PREFIX=tidb-pov
-POV_S3_PROJECT=ec2-test
-POV_S3_REGION=us-east-1
-POV_S3_EXPECTED_BUCKET_OWNER=219248915861
-POV_S3_KMS_KEY_ID=<kms-key-arn>
-EOF
-```
-
-4. Run:
-
-```bash
 git clone https://github.com/stephenlthorn/tidb-pov-kit-self-service.git ~/tidb-pov-kit-self-service-runner || true
 cd ~/tidb-pov-kit-self-service-runner
 git pull --ff-only origin main
@@ -173,116 +131,10 @@ export POV_ENV_FILE=~/pov_vm.env
 bash scripts/pov_pull_run_upload.sh
 ```
 
-5. Verify S3 artifacts:
-
-```bash
-aws s3 ls s3://pingcap-tidb-pov-results-219248915861/tidb-pov/ec2-test/runs/ --recursive
-```
-
-S3 enforcement behavior:
-1. `run_all.sh` now defaults to `POV_ENFORCE_S3_UPLOAD=true`
-2. It runs an S3 write/read/delete preflight before running tests
-3. It hard-fails the run if final S3 upload does not complete
-4. You can disable this only by explicitly setting `POV_ENFORCE_S3_UPLOAD=false` (not recommended)
-
-`run_all.sh` opens an interactive control panel by default in terminal sessions.
-From that parent menu you can:
-1. Run PoC with defaults
-2. Choose cloud tier (including Dedicated)
-3. Run security screener
-4. Print/open PDF report (after completed PoC)
-5. Clear PoC data with confirmation
-6. Exit
-
-The intake flow in `run_all.sh` supports:
-1. Runs a tier decision tree
-2. Captures a pre-PoC security/shared-responsibility checklist
-3. Writes `results/pre_poc_checklist.md` + `results/pre_poc_intake.json`
-4. Builds `results/config.resolved.yaml` and runs the kit automatically
-
-Direct-run shortcuts:
-
-```bash
-./run_all.sh --no-menu --no-wizard
-./run_all.sh --menu
-./run_all.sh --web-ui
-```
-
-Safe small end-to-end run (clean DB + EC2 cleanup before/after):
-
-```bash
-chmod +x scripts/pov_safe_small_e2e.sh
-./scripts/pov_safe_small_e2e.sh config.small.yaml
-```
-
-Laptop/CLI bootstrap (install deps first):
-
-```bash
-chmod +x scripts/bootstrap_cli.sh
-bash scripts/bootstrap_cli.sh
-```
-
-What it enforces:
-1. Terminates any `tidb-pov-managed=true` EC2 instances in `AWS_REGION`
-2. Drops and recreates the configured TiDB database
-3. Forces `test.data_scale=small` and `aws_runner.instance_size=small`
-4. Runs `run_all.sh`
-5. Terminates leftover `tidb-pov-managed=true` EC2 instances again
-
-Dark web UI:
-1. Open with `./run_all.sh --web-ui` (or `python setup/poc_web_ui.py`)
-2. Use the Quickstart Wizard for guided setup + optional auto-run, or use full Configuration for advanced tuning
-3. Quickstart includes an `Industry` dropdown (`General/Auto`, Banking, Healthcare, Gaming, Retail/Ecommerce, SaaS, IoT/Telemetry, AdTech, Logistics) that shapes workload/schema defaults
-4. New-run defaults are `small` scale and `small` runner size unless explicitly changed
-5. Use Test Planner to view per-module test insights and choose all/some suites before execution
-6. Run security screener, run defaults, build report-only, and clear/reset data
-7. In Manual Config -> AWS Runner, use:
-   - `Validate AWS Runner` (AssumeRole + subnet/SG/AMI + DryRun check)
-   - `Launch AWS Runner` (boots Amazon Linux if AMI is blank, installs deps, runs Workload Generator)
-   - `Refresh Runner Status` / `Terminate Runner`
-
-UI access control (invite-based):
-1. First launch redirects to `/setup-admin` to create the first admin account.
-2. Admin signs in and opens the `Admin` tab.
-3. Admin can generate either:
-   - email-scoped invite link/code (restricted to one email), or
-   - open invite code (usable by any email, with max-use and expiry controls).
-4. Invitees open `/signup`, enter email + password + invite code, and get user access.
-
-Workload Lab (Workload Generator flow):
-1. Open the `Workload Lab` tab.
-2. Set mode: `rawsql`, `tpcc`, or `ycsb`.
-3. Configure DSN, load generator hosts, SSH details, and mode-specific settings.
-4. Use `Validate`, `Dry Run`, then `Run`.
-5. Run outputs are written to `runs/<timestamp>_<mode>_<tag>/` with:
-   - `resolved_config.yaml`
-   - `commands.json`
-   - `loadgens/*.log`
-   - `summary.json`
-   - `summary.md`
-   - `chart_data.json`
-
-Sample rawsql assets:
-- `load/sql/rawsql_mix.sql` (high-frequency point reads + simple updates)
-- `load/sql/rawsql_sample_schema.sql` (schema scaffold for quick prep)
-
-That's it. The kit will:
-1. Install Python dependencies
-2. Generate synthetic data (3 schema archetypes, configurable scale)
-3. Run all enabled test modules sequentially
-4. Produce `results/tidb_pov_report.pdf`
-
-To regenerate only the PDF from existing `results/` artifacts (no load/tests):
-
-```bash
-./run_all.sh --report-only
-```
-
-To regenerate only `results/metrics_summary.json` from existing artifacts:
-
-```bash
-./run_all.sh --report-json-only
-```
+See also:
+- `docs/script_only_secure_s3_runner.md`
+- `docs/aws/policies/pov_results_bucket_policy_template.json`
+- `docs/aws/policies/pov_uploader_role_policy_template.json`
 
 ---
 
@@ -387,6 +239,16 @@ modules:
 report:
   customer_name: "Acme Corp"
   se_name:       "Jane Smith — PingCAP"
+  # Optional: override KPI threshold guidance used in PDF appendix.
+  # Supported tier keys: all_tiers, serverless|starter, essential, premium, dedicated, byoc
+  # kpi_threshold_overrides:
+  #   all_tiers:
+  #     01_baseline_perf:
+  #       p99_ms_warn: 90
+  #   premium:
+  #     01_baseline_perf:
+  #       p99_ms_warn: 45
+  #       p99_ms_fail: 120
 
 # Optional TCO model overrides
 tco:

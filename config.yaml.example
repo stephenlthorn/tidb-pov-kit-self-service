@@ -112,6 +112,19 @@ pre_poc:
 report:
   customer_name: "Acme Corp"
   se_name:       "Your Name — PingCAP Sales Engineering"
+  # Optional: override KPI threshold guidance bands in report appendix.
+  # Keys:
+  #   - all_tiers (applies to every tier)
+  #   - serverless | starter | essential | premium | dedicated | byoc
+  # Values are per-module threshold maps (example below).
+  # kpi_threshold_overrides:
+  #   all_tiers:
+  #     01_baseline_perf:
+  #       p99_ms_warn: 90
+  #   premium:
+  #     01_baseline_perf:
+  #       p99_ms_warn: 45
+  #       p99_ms_fail: 120
 
 # TCO model inputs — adjust to match customer's actual environment
 tco:
