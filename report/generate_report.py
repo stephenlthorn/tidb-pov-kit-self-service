@@ -62,14 +62,56 @@ MODULE_DISPLAY = {
     "08_vector_search":       "M8 — Vector Search (AI Track)",
 }
 
-KPI_THRESHOLDS = {
-    "01_baseline_perf": {"p99_ms_warn": 80.0, "p99_ms_fail": 200.0, "tps_warn": 500.0},
-    "02_elastic_scale": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0, "tps_warn": 300.0},
-    "03_high_availability": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
-    "03b_write_contention": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
-    "04_htap_concurrent": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
-    "05_online_ddl": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
-    "07_data_import": {"tps_warn": 100.0},
+KPI_THRESHOLDS_BY_TIER = {
+    # Starter / Serverless: lowest baseline expectation.
+    "serverless": {
+        "01_baseline_perf": {"p99_ms_warn": 120.0, "p99_ms_fail": 280.0, "tps_warn": 250.0},
+        "02_elastic_scale": {"p99_ms_warn": 180.0, "p99_ms_fail": 380.0, "tps_warn": 200.0},
+        "03_high_availability": {"p99_ms_warn": 240.0, "p99_ms_fail": 550.0},
+        "03b_write_contention": {"p99_ms_warn": 220.0, "p99_ms_fail": 450.0},
+        "04_htap_concurrent": {"p99_ms_warn": 220.0, "p99_ms_fail": 450.0},
+        "05_online_ddl": {"p99_ms_warn": 280.0, "p99_ms_fail": 600.0},
+        "07_data_import": {"tps_warn": 60.0},
+    },
+    # Essential: balanced production baseline.
+    "essential": {
+        "01_baseline_perf": {"p99_ms_warn": 80.0, "p99_ms_fail": 200.0, "tps_warn": 500.0},
+        "02_elastic_scale": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0, "tps_warn": 350.0},
+        "03_high_availability": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
+        "03b_write_contention": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
+        "04_htap_concurrent": {"p99_ms_warn": 150.0, "p99_ms_fail": 400.0},
+        "05_online_ddl": {"p99_ms_warn": 200.0, "p99_ms_fail": 500.0},
+        "07_data_import": {"tps_warn": 100.0},
+    },
+    # Premium and higher: stricter expectations.
+    "premium": {
+        "01_baseline_perf": {"p99_ms_warn": 50.0, "p99_ms_fail": 140.0, "tps_warn": 800.0},
+        "02_elastic_scale": {"p99_ms_warn": 90.0, "p99_ms_fail": 220.0, "tps_warn": 600.0},
+        "03_high_availability": {"p99_ms_warn": 150.0, "p99_ms_fail": 380.0},
+        "03b_write_contention": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "04_htap_concurrent": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "05_online_ddl": {"p99_ms_warn": 160.0, "p99_ms_fail": 420.0},
+        "07_data_import": {"tps_warn": 150.0},
+    },
+    "dedicated": {
+        "01_baseline_perf": {"p99_ms_warn": 35.0, "p99_ms_fail": 100.0, "tps_warn": 1200.0},
+        "02_elastic_scale": {"p99_ms_warn": 70.0, "p99_ms_fail": 180.0, "tps_warn": 900.0},
+        "03_high_availability": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "03b_write_contention": {"p99_ms_warn": 90.0, "p99_ms_fail": 220.0},
+        "04_htap_concurrent": {"p99_ms_warn": 90.0, "p99_ms_fail": 220.0},
+        "05_online_ddl": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "07_data_import": {"tps_warn": 220.0},
+    },
+    # BYOC follows dedicated-like expectations in this model.
+    "byoc": {
+        "01_baseline_perf": {"p99_ms_warn": 35.0, "p99_ms_fail": 100.0, "tps_warn": 1200.0},
+        "02_elastic_scale": {"p99_ms_warn": 70.0, "p99_ms_fail": 180.0, "tps_warn": 900.0},
+        "03_high_availability": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "03b_write_contention": {"p99_ms_warn": 90.0, "p99_ms_fail": 220.0},
+        "04_htap_concurrent": {"p99_ms_warn": 90.0, "p99_ms_fail": 220.0},
+        "05_online_ddl": {"p99_ms_warn": 120.0, "p99_ms_fail": 300.0},
+        "07_data_import": {"tps_warn": 220.0},
+    },
 }
 
 
@@ -662,8 +704,18 @@ def _add_run_coverage_page(pdf, metrics):
     )
 
 
-def _kpi_eval(module_key: str, stats: dict) -> tuple[str, str]:
-    rule = KPI_THRESHOLDS.get(module_key, {})
+def _normalize_tier_key(raw: str | None) -> str:
+    t = str(raw or "serverless").strip().lower()
+    if t == "starter":
+        return "serverless"
+    if t not in KPI_THRESHOLDS_BY_TIER:
+        return "serverless"
+    return t
+
+
+def _kpi_eval(module_key: str, stats: dict, tier_key: str) -> tuple[str, str]:
+    tier_rules = KPI_THRESHOLDS_BY_TIER.get(_normalize_tier_key(tier_key), KPI_THRESHOLDS_BY_TIER["serverless"])
+    rule = tier_rules.get(module_key, {})
     p99 = _maybe_float(stats.get("p99_ms"))
     tps = _maybe_float(stats.get("tps"))
 
@@ -685,7 +737,7 @@ def _kpi_eval(module_key: str, stats: dict) -> tuple[str, str]:
     return "PASS", "Within baseline target band"
 
 
-def _add_kpi_appendix_page(pdf, metrics):
+def _add_kpi_appendix_page(pdf, metrics, tier_key: str):
     pdf.add_page()
     pdf.section_title("Appendix — KPI Threshold Evaluation")
     pdf.body_text(
@@ -693,6 +745,7 @@ def _add_kpi_appendix_page(pdf, metrics):
         "Use this page to identify phases that need rerun or tuning.",
         size=8,
     )
+    pdf.body_text(f"Threshold profile: {_normalize_tier_key(tier_key)}", size=8)
 
     col_w = [48, 24, 18, 18, 18, 18, 20, 36]
     hdrs = ["Module / Phase", "Status", "Count", "p50", "p95", "p99", "TPS", "Evaluation"]
@@ -719,7 +772,7 @@ def _add_kpi_appendix_page(pdf, metrics):
         for phase, s in tidb.items():
             if not isinstance(s, dict):
                 continue
-            verdict, note = _kpi_eval(mod_key, s)
+            verdict, note = _kpi_eval(mod_key, s, tier_key)
             if verdict == "PASS":
                 color = GREEN
             elif verdict == "WARN":
@@ -763,6 +816,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     metrics   = collect()
     tco_data  = compute_tco(cfg)
     summary   = metrics.get("summary", {})
+    selected_tier = _normalize_tier_key((cfg.get("tier", {}) or {}).get("selected"))
     customer  = cfg.get("report", {}).get("customer_name", "Customer")
     se_name   = cfg.get("report", {}).get("se_name", "PingCAP Sales Engineering")
 
@@ -979,7 +1033,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                         "at increasing concurrency levels.")
 
     # ── Appendix: raw latency table ───────────────────────────────────────────
-    _add_kpi_appendix_page(pdf, metrics)
+    _add_kpi_appendix_page(pdf, metrics, selected_tier)
 
     # ── Appendix: raw latency table ───────────────────────────────────────────
     pdf.add_page()
