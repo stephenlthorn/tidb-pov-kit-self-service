@@ -49,6 +49,19 @@ WHITE      = (255, 255, 255)
 
 RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
 
+MODULE_DISPLAY = {
+    "00_customer_queries":    "M0 — Customer Query Validation",
+    "01_baseline_perf":       "M1 — Baseline OLTP Performance",
+    "02_elastic_scale":       "M2 — Elastic Auto-Scaling",
+    "03_high_availability":   "M3 — High Availability & RTO",
+    "03b_write_contention":   "M3b — Write Contention / Hot Region",
+    "04_htap_concurrent":     "M4 — HTAP Concurrent Workload",
+    "05_online_ddl":          "M5 — Online DDL",
+    "06_mysql_compat":        "M6 — MySQL Compatibility",
+    "07_data_import":         "M7 — Data Import Speed",
+    "08_vector_search":       "M8 — Vector Search (AI Track)",
+}
+
 
 # ── PDF helper class ──────────────────────────────────────────────────────────
 
@@ -184,7 +197,8 @@ def _chart_baseline(metrics) -> plt.Figure:
     phase_rows.sort(key=lambda x: x[0])
 
     if not phase_rows:
-        return _empty_chart("No baseline OLTP phase data")
+        reason, actions = _module_missing_reason(metrics, "01_baseline_perf", "No baseline OLTP phase data")
+        return _empty_chart("Baseline OLTP data unavailable", reason=reason, actions=actions)
 
     phases = [row[1] for row in phase_rows]
     concs  = []
@@ -276,18 +290,30 @@ def _chart_warm_steady(metrics) -> plt.Figure:
         fig.tight_layout()
         return fig
 
-    return _empty_chart("No warm workload data")
+    reason, actions = _module_missing_reason(metrics, "01_baseline_perf", "No warm workload data")
+    return _empty_chart("Warm workload data unavailable", reason=reason, actions=actions)
 
 
 def _chart_data_population(metrics) -> plt.Figure:
     manifest = metrics.get("data_manifest", {}) or {}
     counts = manifest.get("counts", {}) if isinstance(manifest, dict) else {}
     if not isinstance(counts, dict) or not counts:
-        return _empty_chart("No data manifest available")
+        return _empty_chart(
+            "Data population unavailable",
+            reason="No data manifest file was found for this run.",
+            actions=[
+                "Run data generation (full run or setup/generate_data.py) before building the report.",
+                "Confirm results/data_manifest.json is present in local results or S3 artifacts.",
+            ],
+        )
 
     rows = [(str(k), int(v)) for k, v in counts.items() if isinstance(v, (int, float))]
     if not rows:
-        return _empty_chart("No row counts in manifest")
+        return _empty_chart(
+            "Data population unavailable",
+            reason="Manifest exists, but row-count values are missing.",
+            actions=["Re-run data generation with a valid test.data_scale value (small/medium/large)."],
+        )
     rows.sort(key=lambda x: x[1], reverse=True)
 
     labels = [k.replace("_", " ") for k, _ in rows]
@@ -322,7 +348,8 @@ def _chart_scale(metrics) -> plt.Figure:
         if ph in ts:
             all_ts.extend(ts[ph])
     if not all_ts:
-        return _empty_chart("No elastic scale data")
+        reason, actions = _module_missing_reason(metrics, "02_elastic_scale", "No elastic scale data")
+        return _empty_chart("Elastic scale data unavailable", reason=reason, actions=actions)
 
     elapsed = [r["elapsed_sec"] for r in all_ts]
     p99     = [r["p99_ms"]      for r in all_ts]
@@ -353,7 +380,8 @@ def _chart_ha(metrics) -> plt.Figure:
         if ph in ts:
             all_ts.extend(ts[ph])
     if not all_ts:
-        return _empty_chart("No HA data")
+        reason, actions = _module_missing_reason(metrics, "03_high_availability", "No HA data")
+        return _empty_chart("High-availability data unavailable", reason=reason, actions=actions)
 
     elapsed = [r["elapsed_sec"] for r in all_ts]
     p99     = [r["p99_ms"]      for r in all_ts]
@@ -376,7 +404,8 @@ def _chart_hotspot(metrics) -> plt.Figure:
     seq  = tidb.get("sequential", {})
     ar   = tidb.get("autorand",   {})
     if not seq or not ar:
-        return _empty_chart("No write contention data")
+        reason, actions = _module_missing_reason(metrics, "03b_write_contention", "No write contention data")
+        return _empty_chart("Write-contention data unavailable", reason=reason, actions=actions)
 
     categories = ["p50", "p95", "p99", "max"]
     seq_vals   = [seq.get(f"{k}_ms", 0) for k in categories]
@@ -402,7 +431,8 @@ def _chart_htap(metrics) -> plt.Figure:
     only = tidb.get("oltp_only", {})
     htap = tidb.get("htap", {})
     if not only or not htap:
-        return _empty_chart("No HTAP data")
+        reason, actions = _module_missing_reason(metrics, "04_htap_concurrent", "No HTAP data")
+        return _empty_chart("HTAP data unavailable", reason=reason, actions=actions)
 
     labels = ["p50", "p95", "p99"]
     only_v = [only.get(f"{k}_ms", 0) for k in labels]
@@ -425,7 +455,14 @@ def _chart_htap(metrics) -> plt.Figure:
 def _chart_compat(compat_data) -> plt.Figure:
     details = compat_data.get("details", [])
     if not details:
-        return _empty_chart("No compatibility data")
+        return _empty_chart(
+            "Compatibility data unavailable",
+            reason="No compatibility checks were captured.",
+            actions=[
+                "Enable module M6 (MySQL compatibility) and run again.",
+                "Confirm compat_checks entries exist in results.db before report build.",
+            ],
+        )
 
     normalized = []
     for row in details:
@@ -442,7 +479,11 @@ def _chart_compat(compat_data) -> plt.Figure:
         normalized.append({"category": category, "status": status})
 
     if not normalized:
-        return _empty_chart("No compatibility data")
+        return _empty_chart(
+            "Compatibility data unavailable",
+            reason="Compatibility rows were present but did not include usable pass/fail status.",
+            actions=["Re-run M6 and ensure checks log status values to results.db."],
+        )
 
     cats = sorted(set(r["category"] for r in normalized))
     pass_cnt = {c: sum(1 for r in normalized if r["category"] == c and r["status"] == "pass")
@@ -468,7 +509,8 @@ def _chart_compat(compat_data) -> plt.Figure:
 def _chart_import(metrics) -> plt.Figure:
     imp = metrics.get("import_stats", [])
     if not imp:
-        return _empty_chart("No import data")
+        reason, actions = _module_missing_reason(metrics, "07_data_import", "No import data")
+        return _empty_chart("Import data unavailable", reason=reason, actions=actions)
 
     # We log one row per method; use last 3 rows
     rows  = imp[-3:]
@@ -488,12 +530,126 @@ def _chart_import(metrics) -> plt.Figure:
     return fig
 
 
-def _empty_chart(title: str) -> plt.Figure:
-    fig, ax = plt.subplots(figsize=(10, 3))
-    ax.text(0.5, 0.5, f"No data — {title}", ha="center", va="center",
-            transform=ax.transAxes, fontsize=12, color="grey")
+def _empty_chart(title: str, reason: str = "", actions: list[str] | None = None) -> plt.Figure:
+    actions = actions or []
+    fig, ax = plt.subplots(figsize=(12, 4.5))
+    ax.axis("off")
+
+    ax.text(0.02, 0.92, title, transform=ax.transAxes, fontsize=14, fontweight="bold", color="#334155")
+    ax.text(0.02, 0.80, "Data not available for this section.", transform=ax.transAxes, fontsize=11, color="#64748b")
+    if reason:
+        ax.text(0.02, 0.66, f"Reason: {reason}", transform=ax.transAxes, fontsize=10, color="#475569")
+    if actions:
+        ax.text(0.02, 0.52, "Next run guidance:", transform=ax.transAxes, fontsize=10, color="#334155", fontweight="bold")
+        y = 0.43
+        for item in actions[:4]:
+            ax.text(0.03, y, f"- {item}", transform=ax.transAxes, fontsize=9, color="#475569")
+            y -= 0.10
+    ax.add_patch(plt.Rectangle((0.01, 0.04), 0.98, 0.90, fill=False, lw=1.0, ec="#cbd5e1", transform=ax.transAxes))
     ax.axis("off")
     return fig
+
+
+def _module_data_points(mod_entry: dict) -> int:
+    tidb = mod_entry.get("tidb", {}) if isinstance(mod_entry, dict) else {}
+    total = 0
+    if isinstance(tidb, dict):
+        for stats in tidb.values():
+            if isinstance(stats, dict):
+                try:
+                    total += int(stats.get("count", 0) or 0)
+                except Exception:
+                    pass
+    return total
+
+
+def _module_missing_reason(metrics: dict, module_key: str, fallback: str) -> tuple[str, list[str]]:
+    mod = (metrics.get("modules", {}) or {}).get(module_key, {}) or {}
+    status = str(mod.get("status") or "not_run").lower()
+    notes = str(mod.get("notes") or "").strip()
+    if status == "not_run":
+        reason = f"{MODULE_DISPLAY.get(module_key, module_key)} was not selected for this run."
+    elif status == "failed":
+        reason = f"{MODULE_DISPLAY.get(module_key, module_key)} failed during execution."
+    elif status == "skipped":
+        reason = f"{MODULE_DISPLAY.get(module_key, module_key)} was skipped."
+    else:
+        reason = fallback
+    if notes:
+        reason = f"{reason} Notes: {notes}"
+    actions = [
+        f"Enable {MODULE_DISPLAY.get(module_key, module_key)} in test selection and rerun.",
+        "Use small defaults first, then increase duration/concurrency after a clean baseline.",
+        "Check results/run_all.log for module-level errors before rebuilding report.",
+    ]
+    return reason, actions
+
+
+def _add_run_coverage_page(pdf, metrics):
+    pdf.add_page()
+    pdf.section_title("Run Coverage and Data Completeness")
+    summary = metrics.get("summary", {}) or {}
+    run_context = metrics.get("run_context", {}) or {}
+    manifest = metrics.get("data_manifest", {}) or {}
+    rows_generated = 0
+    if isinstance(manifest.get("counts"), dict):
+        rows_generated = sum(v for v in manifest.get("counts", {}).values() if isinstance(v, (int, float)))
+
+    pdf.body_text(
+        f"Run mode: {run_context.get('run_mode', 'n/a')} | "
+        f"Schema mode: {run_context.get('schema_mode', 'n/a')} | "
+        f"Industry: {run_context.get('industry', 'general_auto')} | "
+        f"Modules passed: {summary.get('modules_passed', 0)}/{summary.get('modules_run', 0)} | "
+        f"Generated rows: {rows_generated:,}" if rows_generated else
+        f"Run mode: {run_context.get('run_mode', 'n/a')} | "
+        f"Schema mode: {run_context.get('schema_mode', 'n/a')} | "
+        f"Industry: {run_context.get('industry', 'general_auto')} | "
+        f"Modules passed: {summary.get('modules_passed', 0)}/{summary.get('modules_run', 0)}"
+    , size=8)
+
+    col_widths = [74, 24, 18, 18, 42]
+    headers = ["Module", "Status", "Secs", "Points", "Interpretation"]
+    pdf.set_font("Helvetica", "B", 8)
+    pdf.set_fill_color(*RED)
+    pdf.set_text_color(*WHITE)
+    for w, h in zip(col_widths, headers):
+        pdf.cell(w, 6, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_font("Helvetica", "", 7)
+
+    for key in MODULE_DISPLAY:
+        mod = (metrics.get("modules", {}) or {}).get(key, {}) or {}
+        status = str(mod.get("status") or "not_run")
+        dur = f"{float(mod.get('duration_sec') or 0):.0f}"
+        points = str(_module_data_points(mod))
+        if status == "passed":
+            interp = "Usable evidence captured."
+            color = GREEN
+        elif status == "failed":
+            interp = "Execution failed; chart may be unavailable."
+            color = RED
+        elif status == "skipped":
+            interp = "Explicitly skipped by test selection."
+            color = ORANGE
+        else:
+            interp = "Not selected in this run."
+            color = DARK_GREY
+        pdf.set_fill_color(*LIGHT_GREY)
+        pdf.cell(col_widths[0], 6, MODULE_DISPLAY[key], border=1, fill=True)
+        pdf.set_text_color(*color)
+        pdf.cell(col_widths[1], 6, status.upper(), border=1, fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.cell(col_widths[2], 6, dur, border=1, fill=True)
+        pdf.cell(col_widths[3], 6, points, border=1, fill=True)
+        pdf.cell(col_widths[4], 6, interp[:60], border=1, fill=True)
+        pdf.ln()
+
+    pdf.ln(4)
+    pdf.body_text(
+        "Charts in this report always display either measured data or a clear reason and action guidance block.",
+        size=8,
+    )
 
 
 def _rgb(color_tuple):
@@ -614,18 +770,6 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     # ── Page 2: Module status table ───────────────────────────────────────────
     pdf.add_page()
     pdf.section_title("Test Module Status")
-    module_display = {
-        "00_customer_queries":    "M0 — Customer Query Validation",
-        "01_baseline_perf":       "M1 — Baseline OLTP Performance",
-        "02_elastic_scale":       "M2 — Elastic Auto-Scaling",
-        "03_high_availability":   "M3 — High Availability & RTO",
-        "03b_write_contention":   "M3b — Write Contention / Hot Region",
-        "04_htap_concurrent":     "M4 — HTAP Concurrent Workload",
-        "05_online_ddl":          "M5 — Online DDL",
-        "06_mysql_compat":        "M6 — MySQL Compatibility",
-        "07_data_import":         "M7 — Data Import Speed",
-        "08_vector_search":       "M8 — Vector Search (AI Track)",
-    }
     col_widths = [80, 22, 22, 50]
     headers    = ["Module", "Status", "Duration", "Notes"]
     pdf.set_font("Helvetica", "B", 9)
@@ -636,7 +780,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     pdf.ln()
     pdf.set_text_color(0, 0, 0)
 
-    for mod_key, mod_label in module_display.items():
+    for mod_key, mod_label in MODULE_DISPLAY.items():
         mod  = metrics["modules"].get(mod_key, {})
         stat = mod.get("status", "not_run")
         dur  = f"{mod.get('duration_sec', 0):.0f}s" if mod.get("duration_sec") else "—"
@@ -653,7 +797,10 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         pdf.ln()
     pdf.ln(5)
 
-    # ── Pages 3+: Charts ──────────────────────────────────────────────────────
+    # ── Page 3: Coverage details ─────────────────────────────────────────────
+    _add_run_coverage_page(pdf, metrics)
+
+    # ── Pages 4+: Charts ──────────────────────────────────────────────────────
     manifest = metrics.get("data_manifest", {}) or {}
     _add_chart_page(
         pdf,
@@ -745,7 +892,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     pdf.set_text_color(0, 0, 0)
     pdf.set_font("Helvetica", "", 7)
 
-    for mod_key in module_display:
+    for mod_key in MODULE_DISPLAY:
         mod  = metrics["modules"].get(mod_key, {})
         tidb = mod.get("tidb", {})
         for phase, s in tidb.items():
