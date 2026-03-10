@@ -831,6 +831,53 @@ DATASET_BOOTSTRAP_REQUIRED="${DATASET_PROFILE_REST%%|*}"
 DATASET_SKIP_SYNTH="${DATASET_PROFILE_REST##*|}"
 DATASET_BOOTSTRAP_STATUS="skipped"
 
+db_has_nonempty_data() {
+  "${PYTHON}" - "${CONFIG_EFFECTIVE}" <<'PY'
+import sys
+import yaml
+import mysql.connector
+
+cfg_path = sys.argv[1]
+cfg = yaml.safe_load(open(cfg_path)) or {}
+tidb = cfg.get("tidb") or {}
+db = str(tidb.get("database") or "").strip()
+if not db:
+    print("false")
+    raise SystemExit(0)
+
+try:
+    conn = mysql.connector.connect(
+        host=tidb.get("host"),
+        port=int(tidb.get("port", 4000) or 4000),
+        user=tidb.get("user"),
+        password=tidb.get("password"),
+        database=db,
+        ssl_disabled=not bool(tidb.get("ssl", True)),
+        connection_timeout=10,
+    )
+    cur = conn.cursor()
+    cur.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema=%s ORDER BY table_name LIMIT 20",
+        (db,),
+    )
+    tables = [r[0] for r in cur.fetchall() if r and r[0]]
+    has_data = False
+    for table in tables:
+        try:
+            cur.execute(f"SELECT 1 FROM `{table}` LIMIT 1")
+            if cur.fetchone():
+                has_data = True
+                break
+        except Exception:
+            continue
+    conn.close()
+    print("true" if has_data else "false")
+except Exception:
+    print("false")
+PY
+}
+
 if [[ "${DATASET_BOOTSTRAP_ENABLED}" == "true" ]]; then
   echo "  Dataset bootstrap: enabled"
   set +e
@@ -855,8 +902,13 @@ fi
 if [[ "${DATASET_BOOTSTRAP_STATUS}" == "passed" && "${DATASET_SKIP_SYNTH}" == "true" ]]; then
   warn "dataset_bootstrap.skip_synthetic_generation=true — skipping synthetic data generation."
 elif [[ -f "${RESULTS_DIR}/data_manifest.json" && "${REGEN}" == "false" ]]; then
-  warn "data_manifest.json exists — skipping synthetic data generation"
-  warn "  Use --regen to force regeneration"
+  if [[ "$(db_has_nonempty_data)" == "true" ]]; then
+    warn "data_manifest.json exists — skipping synthetic data generation"
+    warn "  Use --regen to force regeneration"
+  else
+    warn "data_manifest.json exists but target database appears empty; regenerating data."
+    "${PYTHON}" setup/generate_data.py --config "${CONFIG_EFFECTIVE}"
+  fi
 else
   if [[ "${REGEN}" == "true" ]]; then
     warn "--regen flag detected, regenerating data..."
