@@ -15,9 +15,10 @@ import json
 import os
 import re
 import sys
+import tempfile
 import time
 from typing import Dict, Tuple
-from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit, unquote
 
 import yaml
 
@@ -48,12 +49,11 @@ def _is_s3_uri(uri: str) -> bool:
 
 def _split_s3_uri(uri: str) -> Tuple[str, str]:
     raw = str(uri or "").strip()
-    if not raw.startswith("s3://"):
+    if not raw.lower().startswith("s3://"):
         raise ValueError(f"Invalid S3 URI: {uri}")
-    body = raw[len("s3://") :]
-    if "/" not in body:
-        return body, ""
-    bucket, key = body.split("/", 1)
+    parts = urlsplit(raw)
+    bucket = str(parts.netloc or "").strip()
+    key = str(parts.path or "").lstrip("/")
     return bucket, key
 
 
@@ -170,6 +170,16 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
                         f"(cluster cpu guardrail detected)."
                     )
                     continue
+                if _is_cpu_guardrail_error(msg):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    print(
+                        f"    [dataset] {label} IMPORT INTO blocked by cluster cpu guardrail; "
+                        "falling back to LOAD DATA LOCAL INFILE."
+                    )
+                    return _run_load_data_local_infile(cfg, table, columns, effective_uris, label, start)
                 raise
         imported_uris.append(_redact_uri(uri))
     cur.execute(f"SELECT COUNT(*) FROM `{table}`")
@@ -183,6 +193,7 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
         "uris": imported_uris,
         "rows": count,
         "import_threads": import_threads if import_threads is not None else "default",
+        "import_mode": "import_into",
         "duration_sec": round(elapsed, 2),
         "rows_per_sec": round(count / elapsed, 2),
     }
@@ -274,11 +285,100 @@ def _derive_cpu_safe_threads(err_text: str, parallel_jobs: int) -> int | None:
     return max(1, cpu_count // max(1, parallel_jobs))
 
 
+def _is_cpu_guardrail_error(err_text: str) -> bool:
+    msg = str(err_text or "")
+    return bool(re.search(r"task concurrency\(\d+\)\s+larger than cpu count\(\d+\)", msg, flags=re.IGNORECASE))
+
+
 def _build_import_sql(table: str, columns: list[str], uri: str, import_threads: int | None) -> str:
     sql = f"IMPORT INTO `{table}` ({', '.join(columns)}) FROM '{uri}' FORMAT 'CSV'"
     if import_threads and import_threads > 0:
         sql += f" WITH thread={int(import_threads)}"
     return sql
+
+
+def _run_load_data_local_infile(cfg: Dict, table: str, columns: list[str], uris: list[str], label: str, started_at: float) -> Dict:
+    import boto3
+    import mysql.connector
+
+    ds_cfg = cfg.get("dataset_bootstrap") or {}
+    region = (
+        str(ds_cfg.get("aws_region") or "").strip()
+        or str(os.environ.get("POV_S3_REGION", "")).strip()
+        or str(os.environ.get("AWS_REGION", "")).strip()
+    )
+    s3_kwargs = {"region_name": region} if region else {}
+    s3 = boto3.client("s3", **s3_kwargs)
+
+    tidb = cfg.get("tidb") or {}
+    conn = mysql.connector.connect(
+        host=tidb["host"],
+        port=int(tidb.get("port", 4000)),
+        user=tidb["user"],
+        password=tidb["password"],
+        database=tidb.get("database"),
+        ssl_disabled=not bool(tidb.get("ssl", True)),
+        allow_local_infile=True,
+        connection_timeout=60,
+    )
+    conn.autocommit = True
+    cur = conn.cursor()
+
+    loaded_uris = []
+    local_paths = []
+    try:
+        with tempfile.TemporaryDirectory(prefix="pov_bootstrap_") as tmp:
+            for idx, uri in enumerate(uris):
+                local_path = _resolve_to_local_csv(uri, tmp, idx, s3)
+                local_paths.append(local_path)
+                escaped = local_path.replace("\\", "\\\\").replace("'", "\\'")
+                sql = (
+                    f"LOAD DATA LOCAL INFILE '{escaped}' INTO TABLE `{table}` "
+                    "FIELDS TERMINATED BY ',' LINES TERMINATED BY '\\n' "
+                    f"({', '.join(columns)})"
+                )
+                cur.execute(sql)
+                loaded_uris.append(_redact_uri(uri))
+
+        cur.execute(f"SELECT COUNT(*) FROM `{table}`")
+        row = cur.fetchone()
+        count = int(row[0] if row else 0)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    elapsed = max(0.001, time.time() - started_at)
+    return {
+        "label": label,
+        "table": table,
+        "uris": loaded_uris,
+        "rows": count,
+        "import_threads": "n/a",
+        "import_mode": "load_data_local_infile_fallback",
+        "duration_sec": round(elapsed, 2),
+        "rows_per_sec": round(count / elapsed, 2),
+    }
+
+
+def _resolve_to_local_csv(uri: str, tmp_dir: str, idx: int, s3_client) -> str:
+    raw = str(uri or "").strip()
+    if raw.lower().startswith("file://"):
+        local = unquote(urlsplit(raw).path)
+        if not os.path.exists(local):
+            raise FileNotFoundError(f"Local file not found for LOAD DATA fallback: {local}")
+        return local
+    if raw.lower().startswith("s3://"):
+        bucket, key = _split_s3_uri(raw)
+        if not bucket or not key:
+            raise ValueError(f"Invalid S3 URI for fallback download: {uri}")
+        out = os.path.join(tmp_dir, f"part_{idx:04d}.csv")
+        s3_client.download_file(bucket, key, out)
+        return out
+    if os.path.exists(raw):
+        return raw
+    raise ValueError(f"Unsupported URI for LOAD DATA fallback: {uri}")
 
 
 def run(cfg: Dict, strict: bool = False) -> Dict:

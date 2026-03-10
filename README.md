@@ -84,7 +84,7 @@ dataset_bootstrap:
   skip_synthetic_generation: false
 ```
 
-`run_all.sh` will execute this bootstrap before synthetic generation and load OLTP + OLAP tables using `IMPORT INTO` from S3.
+`run_all.sh` will execute this bootstrap before synthetic generation and load OLTP + OLAP tables using `IMPORT INTO` from S3. On tiny-tier CPU guardrail errors, it automatically falls back to `LOAD DATA LOCAL INFILE` from the same S3 files.
 
 ### 3) Choose How You Run
 

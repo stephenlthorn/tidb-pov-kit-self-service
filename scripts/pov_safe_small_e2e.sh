@@ -177,6 +177,7 @@ bootstrap["profile_key"] = "general_auto"
 bootstrap["s3_prefix"] = str(bootstrap.get("s3_prefix") or "tidb-pov/datasets")
 bootstrap["aws_region"] = str(bootstrap.get("aws_region") or "us-east-1")
 bootstrap["import_threads"] = int(bootstrap.get("import_threads", 1) or 1)
+bootstrap["parallel_import_jobs"] = int(bootstrap.get("parallel_import_jobs", 1) or 1)
 bootstrap["skip_synthetic_generation"] = False
 
 # Force all standard modules on for full test sweep.
