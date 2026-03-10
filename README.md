@@ -18,9 +18,12 @@ TCO comparison.
 | M3b — Write Contention | AUTO_RANDOM eliminates hot-region bottlenecks vs AUTO_INCREMENT |
 | M4 — HTAP Concurrent | Analytics run on TiFlash without degrading OLTP on TiKV |
 | M5 — Online DDL | Schema changes complete with zero application downtime |
-| M6 — MySQL Compatibility | 95%+ MySQL syntax and semantic compatibility |
+| M6 — SQL Compatibility | TiDB SQL compatibility checks + source unsupported-feature inventory (MySQL/PostgreSQL/SQL Server) |
 | M7 — Data Import | Bulk load throughput: IMPORT INTO vs LOAD DATA vs INSERT |
 | M8 — Vector Search *(optional)* | ANN search with HNSW index (TiDB AI track) |
+
+M6 also writes source feature inventory output to:
+- `results/compat_source_unsupported_summary.json`
 
 ---
 

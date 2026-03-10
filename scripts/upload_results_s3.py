@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import socket
+import urllib.parse
 from pathlib import Path
 from typing import Dict, List
 
@@ -43,6 +44,16 @@ def parse_args() -> argparse.Namespace:
         "--kms-key-id",
         default=os.environ.get("POV_S3_KMS_KEY_ID") or os.environ.get("S3_KMS_KEY_ID") or "",
         help="Optional KMS key ARN/ID for SSE-KMS",
+    )
+    p.add_argument(
+        "--presign-seconds",
+        type=int,
+        default=int(
+            os.environ.get("POV_S3_PRESIGN_SECONDS")
+            or os.environ.get("S3_PRESIGN_SECONDS")
+            or "604800"
+        ),
+        help="Signed URL TTL in seconds (default 7 days, set 0 to disable).",
     )
     p.add_argument("--check-only", action="store_true", help="Only validate S3 read/write access and exit")
     return p.parse_args()
@@ -91,6 +102,21 @@ def upload_file(
         "s3_uri": f"s3://{bucket}/{key}",
         "size_bytes": local_path.stat().st_size,
     }
+
+
+def build_download_url(s3, bucket: str, key: str, region: str, presign_seconds: int) -> str:
+    if presign_seconds > 0:
+        try:
+            return s3.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=presign_seconds,
+            )
+        except Exception:
+            pass
+    key_enc = urllib.parse.quote(key, safe="/")
+    reg = region or "us-east-1"
+    return f"https://s3.console.aws.amazon.com/s3/object/{bucket}?region={reg}&prefix={key_enc}"
 
 
 def probe_bucket_access(
@@ -181,16 +207,22 @@ def main() -> int:
             skipped.append(str(path))
             continue
         key = f"{prefix}/{project}/runs/{run_tag}/results/{name}"
-        uploaded.append(
-            upload_file(
-                s3,
-                args.bucket,
-                path,
-                key,
-                expected_bucket_owner=args.expected_bucket_owner,
-                kms_key_id=args.kms_key_id,
-            )
+        row = upload_file(
+            s3,
+            args.bucket,
+            path,
+            key,
+            expected_bucket_owner=args.expected_bucket_owner,
+            kms_key_id=args.kms_key_id,
         )
+        row["download_url"] = build_download_url(
+            s3=s3,
+            bucket=args.bucket,
+            key=key,
+            region=args.region,
+            presign_seconds=args.presign_seconds,
+        )
+        uploaded.append(row)
 
     if runs_dir.exists() and runs_dir.is_dir():
         run_dirs = sorted([p for p in runs_dir.iterdir() if p.is_dir()])
@@ -200,23 +232,39 @@ def main() -> int:
                 p = latest / file_name
                 if p.exists():
                     key = f"{prefix}/{project}/runs/{run_tag}/workload/{file_name}"
-                    uploaded.append(
-                        upload_file(
-                            s3,
-                            args.bucket,
-                            p,
-                            key,
-                            expected_bucket_owner=args.expected_bucket_owner,
-                            kms_key_id=args.kms_key_id,
-                        )
+                    row = upload_file(
+                        s3,
+                        args.bucket,
+                        p,
+                        key,
+                        expected_bucket_owner=args.expected_bucket_owner,
+                        kms_key_id=args.kms_key_id,
                     )
+                    row["download_url"] = build_download_url(
+                        s3=s3,
+                        bucket=args.bucket,
+                        key=key,
+                        region=args.region,
+                        presign_seconds=args.presign_seconds,
+                    )
+                    uploaded.append(row)
 
+    manifest_key = f"{prefix}/{project}/runs/{run_tag}/manifest.json"
     manifest = {
         "uploaded_at": dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z",
         "bucket": args.bucket,
         "prefix": prefix,
         "project": project,
         "run_tag": run_tag,
+        "presign_seconds": args.presign_seconds,
+        "manifest_s3": f"s3://{args.bucket}/{manifest_key}",
+        "manifest_download_url": build_download_url(
+            s3=s3,
+            bucket=args.bucket,
+            key=manifest_key,
+            region=args.region,
+            presign_seconds=args.presign_seconds,
+        ),
         "uploaded_count": len(uploaded),
         "uploaded": uploaded,
         "skipped": skipped,
@@ -226,7 +274,6 @@ def main() -> int:
     results_dir.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    manifest_key = f"{prefix}/{project}/runs/{run_tag}/manifest.json"
     upload_file(
         s3,
         args.bucket,
@@ -239,6 +286,13 @@ def main() -> int:
     print(f"[upload] uploaded_count={len(uploaded)}")
     print(f"[upload] manifest={manifest_path}")
     print(f"[upload] manifest_s3=s3://{args.bucket}/{manifest_key}")
+    report = next((r for r in uploaded if str(r.get("key", "")).endswith("/results/tidb_pov_report.pdf")), None)
+    metrics = next((r for r in uploaded if str(r.get("key", "")).endswith("/results/metrics_summary.json")), None)
+    if report:
+        print(f"[upload] report_download={report.get('download_url')}")
+    if metrics:
+        print(f"[upload] metrics_download={metrics.get('download_url')}")
+    print(f"[upload] manifest_download={manifest.get('manifest_download_url')}")
     return 0
 
 

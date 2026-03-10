@@ -266,7 +266,7 @@ MODULE_LABELS = {
     "write_contention": "M3b - Write Contention",
     "htap": "M4 - HTAP Concurrent",
     "online_ddl": "M5 - Online DDL",
-    "mysql_compat": "M6 - MySQL Compatibility",
+    "mysql_compat": "M6 - SQL Compatibility",
     "data_import": "M7 - Data Import",
     "vector_search": "M8 - Vector Search",
 }
@@ -309,8 +309,8 @@ MODULE_INSIGHTS = {
     },
     "mysql_compat": {
         "focus": "Migration compatibility",
-        "runs": "Executes broad MySQL feature checks across DDL/DML/functions/JSON/window functions/transactions/EXPLAIN and logs detailed results.",
-        "value": "Quantifies MySQL feature compatibility for migration planning.",
+        "runs": "Executes TiDB SQL checks and source unsupported-feature inventory for MySQL/PostgreSQL/SQL Server when configured.",
+        "value": "Quantifies compatibility gaps and remediation scope before migration.",
     },
     "data_import": {
         "focus": "Migration ingest speed",
@@ -361,9 +361,9 @@ MODULE_DETAIL_NOTES = {
         "artifacts": "DDL durations and concurrent latency impact metrics.",
     },
     "mysql_compat": {
-        "validates": "Validates MySQL syntax/behavior compatibility across feature groups.",
-        "pass_signal": "Required compatibility checks pass at target threshold.",
-        "artifacts": "compat_checks summary + failing check list in metrics_summary.json.",
+        "validates": "Validates SQL syntax/behavior compatibility and inventories source-engine unsupported features.",
+        "pass_signal": "Required compatibility checks pass and source unsupported-feature findings are reviewed.",
+        "artifacts": "compat_checks summary + unsupported feature index in metrics_summary.json.",
     },
     "data_import": {
         "validates": "Validates ingestion throughput across configured import methods.",
@@ -477,7 +477,7 @@ MODULE_REPORT_LABELS = {
     "03b_write_contention": "M3b - Write Contention",
     "04_htap_concurrent": "M4 - HTAP Concurrent",
     "05_online_ddl": "M5 - Online DDL",
-    "06_mysql_compat": "M6 - MySQL Compatibility",
+    "06_mysql_compat": "M6 - SQL Compatibility",
     "07_data_import": "M7 - Data Import",
     "08_vector_search": "M8 - Vector Search",
 }
@@ -1445,7 +1445,7 @@ def build_report_dashboard() -> Dict:
         {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
         {"label": "Best TPS", "value": f"{best_tps:,.1f}", "sub": "Higher is better"},
         {"label": "Best P99 (ms)", "value": f"{best_p99:,.2f}", "sub": "Best observed across phases"},
-        {"label": "MySQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "Syntax/behavior checks"},
+        {"label": "SQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "TiDB SQL + source feature checks"},
         {"label": "Best Import GB/min", "value": f"{best_import:.4f}", "sub": "Data import throughput"},
     ]
 

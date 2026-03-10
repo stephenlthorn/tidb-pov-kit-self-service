@@ -233,6 +233,46 @@ s3_upload_required() {
   ok "Artifacts archived to s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/runs/${S3_RUN_TAG}/"
 }
 
+print_s3_download_links() {
+  local latest_manifest
+  latest_manifest="$(ls -1t "${RESULTS_DIR}"/s3_upload_manifest_*.json 2>/dev/null | head -n 1 || true)"
+  if [[ -z "${latest_manifest}" || ! -f "${latest_manifest}" ]]; then
+    return 0
+  fi
+
+  echo ""
+  echo "  S3 downloads:"
+  "${PYTHON}" - "${latest_manifest}" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+try:
+    payload = json.load(open(path))
+except Exception:
+    raise SystemExit(0)
+
+uploaded = payload.get("uploaded") or []
+def pick(suffix: str):
+    for row in uploaded:
+        key = str(row.get("key") or "")
+        if key.endswith(suffix):
+            return row
+    return {}
+
+report = pick("/results/tidb_pov_report.pdf")
+metrics = pick("/results/metrics_summary.json")
+manifest_url = str(payload.get("manifest_download_url") or "").strip()
+
+if report:
+    print(f"    - Report download : {report.get('download_url') or report.get('s3_uri')}")
+if metrics:
+    print(f"    - Metrics download: {metrics.get('download_url') or metrics.get('s3_uri')}")
+if manifest_url:
+    print(f"    - Manifest        : {manifest_url}")
+PY
+}
+
 if ! command -v "${PYTHON}" &>/dev/null; then
   echo "Python 3 not found. Install Python 3.9+ and retry."
   exit 1
@@ -926,7 +966,7 @@ if [[ "${RUN_STANDARD_MODULES}" == "true" ]]; then
   run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention"
   run_module "7" "M4 — HTAP Concurrent" "tests/04_htap_concurrent/run.py" "htap"
   run_module "8" "M5 — Online DDL" "tests/05_online_ddl/run.py" "online_ddl"
-  run_module "8" "M6 — MySQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
+  run_module "8" "M6 — SQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
   run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import"
   run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search"
 else
@@ -966,6 +1006,10 @@ if [[ -f "${INTAKE_JSON}" || -f "${INTAKE_MD}" ]]; then
   echo "  Intake artifacts:"
   [[ -f "${INTAKE_JSON}" ]] && echo "    - ${INTAKE_JSON}"
   [[ -f "${INTAKE_MD}" ]] && echo "    - ${INTAKE_MD}"
+fi
+
+if [[ "${S3_ENFORCED}" == "true" ]]; then
+  print_s3_download_links
 fi
 
 echo ""

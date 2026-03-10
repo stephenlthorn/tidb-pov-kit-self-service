@@ -37,6 +37,7 @@ def collect() -> dict:
         "modules":      {},
         "summary":      {},
         "data_manifest": _load_manifest(),
+        "source_unsupported_inventory": _load_source_unsupported_inventory(),
         "run_context": _load_run_context(),
         "workload_generator": _load_workload_generator_summary(),
         "comparison_enabled": False,
@@ -299,6 +300,7 @@ def _build_summary(payload: dict) -> dict:
 
     # MySQL compat
     compat = payload.get("compat_checks", {})
+    source_inv = payload.get("source_unsupported_inventory", {}) or {}
 
     return {
         "modules_run":          total_mods,
@@ -316,6 +318,8 @@ def _build_summary(payload: dict) -> dict:
         "rto_sec":              rto_sec,
         "hotspot_improvement_pct": hotspot_improvement,
         "mysql_compat_pct":     compat.get("pct"),
+        "source_unsupported_findings": source_inv.get("failing_features"),
+        "source_inventory_target": source_inv.get("target_label"),
         "comparison_enabled":   payload["comparison_enabled"],
         "workload_mode":        str(wg.get("mode") or ""),
         "workload_status":      str(wg.get("status") or ""),
@@ -334,6 +338,16 @@ def _load_manifest() -> dict:
     )
     if os.path.exists(manifest_path):
         with open(manifest_path) as f:
+            return json.load(f)
+    return {}
+
+
+def _load_source_unsupported_inventory() -> dict:
+    path = os.path.join(
+        os.path.dirname(__file__), "..", "results", "compat_source_unsupported_summary.json"
+    )
+    if os.path.exists(path):
+        with open(path) as f:
             return json.load(f)
     return {}
 

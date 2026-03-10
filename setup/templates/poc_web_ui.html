@@ -1665,7 +1665,7 @@
                 </div>
               </details>
               <div class="tiny">Technology-specific options: PostgreSQL uses SSL Mode, SQL Server uses Driver/Encrypt/Trust Certificate, and MySQL-family targets use standard SSL settings.</div>
-              <div class="tiny">Automated side-by-side workload execution currently supports MySQL family targets. Postgres and SQL Server targets are captured for planning/config parity.</div>
+              <div class="tiny">Automated side-by-side workload execution currently supports MySQL family targets; M6 source feature inventory supports MySQL, PostgreSQL, and SQL Server.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="4">
@@ -1799,7 +1799,7 @@
             </div>
 
             <div class="subpanel">
-              <h3 class="subhead">MySQL Compatibility</h3>
+              <h3 class="subhead">SQL Compatibility</h3>
               <div class="bar-meta">
                 <span>Passed {{ report_dashboard.compat_passed }} / {{ report_dashboard.compat_total }}</span>
                 <span>{{ report_dashboard.compat_pct }}%</span>
@@ -2192,7 +2192,7 @@
             </div>
 
             <div class="subpanel">
-              <h3 class="subhead">MySQL Compatibility</h3>
+              <h3 class="subhead">SQL Compatibility</h3>
               <div class="bar-meta">
                 <span>Passed {{ report_dashboard.compat_passed }} / {{ report_dashboard.compat_total }}</span>
                 <span>{{ report_dashboard.compat_pct }}%</span>
@@ -2613,7 +2613,7 @@
                 </div>
               </div>
             </details>
-            <div class="tiny">Automated side-by-side execution currently supports MySQL-family targets (Aurora/MySQL/RDS MySQL/SingleStore). PostgreSQL and SQL Server targets are planning-only and remain saved in configuration.</div>
+            <div class="tiny">Automated side-by-side execution currently supports MySQL-family targets (Aurora/MySQL/RDS MySQL/SingleStore). M6 source unsupported-feature inventory also scans PostgreSQL and SQL Server targets.</div>
           </div>
 
           <div class="config-section" id="manual-tests">

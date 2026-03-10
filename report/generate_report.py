@@ -12,7 +12,7 @@ Layout:
   Page 7:  HA recovery chart (RTO visualisation)
   Page 8:  Write contention comparison (sequential vs AUTO_RANDOM)
   Page 9:  HTAP chart (OLTP-only vs HTAP p99)
-  Page 10: MySQL compatibility heatmap
+  Page 10: SQL compatibility heatmap
   Page 11: Data import comparison bar chart
   Page 12: TCO model (3-year cost comparison)
   Page 13: (Optional) Vector search QPS chart
@@ -57,7 +57,7 @@ MODULE_DISPLAY = {
     "03b_write_contention":   "M3b — Write Contention / Hot Region",
     "04_htap_concurrent":     "M4 — HTAP Concurrent Workload",
     "05_online_ddl":          "M5 — Online DDL",
-    "06_mysql_compat":        "M6 — MySQL Compatibility",
+    "06_mysql_compat":        "M6 — SQL Compatibility",
     "07_data_import":         "M7 — Data Import Speed",
     "08_vector_search":       "M8 — Vector Search (AI Track)",
 }
@@ -125,6 +125,9 @@ COMPAT_FIX_GUIDANCE = {
     "INFORMATION_SCHEMA": "Map metadata queries to TiDB information_schema differences.",
     "SHOW": "Adjust SHOW output expectations; some variables/status fields differ across engines.",
     "EXPLAIN": "Use TiDB EXPLAIN/EXPLAIN ANALYZE formats and update plan parser assumptions.",
+    "SOURCE_MYSQL": "Inventory and remediate MySQL source features not directly supported in TiDB before migration cutover.",
+    "SOURCE_POSTGRES": "Inventory PostgreSQL-specific objects and plan app/schema rewrites for TiDB compatibility.",
+    "SOURCE_MSSQL": "Inventory SQL Server-specific features and replace them with TiDB-compatible schema + application patterns.",
     "UNCATEGORIZED": "Review failing SQL text and error note; patch SQL/driver behavior and retest.",
 }
 _COMPAT_NAME_TO_CATEGORY = None
@@ -644,7 +647,7 @@ def _chart_compat(compat_data) -> plt.Figure:
             "Compatibility data unavailable",
             reason="No compatibility checks were captured.",
             actions=[
-                "Enable module M6 (MySQL compatibility) and run again.",
+                "Enable module M6 (SQL compatibility) and run again.",
                 "Confirm compat_checks entries exist in results.db before report build.",
             ],
         )
@@ -685,7 +688,7 @@ def _chart_compat(compat_data) -> plt.Figure:
     ax.set_xticks(x)
     ax.set_xticklabels(display_labels, rotation=20, ha="right")
     ax.set_ylabel("Check count")
-    ax.set_title("MySQL Compatibility by Category")
+    ax.set_title("SQL Compatibility by Category")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
@@ -1061,13 +1064,13 @@ def _add_compat_index_page(pdf, metrics):
         return
 
     pdf.add_page()
-    pdf.section_title("MySQL Compatibility Index and Remediation Guide")
+    pdf.section_title("SQL Compatibility and Source Feature Index")
     passed = int(compat.get("passed", 0) or 0)
     total = int(compat.get("total", 0) or 0)
     failed = int(compat.get("failed", 0) or 0)
     pdf.body_text(
         f"Checks passed: {passed}/{total} ({compat.get('pct', 0)}%). Failed checks: {failed}. "
-        "Use this index to map each failing item to a concrete remediation action.",
+        "This index includes TiDB SQL checks and source-engine unsupported feature findings.",
         size=8,
     )
 
@@ -1400,7 +1403,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
         ("Drill Recovery (sim)", _fmt(summary.get("rto_sec"),    1), "seconds",  ORANGE),
         ("Hotspot Reduction",   _fmt(summary.get("hotspot_improvement_pct"), 0), "%",   RED),
-        ("MySQL Compat",        _fmt(summary.get("mysql_compat_pct"), 0), "%",   PURPLE),
+        ("SQL Compat",          _fmt(summary.get("mysql_compat_pct"), 0), "%",   PURPLE),
         ("Modules Passed",
          f"{summary.get('modules_passed','—')}/{summary.get('modules_run','—')}",
          "tests", (0, 128, 128)),
@@ -1423,7 +1426,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         "This report summarises the results of a self-service Proof of Value "
         "conducted on TiDB Cloud. The tests were executed automatically using "
         "the TiDB Cloud PoV Kit and cover OLTP performance (including warm steady-state), elastic auto-scaling, "
-        "high availability, write contention, HTAP, online DDL, MySQL compatibility, "
+        "high availability, write contention, HTAP, online DDL, SQL compatibility, "
         "data import speed, and total cost of ownership. "
         f"Run mode: {summary.get('run_mode', 'validation')}. "
         f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}. "
@@ -1457,7 +1460,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         for cat, name, fix in failed_compat[:4]:
             pdf.body_text(f"- [{cat}] {name}\n  Fix path: {fix}", size=8)
     else:
-        pdf.body_text("Compatibility summary: no MySQL compatibility failures were observed in this run.", size=8)
+        pdf.body_text("Compatibility summary: no SQL compatibility failures were observed in this run.", size=8)
 
     # ── Page 2: Module status table ───────────────────────────────────────────
     pdf.add_page()
@@ -1538,7 +1541,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                     "TiFlash columnar replicas serve analytical queries without "
                     "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
 
-    _add_chart_page(pdf, "MySQL Compatibility",
+    _add_chart_page(pdf, "SQL Compatibility",
                     _chart_compat(metrics.get("compat_checks", {})),
                     f"{metrics.get('compat_checks',{}).get('passed','—')} / "
                     f"{metrics.get('compat_checks',{}).get('total','—')} checks passed "
