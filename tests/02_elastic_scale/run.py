@@ -27,13 +27,17 @@ def run(cfg: dict):
     test_cfg = cfg.get("test") or {}
     base_concurrency = test_cfg.get("concurrency_levels", [16, 64, 256])[0]
     peak_concurrency = base_concurrency * 4
-    ramp_sec = test_cfg.get("ramp_duration_seconds", 1200)
-    sustain_sec = 300
+    ramp_sec = int(test_cfg.get("ramp_duration_seconds", 1200) or 1200)
+    sustain_sec = int(test_cfg.get("ramp_sustain_seconds", 300) or 300)
+    ramp_down_sustain_sec = int(test_cfg.get("ramp_down_sustain_seconds", 120) or 120)
 
     print(f"\n{'='*60}")
     print(f"  Module 2: Elastic Scale + Headroom Test")
     print(f"  Base concurrency: {base_concurrency} → Peak: {peak_concurrency}")
-    print(f"  Ramp duration: {ramp_sec}s | Sustain: {sustain_sec}s")
+    print(
+        "  Ramp duration: "
+        f"{ramp_sec}s | Sustain: {sustain_sec}s | Ramp-down sustain: {ramp_down_sustain_sec}s"
+    )
     print(f"{'='*60}")
 
     workload = apply_workload_profile(
@@ -64,7 +68,7 @@ def run(cfg: dict):
         start_concurrency=peak_concurrency,
         end_concurrency=base_concurrency,
         ramp_sec=ramp_sec // 2,
-        sustain_sec=120,
+        sustain_sec=ramp_down_sustain_sec,
         phase="ramp_down",
     )
 

@@ -16,20 +16,28 @@ import yaml
 from lib.result_store import init_db, start_module, end_module, log_result, get_time_series
 
 MODULE = "03_high_availability"
-WARMUP_SEC  = 60
-FAILURE_SEC = 30   # Duration of simulated failure window
-RECOVERY_OBSERVE_SEC = 60
-CONCURRENCY = 32
+DEFAULT_WARMUP_SEC = 60
+DEFAULT_FAILURE_SEC = 30
+DEFAULT_RECOVERY_OBSERVE_SEC = 60
+DEFAULT_CONCURRENCY = 32
 
 
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
+    test_cfg = cfg.get("test") or {}
+    warmup_sec = max(10, int(test_cfg.get("ha_warmup_seconds", DEFAULT_WARMUP_SEC) or DEFAULT_WARMUP_SEC))
+    failure_sec = max(5, int(test_cfg.get("ha_failure_seconds", DEFAULT_FAILURE_SEC) or DEFAULT_FAILURE_SEC))
+    recovery_observe_sec = max(
+        10,
+        int(test_cfg.get("ha_recovery_seconds", DEFAULT_RECOVERY_OBSERVE_SEC) or DEFAULT_RECOVERY_OBSERVE_SEC),
+    )
+    concurrency = max(1, int(test_cfg.get("ha_concurrency", DEFAULT_CONCURRENCY) or DEFAULT_CONCURRENCY))
 
     print(f"\n{'='*60}")
     print(f"  Module 3: High Availability & RTO/RPO")
-    print(f"  Warmup: {WARMUP_SEC}s | Failure window: {FAILURE_SEC}s | "
-          f"Observation: {RECOVERY_OBSERVE_SEC}s")
+    print(f"  Warmup: {warmup_sec}s | Failure window: {failure_sec}s | "
+          f"Observation: {recovery_observe_sec}s")
     print(f"{'='*60}")
 
     from load.load_runner import LoadRunner
@@ -55,24 +63,24 @@ def run(cfg: dict):
 
     # Phase 1: Warmup
     print(f"\n  Phase 1 — Warmup ({WARMUP_SEC}s)")
-    runner.run(pool, concurrency=CONCURRENCY, duration_sec=WARMUP_SEC, phase="warmup")
+    runner.run(pool, concurrency=concurrency, duration_sec=warmup_sec, phase="warmup")
 
     # Phase 2: Inject failure (simulate by closing all connections briefly)
     print(f"\n  Phase 2 — Failure injection (simulated connection drop, {FAILURE_SEC}s)")
     failure_ts["start"] = time.time()
-    _simulate_failure(cfg["tidb"], duration_sec=FAILURE_SEC, module=MODULE)
+    _simulate_failure(cfg["tidb"], duration_sec=failure_sec, module=MODULE)
     failure_ts["end"] = time.time()
     print(f"  Failure window: {failure_ts['end'] - failure_ts['start']:.1f}s")
 
     # Phase 3: Recovery observation
     print(f"\n  Phase 3 — Recovery observation ({RECOVERY_OBSERVE_SEC}s)")
-    runner.run(pool, concurrency=CONCURRENCY, duration_sec=RECOVERY_OBSERVE_SEC, phase="recovery")
+    runner.run(pool, concurrency=concurrency, duration_sec=recovery_observe_sec, phase="recovery")
 
     ts_data = get_time_series(MODULE, bucket_sec=5)
-    rto_sec = _calculate_rto(ts_data, failure_ts)
+    rto_sec = _calculate_rto(ts_data, failure_ts, warmup_window_sec=warmup_sec)
 
     summary = {
-        "failure_duration_sec": FAILURE_SEC,
+        "failure_duration_sec": failure_sec,
         "rto_sec": rto_sec,
         "failure_start_ts": failure_ts["start"],
         "failure_end_ts": failure_ts["end"],
@@ -111,7 +119,7 @@ def _simulate_failure(tidb_cfg: dict, duration_sec: int, module: str):
         time.sleep(0.05)
 
 
-def _calculate_rto(ts_data: list, failure_ts: dict) -> float:
+def _calculate_rto(ts_data: list, failure_ts: dict, warmup_window_sec: int = 60) -> float:
     """
     Estimate RTO by finding the first time bucket after the failure window
     where success rate returns to >= 95% of pre-failure baseline.
@@ -119,7 +127,7 @@ def _calculate_rto(ts_data: list, failure_ts: dict) -> float:
     if not ts_data or not failure_ts.get("end"):
         return 0.0
     # Simple heuristic: find the bucket where TPS recovers past 80% of warmup TPS
-    warmup_tps = [b["tps"] for b in ts_data if b.get("elapsed_sec", 0) < 60]
+    warmup_tps = [b["tps"] for b in ts_data if b.get("elapsed_sec", 0) < max(1, warmup_window_sec)]
     if not warmup_tps:
         return 0.0
     baseline = sum(warmup_tps) / len(warmup_tps)

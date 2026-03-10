@@ -15,18 +15,21 @@ from load.load_runner import LoadRunner
 from load.workload_definitions import schema_b_hotspot_workload, schema_b_autorand_workload, build_weighted_pool
 
 MODULE = "03b_write_contention"
-CONCURRENCY = 64
-PHASE_SEC   = 180   # 3 minutes per phase
+DEFAULT_CONCURRENCY = 64
+DEFAULT_PHASE_SEC = 180
 
 
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
     counts = _get_counts(cfg)
+    test_cfg = cfg.get("test") or {}
+    concurrency = max(1, int(test_cfg.get("write_contention_concurrency", DEFAULT_CONCURRENCY) or DEFAULT_CONCURRENCY))
+    phase_sec = max(15, int(test_cfg.get("write_contention_phase_seconds", DEFAULT_PHASE_SEC) or DEFAULT_PHASE_SEC))
 
     print(f"\n{'='*60}")
     print(f"  Module 3b: Write Contention & Hot Region")
-    print(f"  Concurrency: {CONCURRENCY} | Phase duration: {PHASE_SEC}s each")
+    print(f"  Concurrency: {concurrency} | Phase duration: {phase_sec}s each")
     print(f"{'='*60}")
 
     runner = LoadRunner(tidb_cfg=cfg["tidb"], counts=counts, module=MODULE)
@@ -37,7 +40,7 @@ def run(cfg: dict):
     print("\n  Phase A — Sequential UPSERT (hot region induced)...")
     _ensure_hotspot_table(cur, conn, auto_random=False)
     pool_a = build_weighted_pool(schema_b_hotspot_workload(counts))
-    runner.run(pool_a, concurrency=CONCURRENCY, duration_sec=PHASE_SEC,
+    runner.run(pool_a, concurrency=concurrency, duration_sec=phase_sec,
                phase="sequential")
     stats_a = get_latency_stats(MODULE, phase="sequential")
 
@@ -48,7 +51,7 @@ def run(cfg: dict):
     print("\n  Phase B — AUTO_RANDOM UPSERT (hotspot mitigated)...")
     _ensure_hotspot_table(cur, conn, auto_random=True)  # recreates with AUTO_RANDOM
     pool_b = build_weighted_pool(schema_b_autorand_workload(counts))
-    runner.run(pool_b, concurrency=CONCURRENCY, duration_sec=PHASE_SEC,
+    runner.run(pool_b, concurrency=concurrency, duration_sec=phase_sec,
                phase="autorand")
     stats_b = get_latency_stats(MODULE, phase="autorand")
 

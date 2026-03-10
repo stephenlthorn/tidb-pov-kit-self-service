@@ -25,22 +25,30 @@ from load.workload_definitions import (
     transactional_workload_for_cfg,
 )
 
-MODULE      = "04_htap_concurrent"
-OLTP_CONC   = 32
-ANAL_CONC   = 4       # analytical query threads — kept low, they're heavy
-PHASE_SEC   = 120     # 2 minutes per phase
-ENGINE_BENCH_SEC = 45
+MODULE = "04_htap_concurrent"
+DEFAULT_OLTP_CONC = 32
+DEFAULT_ANAL_CONC = 4
+DEFAULT_PHASE_SEC = 120
+DEFAULT_ENGINE_BENCH_SEC = 45
 
 
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
     counts = _get_counts(cfg)
+    test_cfg = cfg.get("test") or {}
+    oltp_conc = max(1, int(test_cfg.get("htap_oltp_concurrency", DEFAULT_OLTP_CONC) or DEFAULT_OLTP_CONC))
+    anal_conc = max(1, int(test_cfg.get("htap_analytics_concurrency", DEFAULT_ANAL_CONC) or DEFAULT_ANAL_CONC))
+    phase_sec = max(15, int(test_cfg.get("htap_phase_seconds", DEFAULT_PHASE_SEC) or DEFAULT_PHASE_SEC))
+    engine_bench_sec = max(
+        10,
+        int(test_cfg.get("htap_engine_bench_seconds", DEFAULT_ENGINE_BENCH_SEC) or DEFAULT_ENGINE_BENCH_SEC),
+    )
 
     print(f"\n{'='*60}")
     print(f"  Module 4: HTAP Concurrent Workload")
-    print(f"  OLTP concurrency: {OLTP_CONC} | Analytical threads: {ANAL_CONC}")
-    print(f"  Phase duration: {PHASE_SEC}s each")
+    print(f"  OLTP concurrency: {oltp_conc} | Analytical threads: {anal_conc}")
+    print(f"  Phase duration: {phase_sec}s each")
     print(f"{'='*60}")
 
     conn = get_connection(cfg["tidb"])
@@ -64,8 +72,8 @@ def run(cfg: dict):
 
     # ── Phase 1: OLTP-only baseline ──────────────────────────────────────────
     print("\n  Phase 1 — OLTP-only baseline (no analytics)...")
-    runner.run(oltp_pool, concurrency=OLTP_CONC,
-               duration_sec=PHASE_SEC, phase="oltp_only")
+    runner.run(oltp_pool, concurrency=oltp_conc,
+               duration_sec=phase_sec, phase="oltp_only")
     stats_baseline = get_latency_stats(MODULE, phase="oltp_only")
     _print_stats("OLTP-only", stats_baseline)
 
@@ -74,13 +82,13 @@ def run(cfg: dict):
     stop_event = threading.Event()
     anal_thread = threading.Thread(
         target=_run_analytics_continuously,
-        args=(cfg["tidb"], anal_pool, ANAL_CONC, stop_event, counts, "analytics", "tiflash,tikv"),
+        args=(cfg["tidb"], anal_pool, anal_conc, stop_event, counts, "analytics", "tiflash,tikv"),
         daemon=True,
     )
     anal_thread.start()
 
-    runner.run(oltp_pool, concurrency=OLTP_CONC,
-               duration_sec=PHASE_SEC, phase="htap")
+    runner.run(oltp_pool, concurrency=oltp_conc,
+               duration_sec=phase_sec, phase="htap")
     stop_event.set()
     anal_thread.join(timeout=10)
 
@@ -93,7 +101,7 @@ def run(cfg: dict):
     tiflash_stats = _benchmark_analytics_engine(
         cfg["tidb"], anal_pool, counts,
         phase="analytics_tiflash", read_engines="tiflash,tikv",
-        duration_sec=ENGINE_BENCH_SEC, concurrency=max(1, ANAL_CONC // 2),
+        duration_sec=engine_bench_sec, concurrency=max(1, anal_conc // 2),
     )
     _print_stats("Analytics on TiFlash", tiflash_stats)
 
@@ -101,7 +109,7 @@ def run(cfg: dict):
     tikv_stats = _benchmark_analytics_engine(
         cfg["tidb"], anal_pool, counts,
         phase="analytics_tikv", read_engines="tikv",
-        duration_sec=ENGINE_BENCH_SEC, concurrency=max(1, ANAL_CONC // 2),
+        duration_sec=engine_bench_sec, concurrency=max(1, anal_conc // 2),
     )
     _print_stats("Analytics on TiKV", tikv_stats)
     htap_conn   = get_connection(cfg["tidb"])

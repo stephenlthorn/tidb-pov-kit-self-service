@@ -19,16 +19,39 @@ import yaml
 from lib.result_store import init_db, start_module, end_module, log_result, get_latency_stats
 from lib.db_utils import get_connection
 
-MODULE        = "08_vector_search"
-VECTOR_DIM    = 256          # embedding dimensions
-DOC_COUNT     = 50_000       # documents to index
-QUERY_COUNT   = 500          # number of ANN queries per concurrency level
-CONCURRENCIES = [1, 4, 8, 16]
+MODULE = "08_vector_search"
+DEFAULT_VECTOR_DIM = 256
+DEFAULT_DOC_COUNT = 50_000
+DEFAULT_QUERY_COUNT = 500
+DEFAULT_CONCURRENCIES = [1, 4, 8, 16]
+DEFAULT_HYBRID_QUERY_COUNT = 100
 
 
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
+    test_cfg = cfg.get("test") or {}
+    vector_dim = max(8, int(test_cfg.get("vector_dim", DEFAULT_VECTOR_DIM) or DEFAULT_VECTOR_DIM))
+    doc_count = max(1000, int(test_cfg.get("vector_doc_count", DEFAULT_DOC_COUNT) or DEFAULT_DOC_COUNT))
+    query_count = max(50, int(test_cfg.get("vector_query_count", DEFAULT_QUERY_COUNT) or DEFAULT_QUERY_COUNT))
+    hybrid_query_count = max(
+        20,
+        int(test_cfg.get("vector_hybrid_query_count", DEFAULT_HYBRID_QUERY_COUNT) or DEFAULT_HYBRID_QUERY_COUNT),
+    )
+    concurrencies_cfg = test_cfg.get("vector_concurrency_levels", DEFAULT_CONCURRENCIES)
+    if not isinstance(concurrencies_cfg, list):
+        concurrencies_cfg = list(DEFAULT_CONCURRENCIES)
+    concurrencies = []
+    for raw in concurrencies_cfg:
+        try:
+            val = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if val > 0:
+            concurrencies.append(val)
+    if not concurrencies:
+        concurrencies = list(DEFAULT_CONCURRENCIES)
+    concurrencies = sorted(set(concurrencies))
 
     # Check if vector module is requested in config
     if not cfg.get("modules", {}).get("vector_search", True):
@@ -38,7 +61,7 @@ def run(cfg: dict):
 
     print(f"\n{'='*60}")
     print(f"  Module 8: Vector Search (AI Track)")
-    print(f"  Vectors: {DOC_COUNT:,} × {VECTOR_DIM}d | Queries: {QUERY_COUNT}")
+    print(f"  Vectors: {doc_count:,} × {vector_dim}d | Queries: {query_count}")
     print(f"{'='*60}")
 
     conn = get_connection(cfg["tidb"])
@@ -56,16 +79,16 @@ def run(cfg: dict):
     print(f"\n  Vector support confirmed: {note}")
 
     # ── Setup: create table and index ─────────────────────────────────────────
-    print(f"\n  Creating vector table ({DOC_COUNT:,} docs × {VECTOR_DIM}d)...")
-    _setup_vector_table(cur, conn)
+    print(f"\n  Creating vector table ({doc_count:,} docs × {vector_dim}d)...")
+    _setup_vector_table(cur, conn, vector_dim)
 
     # ── Insert synthetic embeddings ────────────────────────────────────────────
     print("  Inserting embeddings...")
     t0 = time.time()
-    _insert_embeddings(cur, conn, DOC_COUNT, VECTOR_DIM)
+    _insert_embeddings(cur, conn, doc_count, vector_dim)
     insert_sec = time.time() - t0
-    print(f"    Inserted {DOC_COUNT:,} vectors in {insert_sec:.1f}s "
-          f"({DOC_COUNT/insert_sec:.0f} vecs/s)")
+    print(f"    Inserted {doc_count:,} vectors in {insert_sec:.1f}s "
+          f"({doc_count/insert_sec:.0f} vecs/s)")
 
     # ── Build HNSW index ──────────────────────────────────────────────────────
     print("  Building HNSW vector index...")
@@ -85,9 +108,9 @@ def run(cfg: dict):
 
     # ── ANN search at various concurrencies ───────────────────────────────────
     concurrency_results = []
-    for conc in CONCURRENCIES:
+    for conc in concurrencies:
         print(f"\n  ANN search @ concurrency={conc}...")
-        _run_ann_queries(cfg["tidb"], VECTOR_DIM, QUERY_COUNT, conc)
+        _run_ann_queries(cfg["tidb"], vector_dim, query_count, conc)
         stats = get_latency_stats(MODULE, phase=f"ann_conc{conc}")
         concurrency_results.append({
             "concurrency": conc,
@@ -99,7 +122,7 @@ def run(cfg: dict):
 
     # ── Hybrid search (vector + SQL filter) ───────────────────────────────────
     print("\n  Hybrid search (vector similarity + SQL category filter)...")
-    hybrid_stats = _run_hybrid_queries(cfg["tidb"], VECTOR_DIM, 100)
+    hybrid_stats = _run_hybrid_queries(cfg["tidb"], vector_dim, hybrid_query_count)
     print(f"    p99={hybrid_stats.get('p99_ms',0):.1f}ms  "
           f"QPS={hybrid_stats.get('tps',0):.0f}")
 
@@ -111,8 +134,8 @@ def run(cfg: dict):
     end_module(MODULE, "passed",
                f"ANN p99 @ conc=1: {concurrency_results[0]['stats'].get('p99_ms',0):.1f}ms")
     return {
-        "doc_count":    DOC_COUNT,
-        "vector_dim":   VECTOR_DIM,
+        "doc_count":    doc_count,
+        "vector_dim":   vector_dim,
         "insert_sec":   round(insert_sec, 1),
         "index_sec":    round(index_sec, 1),
         "ann_by_concurrency": concurrency_results,
@@ -138,14 +161,14 @@ def _check_vector_support(cur) -> tuple:
         return False, str(e)[:120]
 
 
-def _setup_vector_table(cur, conn):
+def _setup_vector_table(cur, conn, vector_dim: int):
     cur.execute("DROP TABLE IF EXISTS vector_docs")
     cur.execute(f"""
         CREATE TABLE vector_docs (
             id        BIGINT AUTO_RANDOM PRIMARY KEY,
             title     VARCHAR(255),
             category  VARCHAR(50),
-            embedding VECTOR({VECTOR_DIM}) NOT NULL,
+            embedding VECTOR({int(vector_dim)}) NOT NULL,
             INDEX idx_category (category)
         )
     """)
