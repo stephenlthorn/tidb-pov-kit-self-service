@@ -188,12 +188,36 @@ def _run_ann_queries(tidb_cfg, dim, query_count, concurrency):
     import time as _time
 
     phase = f"ann_conc{concurrency}"
+    max_connect_retries = 3
 
     def worker(_):
-        conn = get_connection(tidb_cfg)
-        cur  = conn.cursor()
         results = []
         per_worker = max(1, query_count // concurrency)
+        conn = None
+        cur = None
+        last_err = None
+        for _attempt in range(max_connect_retries):
+            try:
+                conn = get_connection(tidb_cfg)
+                cur = conn.cursor()
+                break
+            except Exception as e:
+                last_err = e
+                _time.sleep(0.2)
+
+        if conn is None or cur is None:
+            err_msg = str(last_err)[:120] if last_err else "connection failed"
+            now_ts = _time.time()
+            for _ in range(per_worker):
+                results.append({
+                    "module": MODULE, "phase": phase, "db_label": "tidb",
+                    "ts": now_ts, "query_type": "ann_cosine",
+                    "latency_ms": 0.0, "success": 0,
+                    "retries": max_connect_retries, "error": err_msg,
+                })
+            log_results_batch(results)
+            return
+
         for _ in range(per_worker):
             qvec = _random_vector(dim)
             t0   = _time.perf_counter()
@@ -222,7 +246,10 @@ def _run_ann_queries(tidb_cfg, dim, query_count, concurrency):
                     "retries": 0, "error": str(e)[:120],
                 })
         log_results_batch(results)
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
         list(ex.map(worker, range(concurrency)))

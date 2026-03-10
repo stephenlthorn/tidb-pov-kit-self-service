@@ -13,22 +13,58 @@ from lib.result_store import init_db, start_module, end_module, log_compat_check
 MODULE = "00_customer_queries"
 
 
+def _discover_default_queries(cur, database: str, max_tables: int = 4):
+    """
+    Build a lightweight fallback validation set from tables already present in
+    the active database so Module 0 can still execute when customer SQL is not
+    provided.
+    """
+    cur.execute(
+        """
+        SELECT table_name
+          FROM information_schema.tables
+         WHERE table_schema = %s
+           AND table_type = 'BASE TABLE'
+         ORDER BY table_name
+         LIMIT %s
+        """,
+        (database, max_tables),
+    )
+    tables = [str(row[0]) for row in cur.fetchall() if row and row[0]]
+    queries = []
+    for table in tables:
+        quoted = f"`{table}`"
+        queries.append(f"SELECT COUNT(*) FROM {quoted}")
+        queries.append(f"SELECT * FROM {quoted} LIMIT 20")
+
+    # Keep module lightweight and deterministic for small E2E.
+    return queries[:8]
+
+
 def run(cfg: dict):
     init_db()
     start_module(MODULE)
-    queries = cfg.get("customer_queries", [])
-
-    if not queries:
-        print("  No customer queries configured — skipping Module 0.")
-        end_module(MODULE, "skipped", "No customer_queries in config.yaml")
-        return []
-
-    print(f"\n{'='*60}")
-    print(f"  Module 0: Customer Query Validation ({len(queries)} queries)")
-    print(f"{'='*60}")
+    queries = [q for q in (cfg.get("customer_queries") or []) if isinstance(q, str) and q.strip()]
 
     conn = get_connection(cfg["tidb"])
     cur = conn.cursor()
+    auto_generated = False
+
+    if not queries:
+        database = str(cfg.get("tidb", {}).get("database") or "test")
+        queries = _discover_default_queries(cur, database)
+        auto_generated = True
+        if not queries:
+            print("  No customer queries configured and no tables found — skipping Module 0.")
+            conn.close()
+            end_module(MODULE, "skipped", "No customer_queries in config.yaml and no source tables available")
+            return []
+
+    print(f"\n{'='*60}")
+    print(f"  Module 0: Customer Query Validation ({len(queries)} queries)")
+    if auto_generated:
+        print("  Source: auto-generated default validation queries")
+    print(f"{'='*60}")
     results = []
 
     for i, sql in enumerate(queries, 1):

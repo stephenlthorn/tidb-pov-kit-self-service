@@ -246,6 +246,7 @@ print_s3_download_links() {
   echo "  S3 downloads (copy/paste friendly):"
   "${PYTHON}" - "${latest_manifest}" "${links_file}" <<'PY'
 import json
+from pathlib import Path
 import sys
 from pathlib import Path
 
@@ -932,6 +933,7 @@ import yaml
 
 cfg_path = sys.argv[1]
 metrics_path = sys.argv[2]
+results_dir = str(Path(metrics_path).resolve().parent)
 
 cfg = yaml.safe_load(open(cfg_path)) or {}
 metrics = {}
@@ -943,7 +945,7 @@ except Exception:
 
 mods_cfg = cfg.get("modules") or {}
 module_rows = [
-    ("00_customer_queries", ["customer_queries", "customer_query_validation"], "latency"),
+    ("00_customer_queries", ["customer_queries", "customer_query_validation"], "customer_queries"),
     ("01_baseline_perf", ["baseline_perf"], "latency"),
     ("02_elastic_scale", ["elastic_scale"], "latency"),
     ("03_high_availability", ["high_availability"], "latency"),
@@ -994,6 +996,19 @@ for module_key, config_keys, mode in module_rows:
         total_checks = int(compat.get("total", 0) or 0)
         if total_checks <= 0:
             issues.append(f"{module_key}: no compatibility checks captured")
+        continue
+
+    if mode == "customer_queries":
+        cq_path = Path(results_dir) / "customer_query_validation.json"
+        if not cq_path.exists():
+            issues.append(f"{module_key}: customer_query_validation.json missing")
+            continue
+        try:
+            cq_rows = json.load(open(cq_path))
+        except Exception:
+            cq_rows = []
+        if not isinstance(cq_rows, list) or len(cq_rows) == 0:
+            issues.append(f"{module_key}: customer query validation artifact empty")
         continue
 
     if mode == "import":
