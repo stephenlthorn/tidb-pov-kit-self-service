@@ -45,6 +45,14 @@ dataset_bootstrap:
   s3_bucket: ""                              # if manifest_uri omitted, uses s3://<bucket>/<s3_prefix>/manifest.json
   s3_prefix: "tidb-pov/datasets"
   aws_region: "us-east-1"
+  # Auth for TiDB IMPORT INTO from S3 (choose one path):
+  # 1) role_arn + external_id, OR
+  # 2) access_key_id + secret_access_key (+ session_token for temp creds)
+  s3_role_arn: ""
+  s3_external_id: ""
+  s3_access_key_id: ""
+  s3_secret_access_key: ""
+  s3_session_token: ""
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"
   enable_tiflash_for_olap: true

@@ -69,6 +69,13 @@ dataset_bootstrap:
   s3_bucket: "<your-s3-bucket>"
   s3_prefix: "tidb-pov/datasets"
   aws_region: "us-east-1"
+  # Choose one auth path for TiDB IMPORT INTO:
+  # s3_role_arn + s3_external_id, OR access key fields below.
+  s3_role_arn: ""
+  s3_external_id: ""
+  s3_access_key_id: ""
+  s3_secret_access_key: ""
+  s3_session_token: ""   # required for temporary/session credentials
   skip_synthetic_generation: false
 ```
 
@@ -249,6 +256,12 @@ dataset_bootstrap:
   s3_bucket: ""
   s3_prefix: "tidb-pov/datasets"
   aws_region: "us-east-1"
+  # Auth for TiDB IMPORT INTO from S3 (choose one path)
+  s3_role_arn: ""
+  s3_external_id: ""
+  s3_access_key_id: ""
+  s3_secret_access_key: ""
+  s3_session_token: ""
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"
   enable_tiflash_for_olap: true
