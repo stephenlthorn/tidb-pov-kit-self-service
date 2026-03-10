@@ -1365,6 +1365,8 @@ def build_report_dashboard() -> Dict:
         "compat_passed": 0,
         "compat_failed": 0,
         "compat_failed_checks": [],
+        "compat_output_lines": [],
+        "compat_source_summary": "",
         "line_charts": [],
     }
 
@@ -1528,6 +1530,46 @@ def build_report_dashboard() -> Dict:
     out["compat_failed_checks"] = [
         d for d in (compat.get("details") or []) if isinstance(d, dict) and d.get("status") == "fail"
     ]
+
+    compat_lines = []
+    for item in out["compat_failed_checks"][:12]:
+        check_name = str(item.get("check_name") or item.get("name") or "Unnamed check")
+        category = str(item.get("category") or "General")
+        note = str(item.get("note") or "").strip()
+        if note:
+            compat_lines.append(f"[{category}] {check_name} -> {note}")
+        else:
+            compat_lines.append(f"[{category}] {check_name}")
+
+    source_inv = metrics.get("source_unsupported_inventory") or {}
+    src_status = str(source_inv.get("status") or "").strip().lower()
+    if src_status == "executed":
+        target_label = str(source_inv.get("target_label") or source_inv.get("target") or "source")
+        family = str(source_inv.get("family") or "unknown")
+        checks_total = parse_int(source_inv.get("checks_total"), 0)
+        failing_features = parse_int(source_inv.get("failing_features"), 0)
+        out["compat_source_summary"] = (
+            f"Source inventory ({target_label} / {family}): "
+            f"{failing_features}/{checks_total} features require remediation."
+        )
+        for row in (source_inv.get("rows") or []):
+            if not isinstance(row, dict):
+                continue
+            if str(row.get("status") or "").strip().lower() == "pass":
+                continue
+            feature = str(row.get("feature") or row.get("name") or "feature")
+            note = str(row.get("note") or "").strip()
+            if note:
+                compat_lines.append(f"[SOURCE] {feature} -> {note}")
+            else:
+                compat_lines.append(f"[SOURCE] {feature}")
+            if len(compat_lines) >= 20:
+                break
+    elif src_status:
+        reason = str(source_inv.get("reason") or "source inventory not executed")
+        out["compat_source_summary"] = f"Source inventory: {reason}"
+
+    out["compat_output_lines"] = compat_lines[:20]
 
     line_charts = []
     for module_key, data in modules.items():

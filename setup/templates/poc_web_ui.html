@@ -1805,6 +1805,17 @@
                 <span>{{ report_dashboard.compat_pct }}%</span>
               </div>
               <div class="compat-track"><div class="compat-fill" style="width: {{ report_dashboard.compat_pct }}%"></div></div>
+              {% if report_dashboard.compat_source_summary %}
+                <div class="tiny">{{ report_dashboard.compat_source_summary }}</div>
+              {% endif %}
+              {% if report_dashboard.compat_output_lines %}
+                <div class="tiny">Results output</div>
+                <ul class="compat-list">
+                  {% for line in report_dashboard.compat_output_lines %}
+                    <li>{{ line }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
               <div class="tiny">Generated: {{ report_dashboard.generated_at if report_dashboard.generated_at else 'n/a' }}</div>
             </div>
           </div>
@@ -2198,6 +2209,17 @@
                 <span>{{ report_dashboard.compat_pct }}%</span>
               </div>
               <div class="compat-track"><div class="compat-fill" style="width: {{ report_dashboard.compat_pct }}%"></div></div>
+              {% if report_dashboard.compat_source_summary %}
+                <div class="tiny">{{ report_dashboard.compat_source_summary }}</div>
+              {% endif %}
+              {% if report_dashboard.compat_output_lines %}
+                <div class="tiny">Results output</div>
+                <ul class="compat-list">
+                  {% for line in report_dashboard.compat_output_lines %}
+                    <li>{{ line }}</li>
+                  {% endfor %}
+                </ul>
+              {% endif %}
               {% if report_dashboard.compat_failed_checks %}
                 <div class="tiny">Failed checks</div>
                 <ul class="compat-list">

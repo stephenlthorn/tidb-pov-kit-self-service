@@ -1814,12 +1814,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                     "TiFlash columnar replicas serve analytical queries without "
                     "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
 
-    _add_chart_page(pdf, "SQL Compatibility",
-                    _chart_compat(metrics.get("compat_checks", {})),
-                    f"{metrics.get('compat_checks',{}).get('passed','—')} / "
-                    f"{metrics.get('compat_checks',{}).get('total','—')} checks passed "
-                    f"({metrics.get('compat_checks',{}).get('pct','—')}% compatible). "
-                    "See compatibility index page for failed checks and fix actions.")
+    _add_sql_compat_page(pdf, metrics)
 
     _add_chart_page(pdf, "Data Import Speed",
                     _chart_import(metrics),
@@ -1915,6 +1910,85 @@ def _add_chart_page(pdf, title, fig, caption=""):
     pdf.embed_figure(fig, w=174)
     if caption:
         pdf.body_text(caption, size=8)
+
+
+def _write_wrapped_bullet(pdf: PoVReport, text: str, *, size: float = 7.5, line_h: float = 3.8):
+    content = f"- {pdf.normalize_text(str(text or ''))}"
+    lines = _safe_table_lines(pdf, content, pdf.w - pdf.l_margin - pdf.r_margin - 2, line_h, "", size)
+    needed_h = len(lines) * line_h + 1.0
+    if pdf.get_y() + needed_h > (pdf.h - pdf.b_margin):
+        pdf.add_page()
+        pdf.section_title("SQL Compatibility (Continued)")
+    pdf.set_x(pdf.l_margin + 1)
+    pdf.set_font("Helvetica", "", size)
+    pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 2, line_h, "\n".join(lines))
+
+
+def _add_sql_compat_page(pdf: PoVReport, metrics: dict):
+    compat = metrics.get("compat_checks", {}) or {}
+    details = compat.get("details", []) or []
+    source_inv = metrics.get("source_unsupported_inventory", {}) or {}
+
+    pdf.add_page()
+    pdf.section_title("SQL Compatibility")
+    pdf.embed_figure(_chart_compat(compat), w=174)
+    pdf.body_text(
+        f"{compat.get('passed', '—')} / {compat.get('total', '—')} checks passed "
+        f"({compat.get('pct', '—')}% compatible).",
+        size=8,
+    )
+
+    failed_rows = []
+    for row in details:
+        if not isinstance(row, dict):
+            continue
+        status = str(row.get("status") or "").strip().lower()
+        if status == "pass":
+            continue
+        category = _compat_category(row)
+        name = str(row.get("check_name") or row.get("name") or "Unnamed check")
+        note = str(row.get("note") or "").strip() or "Failed check"
+        failed_rows.append((category, name, note))
+
+    pdf.ln(1)
+    pdf.sub_title("Results Output")
+    if failed_rows:
+        for category, name, note in failed_rows[:10]:
+            _write_wrapped_bullet(pdf, f"[{category}] {name} -> {note}")
+    else:
+        pdf.body_text("No failed TiDB SQL compatibility checks in this run.", size=8)
+
+    src_status = str(source_inv.get("status") or "").strip().lower()
+    if src_status:
+        pdf.ln(1)
+        pdf.sub_title("Source Unsupported Feature Output")
+        if src_status == "executed":
+            target_label = str(source_inv.get("target_label") or source_inv.get("target") or "source")
+            family = str(source_inv.get("family") or "unknown")
+            checks_total = int(source_inv.get("checks_total") or 0)
+            failing_features = int(source_inv.get("failing_features") or 0)
+            pdf.body_text(
+                f"{target_label} ({family}): {failing_features}/{checks_total} features require remediation.",
+                size=8,
+            )
+            rows = source_inv.get("rows") or []
+            shown = 0
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                if str(row.get("status") or "").strip().lower() == "pass":
+                    continue
+                feature = str(row.get("feature") or row.get("name") or "feature")
+                note = str(row.get("note") or "").strip() or "needs review"
+                _write_wrapped_bullet(pdf, f"{feature} -> {note}")
+                shown += 1
+                if shown >= 8:
+                    break
+            if shown == 0:
+                pdf.body_text("No source unsupported features detected.", size=8)
+        else:
+            reason = str(source_inv.get("reason") or "Source inventory not executed.")
+            pdf.body_text(reason, size=8)
 
 
 def _chart_vector(ann_data) -> plt.Figure:
