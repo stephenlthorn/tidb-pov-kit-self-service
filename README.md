@@ -46,6 +46,34 @@ cp config.yaml.example config.yaml
 # fill tidb.host, tidb.user, tidb.password, tidb.database
 ```
 
+### 2.5) Optional: Pre-stage S3 Dataset Packs (recommended for demo/showcase runs)
+
+This creates pluggable OLTP + OLAP seed packs for all industries and uploads them to S3:
+
+```bash
+python3 scripts/publish_dataset_packs_s3.py \
+  --bucket <your-s3-bucket> \
+  --prefix tidb-pov/datasets \
+  --region us-east-1 \
+  --industries all \
+  --target-gb-per-family 0.25 \
+  --shards 8
+```
+
+Then enable first-step bootstrap import in `config.yaml`:
+
+```yaml
+dataset_bootstrap:
+  enabled: true
+  required: true
+  s3_bucket: "<your-s3-bucket>"
+  s3_prefix: "tidb-pov/datasets"
+  aws_region: "us-east-1"
+  skip_synthetic_generation: false
+```
+
+`run_all.sh` will execute this bootstrap before synthetic generation and load OLTP + OLAP tables using `IMPORT INTO` from S3.
+
 ### 3) Choose How You Run
 
 #### Path A — Web UI (recommended for first run)
@@ -212,6 +240,20 @@ test:
   import_into_source_uri: ""        # optional s3://bucket/path/file.csv
   import_source_size_gb: 0.0        # optional, for GB/min with remote import
 
+# Optional: first-step S3 dataset bootstrap (industry-pluggable OLTP/OLAP packs)
+dataset_bootstrap:
+  enabled: false
+  required: false
+  profile_key: ""                    # optional override, otherwise uses industry.selected
+  manifest_uri: ""                   # optional s3://bucket/prefix/manifest.json
+  s3_bucket: ""
+  s3_prefix: "tidb-pov/datasets"
+  aws_region: "us-east-1"
+  oltp_table: "poc_seed_oltp"
+  olap_table: "poc_seed_olap"
+  enable_tiflash_for_olap: true
+  skip_synthetic_generation: false
+
 # Notes:
 # - validation mode keeps broad self-service defaults.
 # - performance mode is intended for high-throughput benchmarking workflows.
@@ -366,6 +408,11 @@ each module — with descriptions of what to screenshot for customer slides.
 **IMPORT INTO fails (M7)**
 → `IMPORT INTO` with `file://` URI requires TiDB >= 7.2 and the file to be
   accessible from the TiDB server. For TiDB Cloud, use an S3 URI instead.
+
+**Dataset bootstrap from S3 fails (Step 4)**
+→ Verify `dataset_bootstrap.enabled=true`, valid manifest path
+  (`manifest_uri` or `s3_bucket + s3_prefix`), AWS credentials, and TiDB Cloud
+  `IMPORT INTO` access to the S3 objects.
   The module falls back to LOAD DATA and INSERT automatically.
 
 **Out of memory during large data generation**

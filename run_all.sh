@@ -459,6 +459,19 @@ print(f"{mode}|{tag}")
 PY
 }
 
+read_dataset_bootstrap_profile() {
+  "${PYTHON}" - <<PY
+import yaml
+with open("${CONFIG_EFFECTIVE}") as f:
+    cfg = yaml.safe_load(f) or {}
+ds = cfg.get("dataset_bootstrap") or {}
+enabled = bool(ds.get("enabled", False))
+required = bool(ds.get("required", False))
+skip_synth = bool(ds.get("skip_synthetic_generation", False))
+print(f"{str(enabled).lower()}|{str(required).lower()}|{str(skip_synth).lower()}")
+PY
+}
+
 sync_workload_generator_summary() {
   "${PYTHON}" - <<'PY'
 import json
@@ -752,12 +765,42 @@ fi
 ok "Dependencies installed"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 4. Generate synthetic data
+# 4. Dataset bootstrap and synthetic data
 # ─────────────────────────────────────────────────────────────────────────────
-step "4/10" "Generating synthetic data"
+step "4/10" "Dataset bootstrap and synthetic data"
 
-if [[ -f "${RESULTS_DIR}/data_manifest.json" && "${REGEN}" == "false" ]]; then
-  warn "data_manifest.json exists — skipping data generation"
+DATASET_PROFILE="$(read_dataset_bootstrap_profile)"
+DATASET_BOOTSTRAP_ENABLED="${DATASET_PROFILE%%|*}"
+DATASET_PROFILE_REST="${DATASET_PROFILE#*|}"
+DATASET_BOOTSTRAP_REQUIRED="${DATASET_PROFILE_REST%%|*}"
+DATASET_SKIP_SYNTH="${DATASET_PROFILE_REST##*|}"
+DATASET_BOOTSTRAP_STATUS="skipped"
+
+if [[ "${DATASET_BOOTSTRAP_ENABLED}" == "true" ]]; then
+  echo "  Dataset bootstrap: enabled"
+  set +e
+  "${PYTHON}" setup/bootstrap_dataset.py --config "${CONFIG_EFFECTIVE}"
+  DATASET_BOOTSTRAP_RC=$?
+  set -e
+  if [[ ${DATASET_BOOTSTRAP_RC} -eq 0 ]]; then
+    DATASET_BOOTSTRAP_STATUS="passed"
+    ok "Dataset bootstrap complete (S3 -> TiDB IMPORT INTO)"
+  else
+    DATASET_BOOTSTRAP_STATUS="failed"
+    if [[ "${DATASET_BOOTSTRAP_REQUIRED}" == "true" ]]; then
+      err "Dataset bootstrap failed and is required."
+      exit ${DATASET_BOOTSTRAP_RC}
+    fi
+    warn "Dataset bootstrap failed; continuing with synthetic data path."
+  fi
+else
+  warn "Dataset bootstrap disabled."
+fi
+
+if [[ "${DATASET_BOOTSTRAP_STATUS}" == "passed" && "${DATASET_SKIP_SYNTH}" == "true" ]]; then
+  warn "dataset_bootstrap.skip_synthetic_generation=true — skipping synthetic data generation."
+elif [[ -f "${RESULTS_DIR}/data_manifest.json" && "${REGEN}" == "false" ]]; then
+  warn "data_manifest.json exists — skipping synthetic data generation"
   warn "  Use --regen to force regeneration"
 else
   if [[ "${REGEN}" == "true" ]]; then

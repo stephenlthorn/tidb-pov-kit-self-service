@@ -35,6 +35,21 @@ tier:
 industry:
   selected: "general_auto"  # general_auto | banking | healthcare | gaming | retail_ecommerce | saas | iot_telemetry | adtech | logistics
 
+# Optional: first-step dataset bootstrap from S3 into TiDB.
+# This is the "showcase fast path" for pre-staged OLTP/OLAP packs.
+dataset_bootstrap:
+  enabled: false
+  required: false
+  profile_key: ""                            # optional override; defaults to industry.selected
+  manifest_uri: ""                           # optional s3://bucket/prefix/manifest.json
+  s3_bucket: ""                              # if manifest_uri omitted, uses s3://<bucket>/<s3_prefix>/manifest.json
+  s3_prefix: "tidb-pov/datasets"
+  aws_region: "us-east-1"
+  oltp_table: "poc_seed_oltp"
+  olap_table: "poc_seed_olap"
+  enable_tiflash_for_olap: true
+  skip_synthetic_generation: false           # true to run only S3 bootstrap data path
+
 # Optional: run load generation in customer AWS account (cross-account AssumeRole).
 # This keeps EC2/network run costs in customer account while summary artifacts
 # can still be uploaded to control plane for shared visibility.
