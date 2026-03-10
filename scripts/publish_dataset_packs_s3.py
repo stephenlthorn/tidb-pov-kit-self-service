@@ -177,10 +177,12 @@ def main():
     random.seed(args.seed)
     industries = _selected_industries(args.industries)
     import boto3
+    from botocore.config import Config as BotoConfig
 
     kwargs = {}
     if args.region:
         kwargs["region_name"] = args.region
+    kwargs["config"] = BotoConfig(signature_version="s3v4")
     s3 = boto3.client("s3", **kwargs)
 
     manifest = {

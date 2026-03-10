@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Dict, List
 
 import boto3
+from botocore.config import Config as BotoConfig
 from botocore.exceptions import ClientError
 
 DEFAULT_FILES = [
@@ -180,6 +181,7 @@ def main() -> int:
     s3_kwargs = {}
     if args.region:
         s3_kwargs["region_name"] = args.region
+    s3_kwargs["config"] = BotoConfig(signature_version="s3v4")
     s3 = boto3.client("s3", **s3_kwargs)
     try:
         probe_bucket_access(

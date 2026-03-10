@@ -45,6 +45,10 @@ try:
     from botocore.exceptions import ClientError
 except ModuleNotFoundError:
     ClientError = Exception
+try:
+    from botocore.config import Config as BotoConfig
+except ModuleNotFoundError:
+    BotoConfig = None
 
 ROOT = Path(__file__).resolve().parents[1]
 IS_VERCEL = bool(os.environ.get("VERCEL"))
@@ -1740,7 +1744,10 @@ def s3_client():
     if not s3_enabled() or not s3_bucket() or boto3 is None:
         return None
     region = str(os.environ.get("S3_REGION", "")).strip() or str(os.environ.get("AWS_REGION", "")).strip() or None
-    return boto3.client("s3", region_name=region)
+    kwargs = {"region_name": region}
+    if BotoConfig is not None:
+        kwargs["config"] = BotoConfig(signature_version="s3v4")
+    return boto3.client("s3", **kwargs)
 
 
 def s3_artifact_key(kind: str) -> str:

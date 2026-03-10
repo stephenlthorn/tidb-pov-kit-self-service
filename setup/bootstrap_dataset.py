@@ -81,6 +81,7 @@ def _load_manifest(cfg: Dict) -> Dict:
         raise FileNotFoundError(f"Manifest file not found: {uri}")
 
     import boto3
+    from botocore.config import Config as BotoConfig
 
     region = (
         str((cfg.get("dataset_bootstrap") or {}).get("aws_region") or "").strip()
@@ -92,6 +93,7 @@ def _load_manifest(cfg: Dict) -> Dict:
     kwargs = {}
     if region:
         kwargs["region_name"] = region
+    kwargs["config"] = BotoConfig(signature_version="s3v4")
     client = boto3.client("s3", **kwargs)
     obj = client.get_object(Bucket=bucket, Key=key)
     return json.loads(obj["Body"].read().decode("utf-8"))
@@ -300,6 +302,7 @@ def _build_import_sql(table: str, columns: list[str], uri: str, import_threads: 
 def _run_load_data_local_infile(cfg: Dict, table: str, columns: list[str], uris: list[str], label: str, started_at: float) -> Dict:
     import boto3
     import mysql.connector
+    from botocore.config import Config as BotoConfig
 
     ds_cfg = cfg.get("dataset_bootstrap") or {}
     region = (
@@ -308,6 +311,7 @@ def _run_load_data_local_infile(cfg: Dict, table: str, columns: list[str], uris:
         or str(os.environ.get("AWS_REGION", "")).strip()
     )
     s3_kwargs = {"region_name": region} if region else {}
+    s3_kwargs["config"] = BotoConfig(signature_version="s3v4")
     s3 = boto3.client("s3", **s3_kwargs)
 
     tidb = cfg.get("tidb") or {}
