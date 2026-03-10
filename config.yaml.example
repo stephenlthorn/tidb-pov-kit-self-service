@@ -53,6 +53,8 @@ dataset_bootstrap:
   s3_access_key_id: ""
   s3_secret_access_key: ""
   s3_session_token: ""
+  import_threads: 0                         # 0=auto; override IMPORT INTO WITH thread=N
+  parallel_import_jobs: 2                   # OLTP + OLAP imports run in parallel by default
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"
   enable_tiflash_for_olap: true

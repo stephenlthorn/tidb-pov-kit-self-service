@@ -79,6 +79,8 @@ dataset_bootstrap:
   s3_access_key_id: ""
   s3_secret_access_key: ""
   s3_session_token: ""   # required for temporary/session credentials
+  import_threads: 0      # 0=auto; set 1 on very small TiDB tiers if needed
+  parallel_import_jobs: 2
   skip_synthetic_generation: false
 ```
 

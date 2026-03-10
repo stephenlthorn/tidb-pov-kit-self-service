@@ -13,6 +13,7 @@ import argparse
 import concurrent.futures
 import json
 import os
+import re
 import sys
 import time
 from typing import Dict, Tuple
@@ -141,18 +142,35 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
     conn = get_connection(cfg["tidb"])
     cur = conn.cursor()
     imported_uris = []
+    ds_cfg = cfg.get("dataset_bootstrap") or {}
+    configured_threads = _as_int(ds_cfg.get("import_threads"), 0)
+    parallel_jobs = max(1, _as_int(ds_cfg.get("parallel_import_jobs"), 2))
+    import_threads = configured_threads if configured_threads > 0 else None
     start = time.time()
     effective_uris = [_augment_s3_uri_auth(uri, cfg) for uri in uris]
     for uri in effective_uris:
-        sql = (
-            f"IMPORT INTO `{table}` ({', '.join(columns)}) "
-            f"FROM '{uri}' FORMAT 'CSV'"
-        )
-        cur.execute(sql)
-        try:
-            cur.fetchall()
-        except Exception:
-            pass
+        active_threads = import_threads
+        while True:
+            sql = _build_import_sql(table, columns, uri, active_threads)
+            try:
+                cur.execute(sql)
+                try:
+                    cur.fetchall()
+                except Exception:
+                    pass
+                break
+            except Exception as e:
+                msg = str(e)
+                cpu_limited_threads = _derive_cpu_safe_threads(msg, parallel_jobs)
+                if cpu_limited_threads and (active_threads is None or cpu_limited_threads < active_threads):
+                    active_threads = cpu_limited_threads
+                    import_threads = cpu_limited_threads
+                    print(
+                        f"    [dataset] {label} import retry with WITH thread={cpu_limited_threads} "
+                        f"(cluster cpu guardrail detected)."
+                    )
+                    continue
+                raise
         imported_uris.append(_redact_uri(uri))
     cur.execute(f"SELECT COUNT(*) FROM `{table}`")
     row = cur.fetchone()
@@ -164,6 +182,7 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
         "table": table,
         "uris": imported_uris,
         "rows": count,
+        "import_threads": import_threads if import_threads is not None else "default",
         "duration_sec": round(elapsed, 2),
         "rows_per_sec": round(count / elapsed, 2),
     }
@@ -232,6 +251,34 @@ def _redact_uri(uri: str) -> str:
     for k, _v in parse_qsl(parts.query, keep_blank_values=True):
         redacted.append((k, "***"))
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(redacted), parts.fragment))
+
+
+def _as_int(value, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _derive_cpu_safe_threads(err_text: str, parallel_jobs: int) -> int | None:
+    msg = str(err_text or "")
+    # Example: task concurrency(4) larger than cpu count(2) of managed node
+    m = re.search(r"task concurrency\((\d+)\)\s+larger than cpu count\((\d+)\)", msg, flags=re.IGNORECASE)
+    if not m:
+        return None
+    cpu_count = _as_int(m.group(2), 0)
+    if cpu_count <= 0:
+        return None
+    # Bootstrap runs two imports in parallel by default (OLTP + OLAP), so split
+    # CPU capacity across concurrent jobs to avoid repeated guardrail errors.
+    return max(1, cpu_count // max(1, parallel_jobs))
+
+
+def _build_import_sql(table: str, columns: list[str], uri: str, import_threads: int | None) -> str:
+    sql = f"IMPORT INTO `{table}` ({', '.join(columns)}) FROM '{uri}' FORMAT 'CSV'"
+    if import_threads and import_threads > 0:
+        sql += f" WITH thread={int(import_threads)}"
+    return sql
 
 
 def run(cfg: Dict, strict: bool = False) -> Dict:
