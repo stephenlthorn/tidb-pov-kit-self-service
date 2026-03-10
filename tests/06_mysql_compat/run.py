@@ -218,7 +218,7 @@ def run(cfg: dict):
 
     for (category, name, check, _) in COMPAT_CHECKS:
         status, note = _run_check(cur, conn, check)
-        log_compat_check(name, status, note)
+        log_compat_check(name, status, note, category=category)
         results.append((category, name, status, note))
         if status == "pass":
             passed += 1

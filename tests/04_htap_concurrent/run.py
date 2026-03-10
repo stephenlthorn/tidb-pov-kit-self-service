@@ -29,6 +29,7 @@ MODULE      = "04_htap_concurrent"
 OLTP_CONC   = 32
 ANAL_CONC   = 4       # analytical query threads — kept low, they're heavy
 PHASE_SEC   = 120     # 2 minutes per phase
+ENGINE_BENCH_SEC = 45
 
 
 def run(cfg: dict):
@@ -73,7 +74,7 @@ def run(cfg: dict):
     stop_event = threading.Event()
     anal_thread = threading.Thread(
         target=_run_analytics_continuously,
-        args=(cfg["tidb"], anal_pool, ANAL_CONC, stop_event, counts),
+        args=(cfg["tidb"], anal_pool, ANAL_CONC, stop_event, counts, "analytics", "tiflash,tikv"),
         daemon=True,
     )
     anal_thread.start()
@@ -88,6 +89,21 @@ def run(cfg: dict):
 
     # ── Analytical query standalone timing ───────────────────────────────────
     anal_stats  = get_latency_stats(MODULE, phase="analytics")
+    print("\n  Phase 3 — OLAP engine benchmark: TiFlash...")
+    tiflash_stats = _benchmark_analytics_engine(
+        cfg["tidb"], anal_pool, counts,
+        phase="analytics_tiflash", read_engines="tiflash,tikv",
+        duration_sec=ENGINE_BENCH_SEC, concurrency=max(1, ANAL_CONC // 2),
+    )
+    _print_stats("Analytics on TiFlash", tiflash_stats)
+
+    print("\n  Phase 4 — OLAP engine benchmark: TiKV...")
+    tikv_stats = _benchmark_analytics_engine(
+        cfg["tidb"], anal_pool, counts,
+        phase="analytics_tikv", read_engines="tikv",
+        duration_sec=ENGINE_BENCH_SEC, concurrency=max(1, ANAL_CONC // 2),
+    )
+    _print_stats("Analytics on TiKV", tikv_stats)
     htap_conn   = get_connection(cfg["tidb"])
     htap_cur    = htap_conn.cursor()
     tiflash_ok  = _check_tiflash_replication(htap_cur)
@@ -104,6 +120,8 @@ def run(cfg: dict):
         "oltp_only":    stats_baseline,
         "htap":         stats_htap,
         "analytics":    anal_stats,
+        "analytics_tiflash": tiflash_stats,
+        "analytics_tikv": tikv_stats,
         "p99_degradation_pct": round(degradation, 1),
         "tiflash_replicated": tiflash_ok,
     }
@@ -146,7 +164,15 @@ def _check_tiflash_replication(cur) -> bool:
         return False
 
 
-def _run_analytics_continuously(tidb_cfg, pool, concurrency, stop_event, counts):
+def _run_analytics_continuously(
+    tidb_cfg,
+    pool,
+    concurrency,
+    stop_event,
+    counts,
+    phase="analytics",
+    read_engines="tiflash,tikv",
+):
     """
     Worker function for the analytics thread pool.
     Runs analytical queries in a tight loop until stop_event is set.
@@ -158,9 +184,9 @@ def _run_analytics_continuously(tidb_cfg, pool, concurrency, stop_event, counts)
     def anal_worker(_):
         conn = get_connection(tidb_cfg)
         cur  = conn.cursor()
-        # Hint: route through TiFlash
+        # Prefer requested read engines for this session.
         try:
-            cur.execute("SET SESSION tidb_isolation_read_engines='tiflash,tikv'")
+            cur.execute(f"SET SESSION tidb_isolation_read_engines='{read_engines}'")
         except Exception:
             pass
         while not stop_event.is_set():
@@ -171,7 +197,7 @@ def _run_analytics_continuously(tidb_cfg, pool, concurrency, stop_event, counts)
                 module="04_htap_concurrent",
                 latency_ms=res["latency_ms"],
                 success=res["success"],
-                phase="analytics",
+                phase=phase,
                 query_type=qtype,
             )
         conn.close()
@@ -180,6 +206,28 @@ def _run_analytics_continuously(tidb_cfg, pool, concurrency, stop_event, counts)
         futures = [ex.submit(anal_worker, i) for i in range(concurrency)]
         for f in concurrent.futures.as_completed(futures):
             pass
+
+
+def _benchmark_analytics_engine(
+    tidb_cfg,
+    pool,
+    counts,
+    phase: str,
+    read_engines: str,
+    duration_sec: int,
+    concurrency: int,
+):
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_run_analytics_continuously,
+        args=(tidb_cfg, pool, concurrency, stop_event, counts, phase, read_engines),
+        daemon=True,
+    )
+    thread.start()
+    time.sleep(max(5, duration_sec))
+    stop_event.set()
+    thread.join(timeout=10)
+    return get_latency_stats(MODULE, phase=phase)
 
 
 def _print_stats(label, s):

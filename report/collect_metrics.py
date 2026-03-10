@@ -53,7 +53,7 @@ def collect() -> dict:
 
         # Compat checks
         compat_rows = c.execute(
-            "SELECT check_name, status, note FROM compat_checks"
+            "SELECT check_name, category, status, note FROM compat_checks"
         ).fetchall()
 
         # Import stats
@@ -120,7 +120,7 @@ def collect() -> dict:
 
     # Compat check summary
     compat_list = [dict(r) for r in compat_rows]
-    passed = sum(1 for r in compat_list if r["status"] == "pass")
+    passed = sum(1 for r in compat_list if str(r.get("status", "")).lower() == "pass")
     payload["compat_checks"] = {
         "total":   len(compat_list),
         "passed":  passed,
@@ -146,7 +146,7 @@ def _get_phases_for_module(mod: str) -> list:
         "02_elastic_scale": ["ramp_up", "sustain", "ramp_down"],
         "03_high_availability": ["warmup", "failure", "recovery"],
         "03b_write_contention": ["sequential", "autorand"],
-        "04_htap_concurrent": ["oltp_only", "htap", "analytics"],
+        "04_htap_concurrent": ["oltp_only", "htap", "analytics", "analytics_tiflash", "analytics_tikv"],
         "05_online_ddl": [],  # phases are dynamic DDL step names
         "06_mysql_compat": [],
         "07_data_import": [],

@@ -21,7 +21,7 @@ Layout:
 Usage:
     python report/generate_report.py [config.yaml]
 """
-import sys, os, json, time, io, re
+import sys, os, json, time, io, re, runpy
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import yaml
@@ -114,6 +114,21 @@ KPI_THRESHOLDS_BY_TIER = {
     },
 }
 
+COMPAT_FIX_GUIDANCE = {
+    "DDL": "Review unsupported DDL syntax or option mismatch; prefer TiDB-supported DDL forms and rerun migration DDL lint.",
+    "DML": "Check SQL mode and implicit casts; update statements to explicit types and deterministic upsert semantics.",
+    "QUERY": "Validate optimizer hints/window usage and verify index coverage for the failing query shape.",
+    "FUNCTION": "Replace unsupported function variants with TiDB-compatible equivalents or computed columns.",
+    "JSON": "Validate JSON path syntax and return-type expectations; normalize JSON extraction logic.",
+    "TRANSACTION": "Align transaction isolation and retry handling with TiDB optimistic/pessimistic behavior.",
+    "PREPARED_STMT": "Ensure driver/server-side prepare compatibility and avoid unsupported multi-statement prepare patterns.",
+    "INFORMATION_SCHEMA": "Map metadata queries to TiDB information_schema differences.",
+    "SHOW": "Adjust SHOW output expectations; some variables/status fields differ across engines.",
+    "EXPLAIN": "Use TiDB EXPLAIN/EXPLAIN ANALYZE formats and update plan parser assumptions.",
+    "UNCATEGORIZED": "Review failing SQL text and error note; patch SQL/driver behavior and retest.",
+}
+_COMPAT_NAME_TO_CATEGORY = None
+
 
 # ── PDF helper class ──────────────────────────────────────────────────────────
 
@@ -198,6 +213,23 @@ class PoVReport(FPDF):
         self.multi_cell(0, 5, text)
         self.ln(2)
 
+    def _fit_single_line_text(self, text: str, max_width: float, style: str, start_size: float, min_size: float = 7.0):
+        size = start_size
+        self.set_font("Helvetica", style, size)
+        while size > min_size and self.get_string_width(text) > max_width:
+            size -= 0.5
+            self.set_font("Helvetica", style, size)
+        if self.get_string_width(text) <= max_width:
+            return text, size
+
+        clip = text
+        while len(clip) > 1:
+            clip = clip[:-1]
+            candidate = f"{clip}..."
+            if self.get_string_width(candidate) <= max_width:
+                return candidate, size
+        return "...", size
+
     def kpi_card(self, x, y, w, h, label, value, unit="", color=BLUE):
         self.set_fill_color(*LIGHT_GREY)
         self.set_draw_color(*color)
@@ -210,14 +242,29 @@ class PoVReport(FPDF):
         self.cell(w - 4, 5, label)
         # Value
         self.set_xy(x + 2, y + 8)
-        self.set_font("Helvetica", "B", 16)
+        value_text = str(value)
+        fitted_text, fitted_size = self._fit_single_line_text(
+            value_text,
+            max_width=max(6.0, w - 4),
+            style="B",
+            start_size=16.0,
+            min_size=7.5,
+        )
+        self.set_font("Helvetica", "B", fitted_size)
         self.set_text_color(*color)
-        self.cell(w - 4, 8, str(value))
+        self.cell(w - 4, 8, fitted_text)
         # Unit
         self.set_xy(x + 2, y + 17)
-        self.set_font("Helvetica", "I", 7)
+        unit_text, unit_size = self._fit_single_line_text(
+            str(unit or ""),
+            max_width=max(6.0, w - 4),
+            style="I",
+            start_size=7.0,
+            min_size=6.0,
+        )
+        self.set_font("Helvetica", "I", unit_size)
         self.set_text_color(*DARK_GREY)
-        self.cell(w - 4, 4, unit)
+        self.cell(w - 4, 4, unit_text)
         self.set_text_color(0, 0, 0)
 
     def embed_figure(self, fig, w=174, h=None):
@@ -392,13 +439,36 @@ def _chart_data_population(metrics) -> plt.Figure:
     return fig
 
 
+def _stitch_phase_series(ts_map: dict, phase_order: list[str], fallback_alias: dict | None = None) -> list[dict]:
+    fallback_alias = fallback_alias or {}
+    merged = []
+    offset = 0.0
+    for phase in phase_order:
+        rows = ts_map.get(phase, [])
+        if not rows and phase in fallback_alias:
+            rows = ts_map.get(fallback_alias[phase], [])
+        if not rows:
+            continue
+        local_elapsed = [float(r.get("elapsed_sec", 0) or 0) for r in rows]
+        local_step = 0.0
+        if len(local_elapsed) > 1:
+            local_step = max(local_elapsed[1] - local_elapsed[0], 0.0)
+        elif local_elapsed:
+            local_step = max(local_elapsed[0], 0.0)
+        for row in rows:
+            merged.append({
+                "elapsed_sec": offset + float(row.get("elapsed_sec", 0) or 0),
+                "p99_ms": float(row.get("p99_ms", 0) or 0),
+                "tps": float(row.get("tps", 0) or 0),
+            })
+        offset += max(local_elapsed[-1] if local_elapsed else 0.0, 0.0) + max(local_step, 1.0)
+    return merged
+
+
 def _chart_scale(metrics) -> plt.Figure:
     mod  = metrics["modules"].get("02_elastic_scale", {})
     ts   = mod.get("time_series", {})
-    all_ts = []
-    for ph in ["ramp_up", "sustain", "ramp_down"]:
-        if ph in ts:
-            all_ts.extend(ts[ph])
+    all_ts = _stitch_phase_series(ts, ["ramp_up", "sustain", "ramp_down"])
     if not all_ts:
         reason, actions = _module_missing_reason(metrics, "02_elastic_scale", "No elastic scale data")
         return _empty_chart("Elastic scale data unavailable", reason=reason, actions=actions)
@@ -407,16 +477,51 @@ def _chart_scale(metrics) -> plt.Figure:
     p99     = [r["p99_ms"]      for r in all_ts]
     tps     = [r["tps"]         for r in all_ts]
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(13, 6), sharex=True)
+    elapsed_np = np.array(elapsed, dtype=float)
+    p99_np = np.array(p99, dtype=float)
+    tps_np = np.array(tps, dtype=float)
+    baseline_tps = max(float(np.percentile(tps_np, 20)) if len(tps_np) else 1.0, 1.0)
+    inferred_capacity = np.maximum(1.0, tps_np / baseline_tps)
+    smoothed_capacity = np.convolve(inferred_capacity, np.ones(3) / 3.0, mode="same")
+    if len(elapsed_np) > 1:
+        step_sec = max(elapsed_np[1] - elapsed_np[0], 1.0)
+    else:
+        step_sec = 10.0
+    cumulative_capacity_hours = np.cumsum(smoothed_capacity) * (step_sec / 3600.0)
+
+    fig, (ax1, ax2, ax3) = plt.subplots(3, 1, figsize=(13, 8), sharex=True)
     ax1.plot(elapsed, p99, color=_rgb(RED), lw=1.5)
-    ax1.set_ylabel("p99 Latency (ms)")
-    ax1.set_title("Elastic Auto-Scaling: Latency & Throughput over Time")
+    ax1.set_ylabel("p99 (ms)")
+    ax1.set_title("Elastic Auto-Scaling: Performance and Pay-as-You-Grow Signal")
     ax1.grid(alpha=0.3)
     ax2.fill_between(elapsed, tps, alpha=0.3, color=_rgb(BLUE))
     ax2.plot(elapsed, tps, color=_rgb(BLUE), lw=1.5)
-    ax2.set_xlabel("Elapsed (seconds)")
     ax2.set_ylabel("TPS")
     ax2.grid(alpha=0.3)
+
+    ax3.step(elapsed, smoothed_capacity, where="mid", color=_rgb(GREEN), lw=1.8, label="Inferred compute index")
+    ax3.fill_between(elapsed, smoothed_capacity, alpha=0.2, color=_rgb(GREEN))
+    ax3_twin = ax3.twinx()
+    ax3_twin.plot(elapsed, cumulative_capacity_hours, color=_rgb(ORANGE), lw=1.2, linestyle="--", label="Cumulative capacity-hours")
+    ax3.set_xlabel("Elapsed (seconds)")
+    ax3.set_ylabel("Capacity index")
+    ax3_twin.set_ylabel("Capacity-hours")
+    ax3.grid(alpha=0.25)
+    h1, l1 = ax3.get_legend_handles_labels()
+    h2, l2 = ax3_twin.get_legend_handles_labels()
+    ax3.legend(h1 + h2, l1 + l2, loc="upper left")
+
+    if len(tps_np):
+        ax3.text(
+            0.99,
+            0.03,
+            "Right axis is inferred from TPS time-series (not billing meter).",
+            transform=ax3.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=8,
+            color="#475569",
+        )
     fig.tight_layout()
     return fig
 
@@ -424,13 +529,11 @@ def _chart_scale(metrics) -> plt.Figure:
 def _chart_ha(metrics) -> plt.Figure:
     mod = metrics["modules"].get("03_high_availability", {})
     ts  = mod.get("time_series", {})
-    all_ts = []
-    for ph in ["warmup", "failure", "recovery"]:
-        if ph == "failure" and ph not in ts and "during_failure" in ts:
-            all_ts.extend(ts["during_failure"])
-            continue
-        if ph in ts:
-            all_ts.extend(ts[ph])
+    warm_rows = ts.get("warmup", []) if isinstance(ts, dict) else []
+    warm_elapsed = [float(r.get("elapsed_sec", 0) or 0) for r in warm_rows]
+    warm_step = max((warm_elapsed[1] - warm_elapsed[0]) if len(warm_elapsed) > 1 else 1.0, 1.0) if warm_elapsed else 1.0
+    failure_marker_x = (max(warm_elapsed) + warm_step) if warm_elapsed else 30.0
+    all_ts = _stitch_phase_series(ts, ["warmup", "failure", "recovery"], fallback_alias={"failure": "during_failure"})
     if not all_ts:
         reason, actions = _module_missing_reason(metrics, "03_high_availability", "No HA data")
         return _empty_chart("High-availability data unavailable", reason=reason, actions=actions)
@@ -440,10 +543,10 @@ def _chart_ha(metrics) -> plt.Figure:
 
     fig, ax = plt.subplots(figsize=(13, 4))
     ax.plot(elapsed, p99, color=_rgb(BLUE), lw=1.5, label="p99 Latency")
-    ax.axvline(x=30, color=_rgb(RED), linestyle="--", label="Failure injected")
+    ax.axvline(x=failure_marker_x, color=_rgb(RED), linestyle="--", label="Simulated failure window")
     ax.set_xlabel("Elapsed (seconds)")
     ax.set_ylabel("p99 Latency (ms)")
-    ax.set_title("High Availability: RTO Visualisation")
+    ax.set_title("Availability Drill: Simulated Failure Window and Recovery")
     ax.legend()
     ax.grid(alpha=0.3)
     fig.tight_layout()
@@ -491,15 +594,45 @@ def _chart_htap(metrics) -> plt.Figure:
     htap_v = [htap.get(f"{k}_ms", 0) for k in labels]
     x = np.arange(len(labels))
 
-    fig, ax = plt.subplots(figsize=(8, 4))
-    ax.bar(x - 0.2, only_v, 0.35, label="OLTP only",           color=_rgb(BLUE))
-    ax.bar(x + 0.2, htap_v, 0.35, label="OLTP + Analytics",    color=_rgb(PURPLE))
+    t_flash = tidb.get("analytics_tiflash", {}) if isinstance(tidb, dict) else {}
+    t_kv = tidb.get("analytics_tikv", {}) if isinstance(tidb, dict) else {}
+    has_engine_compare = bool(t_flash) and bool(t_kv)
+
+    if has_engine_compare:
+        fig, (ax, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    else:
+        fig, ax = plt.subplots(figsize=(8, 4))
+        ax2 = None
+
+    ax.bar(x - 0.2, only_v, 0.35, label="OLTP only", color=_rgb(BLUE))
+    ax.bar(x + 0.2, htap_v, 0.35, label="OLTP + Analytics", color=_rgb(PURPLE))
     ax.set_xticks(x)
     ax.set_xticklabels([k.upper() for k in labels])
     ax.set_ylabel("Latency (ms)")
-    ax.set_title("HTAP: OLTP Latency with and without Concurrent Analytics")
+    ax.set_title("OLTP Latency with Concurrent Analytics")
     ax.legend()
     ax.grid(axis="y", alpha=0.3)
+
+    if ax2 is not None:
+        engine_labels = ["TiFlash", "TiKV"]
+        p95_vals = [t_flash.get("p95_ms", 0), t_kv.get("p95_ms", 0)]
+        p99_vals = [t_flash.get("p99_ms", 0), t_kv.get("p99_ms", 0)]
+        tps_vals = [t_flash.get("tps", 0), t_kv.get("tps", 0)]
+        xx = np.arange(len(engine_labels))
+        ax2.bar(xx - 0.22, p95_vals, 0.22, label="p95 (ms)", color=_rgb(GREEN))
+        ax2.bar(xx, p99_vals, 0.22, label="p99 (ms)", color=_rgb(ORANGE))
+        ax2_twin = ax2.twinx()
+        ax2_twin.plot(xx + 0.22, tps_vals, "o--", color=_rgb(BLUE), lw=1.8, label="TPS")
+        ax2.set_xticks(xx)
+        ax2.set_xticklabels(engine_labels)
+        ax2.set_ylabel("Latency (ms)")
+        ax2_twin.set_ylabel("TPS")
+        ax2.set_title("OLAP Engine Comparison")
+        ax2.grid(axis="y", alpha=0.3)
+        h1, l1 = ax2.get_legend_handles_labels()
+        h2, l2 = ax2_twin.get_legend_handles_labels()
+        ax2.legend(h1 + h2, l1 + l2, loc="upper left")
+
     fig.tight_layout()
     return fig
 
@@ -520,7 +653,7 @@ def _chart_compat(compat_data) -> plt.Figure:
     for row in details:
         if not isinstance(row, dict):
             continue
-        category = str(row.get("category") or row.get("group") or row.get("module") or "Uncategorized")
+        category = _compat_category(row)
         raw_status = str(row.get("status") or row.get("result") or "").strip().lower()
         if raw_status in {"pass", "passed", "ok", "success", "true", "1"}:
             status = "pass"
@@ -543,13 +676,14 @@ def _chart_compat(compat_data) -> plt.Figure:
     fail_cnt = {c: sum(1 for r in normalized if r["category"] == c and r["status"] != "pass")
                 for c in cats}
     x = np.arange(len(cats))
+    display_labels = [c.replace("_", " ") for c in cats]
 
     fig, ax = plt.subplots(figsize=(12, 4))
     ax.bar(x, [pass_cnt[c] for c in cats], label="Pass", color=_rgb(GREEN))
     ax.bar(x, [fail_cnt[c] for c in cats], bottom=[pass_cnt[c] for c in cats],
            label="Fail", color=_rgb(RED))
     ax.set_xticks(x)
-    ax.set_xticklabels(cats, rotation=20, ha="right")
+    ax.set_xticklabels(display_labels, rotation=20, ha="right")
     ax.set_ylabel("Check count")
     ax.set_title("MySQL Compatibility by Category")
     ax.legend()
@@ -580,6 +714,194 @@ def _chart_import(metrics) -> plt.Figure:
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     return fig
+
+
+def _compat_category(row: dict) -> str:
+    if not isinstance(row, dict):
+        return "UNCATEGORIZED"
+    raw = str(row.get("category") or row.get("group") or row.get("module") or "").strip()
+    if raw:
+        return raw.upper().replace(" ", "_")
+    name = str(row.get("check_name") or row.get("name") or "").strip()
+    if name:
+        cat_map = _load_compat_name_to_category()
+        if name in cat_map:
+            return str(cat_map[name]).upper().replace(" ", "_")
+    if name and " - " in name:
+        return name.split(" - ", 1)[0].strip().upper().replace(" ", "_")
+    return "UNCATEGORIZED"
+
+
+def _load_compat_name_to_category() -> dict:
+    global _COMPAT_NAME_TO_CATEGORY
+    if _COMPAT_NAME_TO_CATEGORY is not None:
+        return _COMPAT_NAME_TO_CATEGORY
+    mapping = {}
+    try:
+        path = os.path.join(os.path.dirname(__file__), "..", "tests", "06_mysql_compat", "run.py")
+        loaded = runpy.run_path(path)
+        checks = loaded.get("COMPAT_CHECKS") or []
+        for row in checks:
+            if isinstance(row, (list, tuple)) and len(row) >= 2:
+                category = str(row[0] or "").strip()
+                name = str(row[1] or "").strip()
+                if category and name:
+                    mapping[name] = category
+    except Exception:
+        mapping = {}
+    _COMPAT_NAME_TO_CATEGORY = mapping
+    return _COMPAT_NAME_TO_CATEGORY
+
+
+def _compat_fix_text(category: str, note: str = "") -> str:
+    key = str(category or "UNCATEGORIZED").upper()
+    base = COMPAT_FIX_GUIDANCE.get(key, COMPAT_FIX_GUIDANCE["UNCATEGORIZED"])
+    clean_note = str(note or "").strip()
+    if clean_note:
+        return f"{base} Last error: {clean_note[:90]}"
+    return base
+
+
+def _warm_stability_comment(metrics: dict) -> str:
+    mod = (metrics.get("modules", {}) or {}).get("01_baseline_perf", {}) or {}
+    ts = (mod.get("time_series", {}) or {}).get("warm_steady", []) if isinstance(mod.get("time_series"), dict) else []
+    if not ts:
+        return "Warm stability interpretation unavailable: no warm_steady time-series was captured."
+
+    p99_vals = [float(r.get("p99_ms", 0) or 0) for r in ts if r.get("p99_ms") is not None]
+    tps_vals = [float(r.get("tps", 0) or 0) for r in ts if r.get("tps") is not None]
+    if len(p99_vals) < 3:
+        return "Warm phase captured limited samples; rerun with longer warm duration for stronger confidence."
+
+    p99_min = max(min(p99_vals), 0.1)
+    p99_max = max(p99_vals)
+    spike_ratio = p99_max / p99_min
+    tps_avg = sum(tps_vals) / len(tps_vals) if tps_vals else 0.0
+    tps_min = min(tps_vals) if tps_vals else 0.0
+    tps_drop_pct = (1 - (tps_min / tps_avg)) * 100 if tps_avg > 0 else 0.0
+
+    if spike_ratio <= 1.25 and tps_drop_pct <= 10:
+        level = "stable"
+        meaning = "good: latency variation stayed tight while throughput remained consistent."
+    elif spike_ratio <= 1.8 and tps_drop_pct <= 20:
+        level = "moderate spikes"
+        meaning = "acceptable for PoV; usually caused by compaction, cache warming, or concurrent background work."
+    else:
+        level = "high spikes"
+        meaning = "risk signal: sustained workload likely needs tier/concurrency/index tuning before production."
+
+    return (
+        f"Warm phase showed {level}. p99 min={p99_min:.1f}ms, max={p99_max:.1f}ms "
+        f"({spike_ratio:.2f}x), lowest TPS dip={tps_drop_pct:.1f}%. This is {meaning}"
+    )
+
+
+def _module_interpretation(metrics: dict, module_key: str) -> tuple[str, str, str]:
+    mod = (metrics.get("modules", {}) or {}).get(module_key, {}) or {}
+    status = str(mod.get("status") or "not_run").lower()
+    tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
+
+    if status != "passed":
+        return (
+            status.upper(),
+            "No validated data captured in this run.",
+            "No business conclusion for this module. Rerun or enable module to produce customer evidence.",
+        )
+
+    if module_key == "01_baseline_perf":
+        warm = tidb.get("warm_steady", {}) if isinstance(tidb, dict) else {}
+        p99 = warm.get("p99_ms")
+        tps = warm.get("tps")
+        return (
+            f"Warm p99={p99:.1f}ms, TPS={tps:.0f}" if p99 and tps else "Baseline phases captured",
+            _warm_stability_comment(metrics),
+            "Defines steady-state user experience and sets SLA-confidence baseline for migration approval.",
+        )
+    if module_key == "02_elastic_scale":
+        ts = (mod.get("time_series", {}) or {})
+        points = sum(len(v) for v in ts.values() if isinstance(v, list))
+        return (
+            f"{points} time buckets captured across ramp phases",
+            "Load increased through ramp/sustain/ramp_down while tracking p99 and TPS to verify control under demand growth.",
+            "Supports pay-as-you-grow positioning: scale when needed while keeping latency predictable.",
+        )
+    if module_key == "03_high_availability":
+        notes = str(mod.get("notes") or "")
+        rto = ""
+        m = re.search(r"RTO[=: ]+([0-9.]+)", notes)
+        if m:
+            rto = f"Estimated simulated RTO {float(m.group(1)):.1f}s"
+        return (
+            rto or "Simulated failure-window drill completed",
+            "This is a simulated connection-failure drill, not a physical TiKV node kill on cloud control plane.",
+            "Shows application-side resilience behavior; use backup+restore drill for customer-facing RTO evidence.",
+        )
+    if module_key == "03b_write_contention":
+        seq = tidb.get("sequential", {})
+        ar = tidb.get("autorand", {})
+        seq_p99 = float(seq.get("p99_ms", 0) or 0)
+        ar_p99 = float(ar.get("p99_ms", 0) or 0)
+        if seq_p99 > 0 and ar_p99 > 0:
+            gain = (seq_p99 - ar_p99) / seq_p99 * 100
+            signal = f"p99 improvement with AUTO_RANDOM: {gain:.1f}%"
+        else:
+            signal = "Sequential vs AUTO_RANDOM comparison captured"
+        return (
+            signal,
+            "Compares hotspot-prone monotonic key pattern vs distributed key allocation to reduce leader pressure.",
+            "Demonstrates schema-level tuning that delays expensive sharding/re-architecture work.",
+        )
+    if module_key == "04_htap_concurrent":
+        htap = tidb.get("htap", {})
+        only = tidb.get("oltp_only", {})
+        t_flash = tidb.get("analytics_tiflash", {})
+        t_kv = tidb.get("analytics_tikv", {})
+        msg = "OLTP + analytics concurrent test completed"
+        if only.get("p99_ms") and htap.get("p99_ms"):
+            delta = (float(htap["p99_ms"]) - float(only["p99_ms"])) / max(float(only["p99_ms"]), 0.1) * 100
+            msg = f"OLTP p99 delta under analytics: {delta:+.1f}%"
+        if t_flash and t_kv and t_flash.get("p99_ms") and t_kv.get("p99_ms"):
+            msg += f" | TiFlash vs TiKV OLAP p99: {float(t_flash['p99_ms']):.1f}ms vs {float(t_kv['p99_ms']):.1f}ms"
+        return (
+            msg,
+            "Validates HTAP isolation and compares OLAP query service path on TiFlash versus TiKV.",
+            "Enables mixed workload consolidation without forcing separate OLTP and analytics systems.",
+        )
+    if module_key == "05_online_ddl":
+        return (
+            "Online schema change workload executed",
+            "Measures impact of schema evolution during active traffic.",
+            "Reduces migration/change windows and operational downtime risk.",
+        )
+    if module_key == "06_mysql_compat":
+        compat = metrics.get("compat_checks", {}) or {}
+        failed = int(compat.get("failed", 0) or 0)
+        total = int(compat.get("total", 0) or 0)
+        return (
+            f"{total - failed}/{total} checks passed" if total else "Compatibility checks executed",
+            "Runs MySQL syntax/behavior checks and records exact failing statements with notes.",
+            "Accelerates remediation planning by showing migration blockers and concrete fix paths.",
+        )
+    if module_key == "07_data_import":
+        stats = metrics.get("import_stats", []) or []
+        best = max((float(s.get("throughput_gbpm", 0) or 0) for s in stats), default=0.0)
+        return (
+            f"Best observed import throughput: {best:.3f} GB/min",
+            "Compares ingest methods to find the fastest loading path for initial migration and bulk refresh.",
+            "Directly impacts time-to-value by shrinking dataset onboarding time.",
+        )
+    if module_key == "08_vector_search":
+        return (
+            "Vector query profile captured",
+            "Measures ANN query latency and throughput under concurrency.",
+            "Supports AI search use cases on the same operational platform.",
+        )
+
+    return (
+        "Module executed",
+        "Performance evidence captured for this module.",
+        "Provides workload-specific confidence for migration decision-making.",
+    )
 
 
 def _empty_chart(title: str, reason: str = "", actions: list[str] | None = None) -> plt.Figure:
@@ -702,6 +1024,151 @@ def _add_run_coverage_page(pdf, metrics):
         "Charts in this report always display either measured data or a clear reason and action guidance block.",
         size=8,
     )
+
+
+def _add_module_interpretation_page(pdf, metrics):
+    pdf.add_page()
+    pdf.section_title("Module Interpretation — Technical and Business Value")
+    pdf.body_text(
+        "This page translates each executed module into technical meaning and business impact so non-DB stakeholders can action results quickly.",
+        size=8,
+    )
+
+    for mod_key in MODULE_DISPLAY:
+        if pdf.get_y() > 245:
+            pdf.add_page()
+            pdf.section_title("Module Interpretation — Continued")
+        signal, technical, business = _module_interpretation(metrics, mod_key)
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_text_color(*RED)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 5, MODULE_DISPLAY[mod_key])
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_font("Helvetica", "", 8)
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 4.5, f"Observed: {signal}")
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 4.5, f"Technical: {technical}")
+        pdf.set_x(pdf.l_margin)
+        pdf.multi_cell(0, 4.5, f"Business: {business}")
+        pdf.ln(1)
+
+
+def _add_compat_index_page(pdf, metrics):
+    compat = metrics.get("compat_checks", {}) or {}
+    details = compat.get("details", []) or []
+    if not details:
+        return
+
+    pdf.add_page()
+    pdf.section_title("MySQL Compatibility Index and Remediation Guide")
+    passed = int(compat.get("passed", 0) or 0)
+    total = int(compat.get("total", 0) or 0)
+    failed = int(compat.get("failed", 0) or 0)
+    pdf.body_text(
+        f"Checks passed: {passed}/{total} ({compat.get('pct', 0)}%). Failed checks: {failed}. "
+        "Use this index to map each failing item to a concrete remediation action.",
+        size=8,
+    )
+
+    failed_rows = []
+    by_category = {}
+    for row in details:
+        if not isinstance(row, dict):
+            continue
+        category = _compat_category(row)
+        status = str(row.get("status") or "").strip().lower()
+        name = str(row.get("check_name") or row.get("name") or "Unnamed check")
+        note = str(row.get("note") or "").strip()
+        by_category.setdefault(category, {"pass": 0, "fail": 0})
+        if status == "pass":
+            by_category[category]["pass"] += 1
+        else:
+            by_category[category]["fail"] += 1
+            failed_rows.append((category, name, note, _compat_fix_text(category, note)))
+
+    pdf.sub_title("Category Summary")
+    col_w = [36, 18, 18, 102]
+    hdr = ["Category", "Pass", "Fail", "Recommended Fix Direction"]
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_fill_color(*RED)
+    pdf.set_text_color(*WHITE)
+    for w, h in zip(col_w, hdr):
+        pdf.cell(w, 6, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(*WHITE)
+    for category in sorted(by_category.keys()):
+        rec = _compat_fix_text(category, "")
+        row = [category, str(by_category[category]["pass"]), str(by_category[category]["fail"]), rec]
+        for w, cell in zip(col_w, row):
+            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
+            pdf.set_font("Helvetica", "", sz)
+            pdf.cell(w, 6, txt, border=1, fill=True)
+        pdf.ln()
+
+    pdf.ln(3)
+    pdf.sub_title("Failed Check Index")
+    if not failed_rows:
+        pdf.body_text("No failed checks in this run.", size=8)
+        return
+
+    col_w2 = [24, 54, 40, 56]
+    hdr2 = ["Category", "Check", "Observed Error", "How to Fix"]
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_fill_color(*RED)
+    pdf.set_text_color(*WHITE)
+    for w, h in zip(col_w2, hdr2):
+        pdf.cell(w, 6, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_font("Helvetica", "", 7)
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(*WHITE)
+    for category, name, note, fix in failed_rows:
+        row = [category, name, note or "n/a", fix]
+        for w, cell in zip(col_w2, row):
+            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
+            pdf.set_font("Helvetica", "", sz)
+            pdf.cell(w, 6, txt, border=1, fill=True)
+        pdf.ln()
+    pdf.set_font("Helvetica", "", 7)
+
+    pdf.ln(3)
+    pdf.sub_title("All Compatibility Checks (Full Index)")
+    col_w3 = [24, 106, 22, 24]
+    hdr3 = ["Category", "Check", "Status", "Fix Ref"]
+    pdf.set_font("Helvetica", "B", 7)
+    pdf.set_fill_color(*RED)
+    pdf.set_text_color(*WHITE)
+    for w, h in zip(col_w3, hdr3):
+        pdf.cell(w, 6, h, border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_fill_color(*WHITE)
+
+    for row in details:
+        if not isinstance(row, dict):
+            continue
+        category = _compat_category(row)
+        name = str(row.get("check_name") or row.get("name") or "Unnamed check")
+        status = str(row.get("status") or "fail").upper()
+        if status not in {"PASS", "FAIL"}:
+            status = "FAIL"
+        ref = "See failed index" if status == "FAIL" else "-"
+        cells = [category, name, status, ref]
+        for w, cell in zip(col_w3, cells):
+            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
+            pdf.set_font("Helvetica", "", sz)
+            if cell == "FAIL":
+                pdf.set_text_color(*RED)
+            elif cell == "PASS":
+                pdf.set_text_color(*GREEN)
+            else:
+                pdf.set_text_color(0, 0, 0)
+            pdf.cell(w, 6, txt, border=1, fill=True)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln()
 
 
 def _normalize_tier_key(raw: str | None) -> str:
@@ -931,7 +1398,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
-        ("HA Recovery (RTO)",   _fmt(summary.get("rto_sec"),     1), "seconds",  ORANGE),
+        ("Drill Recovery (sim)", _fmt(summary.get("rto_sec"),    1), "seconds",  ORANGE),
         ("Hotspot Reduction",   _fmt(summary.get("hotspot_improvement_pct"), 0), "%",   RED),
         ("MySQL Compat",        _fmt(summary.get("mysql_compat_pct"), 0), "%",   PURPLE),
         ("Modules Passed",
@@ -974,6 +1441,24 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         intro += "."
     pdf.body_text(intro, size=9)
 
+    compat = metrics.get("compat_checks", {}) or {}
+    failed_compat = []
+    for row in (compat.get("details") or []):
+        if not isinstance(row, dict):
+            continue
+        if str(row.get("status") or "").strip().lower() == "pass":
+            continue
+        cat = _compat_category(row)
+        nm = str(row.get("check_name") or row.get("name") or "Unnamed check")
+        nt = str(row.get("note") or "").strip()
+        failed_compat.append((cat, nm, _compat_fix_text(cat, nt)))
+    if failed_compat:
+        pdf.sub_title("Top Compatibility Gaps to Fix")
+        for cat, name, fix in failed_compat[:4]:
+            pdf.body_text(f"- [{cat}] {name}\n  Fix path: {fix}", size=8)
+    else:
+        pdf.body_text("Compatibility summary: no MySQL compatibility failures were observed in this run.", size=8)
+
     # ── Page 2: Module status table ───────────────────────────────────────────
     pdf.add_page()
     pdf.section_title("Test Module Status")
@@ -1006,6 +1491,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
 
     # ── Page 3: Coverage details ─────────────────────────────────────────────
     _add_run_coverage_page(pdf, metrics)
+    _add_module_interpretation_page(pdf, metrics)
 
     # ── Pages 4+: Charts ──────────────────────────────────────────────────────
     manifest = metrics.get("data_manifest", {}) or {}
@@ -1027,39 +1513,45 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         pdf,
         "Warm Workload Stability",
         _chart_warm_steady(metrics),
-        "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time.",
+        "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time. "
+        + _warm_stability_comment(metrics),
     )
 
     _add_chart_page(pdf, "Elastic Auto-Scaling",
                     _chart_scale(metrics),
-                    "Load ramped from baseline to 4× peak. TiDB Cloud auto-scales "
-                    "compute horizontally, keeping p99 stable throughout.")
+                    "Load ramped from baseline to peak. The bottom panel provides an inferred pay-as-you-grow control signal "
+                    "(capacity index and cumulative capacity-hours) derived from measured TPS.")
 
-    _add_chart_page(pdf, "High Availability — RTO",
+    _add_chart_page(pdf, "Availability Drill — Simulated Failure Window",
                     _chart_ha(metrics),
-                    "A node failure was simulated during steady-state load. "
-                    "The chart shows recovery time (RTO) and latency impact.")
+                    "This module simulates a client-connection failure window and measures recovery behavior. "
+                    "It is not a cloud control-plane node kill. For customer-grade RTO evidence, pair this with backup+restore drill timings.")
 
     _add_chart_page(pdf, "Write Contention — AUTO_RANDOM vs Sequential Keys",
                     _chart_hotspot(metrics),
                     "Sequential (AUTO_INCREMENT) PKs concentrate writes on a single "
-                    "region leader (hot region). AUTO_RANDOM distributes writes evenly.")
+                    "region leader (hot region). AUTO_RANDOM distributes writes evenly. "
+                    "For a stronger delta, rerun with higher write concurrency and longer phase duration.")
 
     _add_chart_page(pdf, "HTAP — Concurrent Transactional & Analytical Workload",
                     _chart_htap(metrics),
                     "TiFlash columnar replicas serve analytical queries without "
-                    "interfering with TiKV row-store OLTP writes.")
+                    "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
 
     _add_chart_page(pdf, "MySQL Compatibility",
                     _chart_compat(metrics.get("compat_checks", {})),
                     f"{metrics.get('compat_checks',{}).get('passed','—')} / "
                     f"{metrics.get('compat_checks',{}).get('total','—')} checks passed "
-                    f"({metrics.get('compat_checks',{}).get('pct','—')}% compatible).")
+                    f"({metrics.get('compat_checks',{}).get('pct','—')}% compatible). "
+                    "See compatibility index page for failed checks and fix actions.")
 
     _add_chart_page(pdf, "Data Import Speed",
                     _chart_import(metrics),
                     "Bulk load throughput comparison: Batched INSERT, "
-                    "LOAD DATA LOCAL INFILE, and IMPORT INTO (TiDB native loader).")
+                    "LOAD DATA LOCAL INFILE, and IMPORT INTO (TiDB native loader). "
+                    "For production-scale PoV, pre-stage industry data in S3 and prefer IMPORT INTO.")
+
+    _add_compat_index_page(pdf, metrics)
 
     # TCO page
     pdf.add_page()

@@ -44,6 +44,7 @@ def init_db():
             CREATE TABLE IF NOT EXISTS compat_checks (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 check_name  TEXT,
+                category    TEXT,
                 status      TEXT,
                 note        TEXT
             );
@@ -56,6 +57,10 @@ def init_db():
                 throughput_gbpm REAL
             );
         """)
+        # Backward-compatible migration for pre-existing results.db files.
+        compat_cols = [row["name"] for row in c.execute("PRAGMA table_info(compat_checks)").fetchall()]
+        if "category" not in compat_cols:
+            c.execute("ALTER TABLE compat_checks ADD COLUMN category TEXT")
 
 
 def log_result(module: str, latency_ms: float, success: bool,
@@ -119,11 +124,11 @@ def end_module(module: str, status: str = "passed", notes: str = None):
         """, (status, time.time(), notes, module))
 
 
-def log_compat_check(check_name: str, status: str, note: str = ""):
+def log_compat_check(check_name: str, status: str, note: str = "", category: str = ""):
     with _conn() as c:
         c.execute(
-            "INSERT INTO compat_checks (check_name, status, note) VALUES (?,?,?)",
-            (check_name, status, note)
+            "INSERT INTO compat_checks (check_name, category, status, note) VALUES (?,?,?,?)",
+            (check_name, category, status, note)
         )
 
 

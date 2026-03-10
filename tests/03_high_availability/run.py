@@ -78,7 +78,7 @@ def run(cfg: dict):
         "failure_end_ts": failure_ts["end"],
         "time_series": ts_data,
     }
-    end_module(MODULE, "passed", f"Estimated RTO: {rto_sec:.1f}s")
+    end_module(MODULE, "passed", f"Simulated failure drill; Estimated RTO: {rto_sec:.1f}s")
     print(f"\n  Estimated RTO: {rto_sec:.1f}s")
     return summary
 
