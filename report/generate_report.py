@@ -63,6 +63,19 @@ MODULE_DISPLAY = {
     "08_vector_search":       "M8 — Vector Search (AI Track)",
 }
 
+MODULE_SCOPE_SUMMARY = {
+    "00_customer_queries": "Runs customer SQL samples with EXPLAIN checks to validate immediate query portability.",
+    "01_baseline_perf": "Measures warm OLTP p99 latency and throughput across configured concurrency levels.",
+    "02_elastic_scale": "Ramps load and records latency/throughput response under demand changes.",
+    "03_high_availability": "Runs an application-level failure-window drill to estimate recovery behavior.",
+    "03b_write_contention": "Compares sequential keys vs AUTO_RANDOM under write contention.",
+    "04_htap_concurrent": "Runs transactional and analytical workloads concurrently to validate HTAP isolation.",
+    "05_online_ddl": "Executes schema changes while workload traffic continues.",
+    "06_mysql_compat": "Executes SQL compatibility checks and reports failed statements with fix guidance.",
+    "07_data_import": "Compares bulk ingest paths and reports best observed import throughput.",
+    "08_vector_search": "Measures ANN query behavior for the AI/vector workload track.",
+}
+
 KPI_THRESHOLDS_BY_TIER = {
     # Starter / Serverless: lowest baseline expectation.
     "serverless": {
@@ -582,6 +595,18 @@ def _chart_scale(metrics) -> plt.Figure:
     mod  = metrics["modules"].get("02_elastic_scale", {})
     ts   = mod.get("time_series", {})
     all_ts = _stitch_phase_series(ts, ["ramp_up", "sustain", "ramp_down"])
+    if not all_ts and isinstance(ts, dict):
+        dynamic_order = []
+        for prefix in ("ramp_up", "sustain", "ramp_down"):
+            keys = sorted(
+                [
+                    k for k, v in ts.items()
+                    if isinstance(v, list) and (k == prefix or str(k).startswith(f"{prefix}_"))
+                ]
+            )
+            dynamic_order.extend(keys)
+        if dynamic_order:
+            all_ts = _stitch_phase_series(ts, dynamic_order)
     if not all_ts:
         reason, actions = _module_missing_reason(metrics, "02_elastic_scale", "No elastic scale data")
         return _empty_chart("Elastic scale data unavailable", reason=reason, actions=actions)
@@ -1072,6 +1097,205 @@ def _module_missing_reason(metrics: dict, module_key: str, fallback: str) -> tup
     return reason, actions
 
 
+def _industry_display_label(industry_key: str | None) -> str:
+    key = str(industry_key or "general_auto").strip().lower() or "general_auto"
+    try:
+        label = str(get_industry_profile(key).get("label") or "").strip()
+        if label:
+            return label
+    except Exception:
+        pass
+    return key.replace("_", " ").title()
+
+
+def _prospect_decision(summary: dict, metrics: dict) -> tuple[str, tuple[int, int, int], list[str], list[str]]:
+    modules = (metrics.get("modules", {}) or {})
+    failed = [
+        MODULE_DISPLAY.get(k, k)
+        for k, v in modules.items()
+        if str((v or {}).get("status") or "").strip().lower() == "failed"
+    ]
+    modules_run = int(summary.get("modules_run", 0) or 0)
+    modules_passed = int(summary.get("modules_passed", 0) or 0)
+    warm_p99 = _maybe_float(summary.get("warm_p99_ms"))
+    compat_pct = _maybe_float(summary.get("mysql_compat_pct"))
+
+    findings = []
+    actions = []
+
+    if failed:
+        findings.append(f"{len(failed)} module(s) failed: {', '.join(failed[:3])}")
+        actions.append("Fix failed module(s) first, then rerun the same profile for clean evidence.")
+
+    if compat_pct is not None and compat_pct < 95:
+        findings.append(f"SQL compatibility below target ({compat_pct:.1f}% < 95%).")
+        actions.append("Resolve failed compatibility checks and retest the affected SQL paths.")
+
+    if warm_p99 is not None and warm_p99 > 40:
+        findings.append(f"Warm p99 latency is elevated for first production gate ({warm_p99:.1f}ms).")
+        actions.append("Tune indexes/concurrency and consider a higher tier before production sign-off.")
+
+    if modules_run > 0 and modules_passed < modules_run:
+        findings.append(f"Coverage incomplete ({modules_passed}/{modules_run} passed).")
+        actions.append("Rerun incomplete modules or mark them out of scope with customer agreement.")
+
+    if modules_run <= 2:
+        findings.append("Limited module evidence was captured in this run.")
+        actions.append("Run the full guided validation profile before migration decisions.")
+
+    if findings:
+        return (
+            "Needs Tuning Before Next Stage",
+            ORANGE,
+            findings,
+            actions[:4],
+        )
+
+    return (
+        "Ready for Next PoC Stage",
+        GREEN,
+        [
+            "Core validation modules passed with usable evidence.",
+            "No critical blockers were detected in this run profile.",
+        ],
+        [
+            "Proceed to customer workload replay or larger-scale tier validation.",
+            "Track the same KPI set in the next stage to confirm consistency.",
+        ],
+    )
+
+
+def _add_decision_summary_page(pdf: PoVReport, metrics: dict, cfg: dict):
+    summary = metrics.get("summary", {}) or {}
+    verdict, verdict_color, findings, actions = _prospect_decision(summary, metrics)
+    run_context = metrics.get("run_context", {}) or {}
+    source_cfg = (cfg or {}).get("comparison_db", {}) or {}
+
+    pdf.add_page()
+    pdf.section_title("Prospect Decision Summary")
+
+    x = pdf.l_margin
+    w = pdf.w - pdf.l_margin - pdf.r_margin
+    y = pdf.get_y()
+    h = 17
+    pdf.set_fill_color(*LIGHT_GREY)
+    pdf.set_draw_color(*verdict_color)
+    pdf.set_line_width(0.8)
+    pdf.rect(x, y, w, h, style="FD")
+    pdf.set_xy(x + 2, y + 2)
+    pdf.set_font("Helvetica", "B", 10)
+    pdf.set_text_color(*verdict_color)
+    pdf.cell(0, 5, "Decision")
+    pdf.set_xy(x + 2, y + 7.5)
+    pdf.set_font("Helvetica", "B", 14)
+    pdf.cell(0, 7, verdict)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(h + 2)
+
+    pdf.sub_title("First-Time Buyer Questions")
+    pdf.body_text(
+        "1. Will this workload perform consistently on TiDB Cloud?\n"
+        "2. What migration blockers remain and how hard are they to fix?\n"
+        "3. What operational risk is removed compared to the current path?",
+        size=8,
+    )
+
+    pdf.sub_title("Run Evidence Highlights")
+    for line in findings:
+        _write_wrapped_bullet(pdf, line, size=8)
+    if not findings:
+        _write_wrapped_bullet(pdf, "No high-risk findings were detected.", size=8)
+
+    pdf.sub_title("Recommended Next Action")
+    for line in actions:
+        _write_wrapped_bullet(pdf, line, size=8)
+
+    pdf.sub_title("Context")
+    tier = _normalize_tier_key((cfg.get("tier", {}) or {}).get("selected"))
+    comparison = "enabled" if bool(source_cfg.get("enabled")) else "disabled"
+    context_line = (
+        f"Run mode: {run_context.get('run_mode', 'n/a')} | "
+        f"Schema mode: {run_context.get('schema_mode', 'n/a')} | "
+        f"Industry: {_industry_display_label(run_context.get('industry'))} | "
+        f"Tier profile: {tier} | Source comparison: {comparison}"
+    )
+    pdf.body_text(context_line, size=8)
+
+
+def _add_test_scope_page(pdf: PoVReport, metrics: dict, cfg: dict):
+    modules = (metrics.get("modules", {}) or {})
+    run_context = metrics.get("run_context", {}) or {}
+    summary = metrics.get("summary", {}) or {}
+    tidb_cfg = (cfg.get("tidb", {}) or {})
+    aws_cfg = (cfg.get("aws_runner", {}) or {})
+
+    pdf.add_page()
+    pdf.section_title("What Was Tested")
+    pdf.body_text(
+        "This section lists exactly what was executed in this run so buyers can map evidence to their own deployment decision.",
+        size=8,
+    )
+
+    env_bits = [
+        f"TiDB host: {tidb_cfg.get('host', 'n/a')}",
+        f"DB: {tidb_cfg.get('database', 'n/a')}",
+        f"Tier profile: {_normalize_tier_key((cfg.get('tier', {}) or {}).get('selected'))}",
+        f"Run mode: {run_context.get('run_mode', 'n/a')}",
+        f"Schema mode: {run_context.get('schema_mode', 'n/a')}",
+        f"Industry: {_industry_display_label(run_context.get('industry'))}",
+    ]
+    if aws_cfg.get("enabled"):
+        env_bits.append(f"AWS runner region: {aws_cfg.get('aws_region', 'n/a')}")
+        env_bits.append(f"AWS instance size profile: {aws_cfg.get('instance_size', 'n/a')}")
+    pdf.body_text(" | ".join(env_bits), size=8)
+
+    col_w = [52, 22, 98]
+    _draw_wrapped_table_header(pdf, col_w, ["Module", "Status", "What It Tested"])
+    for key in MODULE_DISPLAY:
+        status = str((modules.get(key, {}) or {}).get("status") or "not_run").strip().lower()
+        status_display = status.upper()
+        if status == "passed":
+            status_color = GREEN
+        elif status == "failed":
+            status_color = RED
+        elif status == "skipped":
+            status_color = ORANGE
+        else:
+            status_color = DARK_GREY
+        scope = MODULE_SCOPE_SUMMARY.get(key, "Module scope summary unavailable.")
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_w,
+            [MODULE_DISPLAY[key], status_display, scope],
+            styles=["", "B", ""],
+            font_sizes=[7.0, 7.0, 7.0],
+            text_colors=[(0, 0, 0), status_color, (0, 0, 0)],
+            aligns=["L", "C", "L"],
+            fill_color=WHITE,
+            line_h=3.6,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("What Was Tested (Continued)")
+            _draw_wrapped_table_header(pdf, col_w, ["Module", "Status", "What It Tested"])
+            _draw_wrapped_table_row(
+                pdf,
+                col_w,
+                [MODULE_DISPLAY[key], status_display, scope],
+                styles=["", "B", ""],
+                font_sizes=[7.0, 7.0, 7.0],
+                text_colors=[(0, 0, 0), status_color, (0, 0, 0)],
+                aligns=["L", "C", "L"],
+                fill_color=WHITE,
+                line_h=3.6,
+            )
+    pdf.ln(2)
+    pdf.body_text(
+        f"Coverage summary: {summary.get('modules_passed', 0)}/{summary.get('modules_run', 0)} selected modules passed.",
+        size=8,
+    )
+
+
 def _add_run_coverage_page(pdf, metrics):
     pdf.add_page()
     pdf.section_title("Run Coverage and Data Completeness")
@@ -1082,15 +1306,16 @@ def _add_run_coverage_page(pdf, metrics):
     if isinstance(manifest.get("counts"), dict):
         rows_generated = sum(v for v in manifest.get("counts", {}).values() if isinstance(v, (int, float)))
 
+    industry_label = _industry_display_label(run_context.get("industry"))
     pdf.body_text(
         f"Run mode: {run_context.get('run_mode', 'n/a')} | "
         f"Schema mode: {run_context.get('schema_mode', 'n/a')} | "
-        f"Industry: {run_context.get('industry', 'general_auto')} | "
+        f"Industry: {industry_label} | "
         f"Modules passed: {summary.get('modules_passed', 0)}/{summary.get('modules_run', 0)} | "
         f"Generated rows: {rows_generated:,}" if rows_generated else
         f"Run mode: {run_context.get('run_mode', 'n/a')} | "
         f"Schema mode: {run_context.get('schema_mode', 'n/a')} | "
-        f"Industry: {run_context.get('industry', 'general_auto')} | "
+        f"Industry: {industry_label} | "
         f"Modules passed: {summary.get('modules_passed', 0)}/{summary.get('modules_run', 0)}"
     , size=8)
 
@@ -1165,6 +1390,9 @@ def _add_module_interpretation_page(pdf, metrics):
     inner_w = block_w - 4
 
     for mod_key in MODULE_DISPLAY:
+        status = str(((metrics.get("modules", {}) or {}).get(mod_key, {}) or {}).get("status") or "not_run").lower()
+        if status == "not_run":
+            continue
         signal, technical, business = _module_interpretation(metrics, mod_key)
         technical_points = _split_value_bullets(technical)
         business_points = _split_value_bullets(business)
@@ -1481,6 +1709,111 @@ def _add_kpi_appendix_page(pdf, metrics, tier_key: str, thresholds_by_tier: dict
         mod = (metrics.get("modules", {}) or {}).get(mod_key, {}) or {}
         tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
         if not tidb:
+            # Some modules produce non-latency evidence. Render explicit rows so the appendix
+            # does not incorrectly show "NO DATA" for successful compatibility/import checks.
+            if mod_key == "00_customer_queries" and str(mod.get("status") or "").lower() == "passed":
+                checks = str(mod.get("notes") or "Validation checks passed")
+                row_ok = _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    [mod_key, "PASS", "-", "-", "-", "-", "-", checks],
+                    styles=["", "B", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0), GREEN, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
+                if not row_ok:
+                    pdf.add_page()
+                    pdf.section_title("Appendix — KPI Threshold Evaluation (Continued)")
+                    _draw_wrapped_table_header(pdf, col_w, hdrs)
+                    _draw_wrapped_table_row(
+                        pdf,
+                        col_w,
+                        [mod_key, "PASS", "-", "-", "-", "-", "-", checks],
+                        styles=["", "B", "", "", "", "", "", ""],
+                        font_sizes=[7.0] * 8,
+                        text_colors=[(0, 0, 0), GREEN, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                        aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                        fill_color=LIGHT_GREY,
+                        line_h=3.5,
+                    )
+                continue
+
+            if mod_key == "06_mysql_compat" and str(mod.get("status") or "").lower() == "passed":
+                compat = metrics.get("compat_checks", {}) or {}
+                total = int(compat.get("total", 0) or 0)
+                passed = int(compat.get("passed", 0) or 0)
+                failed = int(compat.get("failed", 0) or 0)
+                pct = _maybe_float(compat.get("pct"))
+                verdict = "PASS" if failed == 0 else "WARN"
+                verdict_color = GREEN if verdict == "PASS" else ORANGE
+                note = f"{passed}/{total} checks passed"
+                if pct is not None:
+                    note += f" ({pct:.1f}%)"
+                row_ok = _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    [mod_key, verdict, str(total), "-", "-", "-", "-", note],
+                    styles=["", "B", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0), verdict_color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
+                if not row_ok:
+                    pdf.add_page()
+                    pdf.section_title("Appendix — KPI Threshold Evaluation (Continued)")
+                    _draw_wrapped_table_header(pdf, col_w, hdrs)
+                    _draw_wrapped_table_row(
+                        pdf,
+                        col_w,
+                        [mod_key, verdict, str(total), "-", "-", "-", "-", note],
+                        styles=["", "B", "", "", "", "", "", ""],
+                        font_sizes=[7.0] * 8,
+                        text_colors=[(0, 0, 0), verdict_color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                        aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                        fill_color=LIGHT_GREY,
+                        line_h=3.5,
+                    )
+                continue
+
+            if mod_key == "07_data_import" and str(mod.get("status") or "").lower() == "passed":
+                import_stats = metrics.get("import_stats", []) or []
+                best = max((float(r.get("throughput_gbpm", 0) or 0) for r in import_stats), default=0.0)
+                verdict = "PASS" if best > 0 else "WARN"
+                verdict_color = GREEN if verdict == "PASS" else ORANGE
+                note = f"Best throughput {best:.3f} GB/min"
+                row_ok = _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    [mod_key, verdict, str(len(import_stats)), "-", "-", "-", "-", note],
+                    styles=["", "B", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0), verdict_color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
+                if not row_ok:
+                    pdf.add_page()
+                    pdf.section_title("Appendix — KPI Threshold Evaluation (Continued)")
+                    _draw_wrapped_table_header(pdf, col_w, hdrs)
+                    _draw_wrapped_table_row(
+                        pdf,
+                        col_w,
+                        [mod_key, verdict, str(len(import_stats)), "-", "-", "-", "-", note],
+                        styles=["", "B", "", "", "", "", "", ""],
+                        font_sizes=[7.0] * 8,
+                        text_colors=[(0, 0, 0), verdict_color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                        aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                        fill_color=LIGHT_GREY,
+                        line_h=3.5,
+                    )
+                continue
+
             row_ok = _draw_wrapped_table_row(
                 pdf,
                 col_w,
@@ -1643,10 +1976,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         "tidb_optimized": "TiDB Optimized",
         "mysql_compatible": "MySQL Compatible",
     }.get(schema_mode_key, schema_mode_key.replace("_", " ").title())
-    try:
-        industry_display = str(get_industry_profile(industry_key).get("label") or "General / Auto")
-    except Exception:
-        industry_display = industry_key.replace("_", " ").title()
+    industry_display = _industry_display_label(industry_key)
     if summary.get("run_mode") == "performance":
         if display_latency is None:
             display_latency = summary.get("workload_p99_ms")
@@ -1687,12 +2017,10 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     intro = (
         "This report summarises the results of a self-service Proof of Value "
         "conducted on TiDB Cloud. The tests were executed automatically using "
-        "the TiDB Cloud PoV Kit and cover OLTP performance (including warm steady-state), elastic auto-scaling, "
-        "high availability, write contention, HTAP, online DDL, SQL compatibility, "
-        "data import speed, and total cost of ownership. "
+        "the TiDB Cloud PoV Kit. Charts and conclusions only include modules selected for this run. "
         f"Run mode: {summary.get('run_mode', 'validation')}. "
         f"Schema mode: {summary.get('schema_mode', 'tidb_optimized')}. "
-        f"Industry: {summary.get('industry', 'general_auto')}."
+        f"Industry: {industry_display}."
     )
     if summary.get("workload_status"):
         intro += (
@@ -1719,12 +2047,17 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         failed_compat.append((cat, nm, _compat_fix_text(cat, nt)))
     if failed_compat:
         pdf.sub_title("Top Compatibility Gaps to Fix")
-        for cat, name, fix in failed_compat[:4]:
-            pdf.body_text(f"- [{cat}] {name}\n  Fix path: {fix}", size=8)
+        for cat, name, fix in failed_compat[:2]:
+            concise_fix = fix.split(" Last error:", 1)[0].strip()
+            _write_wrapped_bullet(pdf, f"[{cat}] {name} — Fix path: {concise_fix}", size=7.5)
     else:
         pdf.body_text("Compatibility summary: no SQL compatibility failures were observed in this run.", size=8)
 
-    # ── Page 2: Module status table ───────────────────────────────────────────
+    # ── Page 2/3: Buyer-facing summary pages ─────────────────────────────────
+    _add_decision_summary_page(pdf, metrics, cfg)
+    _add_test_scope_page(pdf, metrics, cfg)
+
+    # ── Page 4: Module status table ───────────────────────────────────────────
     pdf.add_page()
     pdf.section_title("Test Module Status")
     col_widths = [80, 22, 22, 50]
@@ -1736,7 +2069,15 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         stat = mod.get("status", "not_run")
         dur  = f"{mod.get('duration_sec', 0):.0f}s" if mod.get("duration_sec") else "—"
         note = mod.get("notes") or ""
-        color = GREEN if stat == "passed" else (ORANGE if stat == "skipped" else RED)
+        stat_l = str(stat).lower()
+        if stat_l == "passed":
+            color = GREEN
+        elif stat_l == "skipped":
+            color = ORANGE
+        elif stat_l == "not_run":
+            color = DARK_GREY
+        else:
+            color = RED
         row_ok = _draw_wrapped_table_row(
             pdf,
             col_widths,
@@ -1769,7 +2110,10 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     _add_run_coverage_page(pdf, metrics)
     _add_module_interpretation_page(pdf, metrics)
 
-    # ── Pages 4+: Charts ──────────────────────────────────────────────────────
+    # ── Chart pages (only for executed modules) ──────────────────────────────
+    def _module_ran(key: str) -> bool:
+        return str((metrics.get("modules", {}).get(key, {}) or {}).get("status") or "not_run").lower() != "not_run"
+
     manifest = metrics.get("data_manifest", {}) or {}
     _add_chart_page(
         pdf,
@@ -1780,49 +2124,55 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         f"Generation time: {manifest.get('generation_duration_sec', 'n/a')} sec",
     )
 
-    _add_chart_page(pdf, "Baseline OLTP Performance",
-                    _chart_baseline(metrics),
-                    "OLTP workload across configured concurrency levels. "
-                    "Shows p99 latency and transactions per second.")
+    if _module_ran("01_baseline_perf"):
+        _add_chart_page(pdf, "Baseline OLTP Performance",
+                        _chart_baseline(metrics),
+                        "OLTP workload across configured concurrency levels. "
+                        "Shows p99 latency and transactions per second.")
 
-    _add_chart_page(
-        pdf,
-        "Warm Workload Stability",
-        _chart_warm_steady(metrics),
-        "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time. "
-        + _warm_stability_comment(metrics),
-    )
+        _add_chart_page(
+            pdf,
+            "Warm Workload Stability",
+            _chart_warm_steady(metrics),
+            "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time. "
+            + _warm_stability_comment(metrics),
+        )
 
-    _add_chart_page(pdf, "Elastic Auto-Scaling",
-                    _chart_scale(metrics),
-                    "Load ramped from baseline to peak. The bottom panel provides an inferred pay-as-you-grow control signal "
-                    "(capacity index and cumulative capacity-hours) derived from measured TPS.")
+    if _module_ran("02_elastic_scale"):
+        _add_chart_page(pdf, "Elastic Auto-Scaling",
+                        _chart_scale(metrics),
+                        "Load ramped from baseline to peak. The bottom panel provides an inferred pay-as-you-grow control signal "
+                        "(capacity index and cumulative capacity-hours) derived from measured TPS.")
 
-    _add_chart_page(pdf, "Availability Drill — Simulated Failure Window",
-                    _chart_ha(metrics),
-                    "This module simulates a client-connection failure window and measures recovery behavior. "
-                    "It is not a cloud control-plane node kill. For customer-grade RTO evidence, pair this with backup+restore drill timings.")
+    if _module_ran("03_high_availability"):
+        _add_chart_page(pdf, "Availability Drill — Simulated Failure Window",
+                        _chart_ha(metrics),
+                        "This module simulates a client-connection failure window and measures recovery behavior. "
+                        "It is not a cloud control-plane node kill. For customer-grade RTO evidence, pair this with backup+restore drill timings.")
 
-    _add_chart_page(pdf, "Write Contention — AUTO_RANDOM vs Sequential Keys",
-                    _chart_hotspot(metrics),
-                    "Sequential (AUTO_INCREMENT) PKs concentrate writes on a single "
-                    "region leader (hot region). AUTO_RANDOM distributes writes evenly. "
-                    "For a stronger delta, rerun with higher write concurrency and longer phase duration.")
+    if _module_ran("03b_write_contention"):
+        _add_chart_page(pdf, "Write Contention — AUTO_RANDOM vs Sequential Keys",
+                        _chart_hotspot(metrics),
+                        "Sequential (AUTO_INCREMENT) PKs concentrate writes on a single "
+                        "region leader (hot region). AUTO_RANDOM distributes writes evenly. "
+                        "For a stronger delta, rerun with higher write concurrency and longer phase duration.")
 
-    _add_chart_page(pdf, "HTAP — Concurrent Transactional & Analytical Workload",
-                    _chart_htap(metrics),
-                    "TiFlash columnar replicas serve analytical queries without "
-                    "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
+    if _module_ran("04_htap_concurrent"):
+        _add_chart_page(pdf, "HTAP — Concurrent Transactional & Analytical Workload",
+                        _chart_htap(metrics),
+                        "TiFlash columnar replicas serve analytical queries without "
+                        "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
 
-    _add_sql_compat_page(pdf, metrics)
+    if _module_ran("06_mysql_compat"):
+        _add_sql_compat_page(pdf, metrics)
+        _add_compat_index_page(pdf, metrics)
 
-    _add_chart_page(pdf, "Data Import Speed",
-                    _chart_import(metrics),
-                    "Bulk load throughput comparison: Batched INSERT, "
-                    "LOAD DATA LOCAL INFILE, and IMPORT INTO (TiDB native loader). "
-                    "For production-scale PoV, pre-stage industry data in S3 and prefer IMPORT INTO.")
-
-    _add_compat_index_page(pdf, metrics)
+    if _module_ran("07_data_import"):
+        _add_chart_page(pdf, "Data Import Speed",
+                        _chart_import(metrics),
+                        "Bulk load throughput comparison: Batched INSERT, "
+                        "LOAD DATA LOCAL INFILE, and IMPORT INTO (TiDB native loader). "
+                        "For production-scale PoV, pre-stage industry data in S3 and prefer IMPORT INTO.")
 
     # TCO page
     pdf.add_page()
@@ -1830,8 +2180,11 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     tco_fig = make_tco_chart(tco_data)
     pdf.embed_figure(tco_fig, w=174)
     npv = tco_data["npv"]
+    tco_cfg = (cfg.get("tco", {}) or {})
+    tco_mode = "customer-input" if bool(tco_cfg) else "illustrative-default"
+    tco_prefix = "Illustrative model: " if tco_mode == "illustrative-default" else ""
     pdf.body_text(
-        f"3-year TCO: Aurora MySQL + Sharding ${npv['aurora_3yr']:,} vs "
+        f"{tco_prefix}3-year TCO: Aurora MySQL + Sharding ${npv['aurora_3yr']:,} vs "
         f"TiDB Cloud ${npv['tidb_3yr']:,}. "
         f"Projected savings: ${npv['savings']:,} ({npv['savings_pct']:.0f}%). "
         "Engineering overhead of maintaining manual sharding accounts for a "
@@ -1922,6 +2275,7 @@ def _write_wrapped_bullet(pdf: PoVReport, text: str, *, size: float = 7.5, line_
     pdf.set_x(pdf.l_margin + 1)
     pdf.set_font("Helvetica", "", size)
     pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 2, line_h, "\n".join(lines))
+    pdf.set_x(pdf.l_margin)
 
 
 def _add_sql_compat_page(pdf: PoVReport, metrics: dict):
@@ -1987,8 +2341,11 @@ def _add_sql_compat_page(pdf: PoVReport, metrics: dict):
             if shown == 0:
                 pdf.body_text("No source unsupported features detected.", size=8)
         else:
-            reason = str(source_inv.get("reason") or "Source inventory not executed.")
-            pdf.body_text(reason, size=8)
+            pdf.body_text(
+                "Source feature inventory was not run in this profile. "
+                "Enable source comparison to include source-engine unsupported-feature findings.",
+                size=8,
+            )
 
 
 def _chart_vector(ann_data) -> plt.Figure:

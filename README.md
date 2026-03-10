@@ -2,8 +2,12 @@
 
 A fully automated Proof of Value toolkit for TiDB Cloud. Spin up a cluster,
 edit one config file, and run a single command — the kit handles the rest and
-produces a professional PDF report with charts, latency tables, and a 3-year
-TCO comparison.
+produces a professional PDF report with:
+- a buyer-facing decision summary
+- exact test scope and environment context
+- module evidence charts for executed modules only
+- SQL compatibility fix index
+- KPI appendix and 3-year TCO comparison
 
 ---
 
@@ -25,11 +29,14 @@ TCO comparison.
 M6 also writes source feature inventory output to:
 - `results/compat_source_unsupported_summary.json`
 
+If a module is not selected in the run, it is shown in coverage tables but
+omitted from the chart section to keep the report concise.
+
 ---
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.10+
 - A TiDB Cloud account (free at [tidbcloud.com](https://tidbcloud.com))
 - Network access to your TiDB cluster
 
@@ -142,6 +149,21 @@ Local:
 
 S3:
 - `s3://<bucket>/<prefix>/<project>/runs/<run_tag>/...`
+
+### 6) Read the Report (first-time prospect flow)
+
+Read in this order:
+1. **Prospect Decision Summary** — clear decision + next action
+2. **What Was Tested** — exact executed scope and environment context
+3. **Executive Summary** — headline KPIs (warm latency, throughput, compatibility)
+4. **Module charts** — evidence pages for executed modules only
+5. **SQL Compatibility Index** — failed checks + fix directions
+6. **KPI appendix** — threshold evaluation table for technical review
+
+TCO note:
+- If `tco:` values are not provided in `config.yaml`, the report labels TCO as
+  an **illustrative model**.
+- Provide customer-specific `tco` inputs for customer-specific TCO output.
 
 ### Useful Shortcuts
 
