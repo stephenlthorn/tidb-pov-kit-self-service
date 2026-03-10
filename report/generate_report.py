@@ -620,7 +620,21 @@ def _chart_scale(metrics) -> plt.Figure:
     tps_np = np.array(tps, dtype=float)
     baseline_tps = max(float(np.percentile(tps_np, 20)) if len(tps_np) else 1.0, 1.0)
     inferred_capacity = np.maximum(1.0, tps_np / baseline_tps)
-    smoothed_capacity = np.convolve(inferred_capacity, np.ones(3) / 3.0, mode="same")
+    # Guard short series: np.convolve(mode="same") returns max(M, N), which can
+    # produce a length mismatch when the kernel is longer than the signal.
+    window = min(3, int(len(inferred_capacity)))
+    if window <= 1:
+        smoothed_capacity = inferred_capacity.copy()
+    else:
+        smoothed_capacity = np.convolve(inferred_capacity, np.ones(window) / float(window), mode="same")
+    if len(smoothed_capacity) != len(elapsed_np):
+        if len(smoothed_capacity) > len(elapsed_np):
+            smoothed_capacity = smoothed_capacity[: len(elapsed_np)]
+        elif len(smoothed_capacity) > 0:
+            pad_len = len(elapsed_np) - len(smoothed_capacity)
+            smoothed_capacity = np.pad(smoothed_capacity, (0, pad_len), mode="edge")
+        else:
+            smoothed_capacity = np.ones_like(elapsed_np)
     if len(elapsed_np) > 1:
         step_sec = max(elapsed_np[1] - elapsed_np[0], 1.0)
     else:
@@ -662,6 +676,23 @@ def _chart_scale(metrics) -> plt.Figure:
         )
     fig.tight_layout()
     return fig
+
+
+def _safe_chart_render(title: str, render_fn) -> plt.Figure:
+    try:
+        fig = render_fn()
+        if fig is None:
+            raise ValueError("renderer returned no figure")
+        return fig
+    except Exception as exc:
+        return _empty_chart(
+            f"{title} unavailable",
+            reason=f"Chart renderer error: {type(exc).__name__}: {exc}",
+            actions=[
+                "Re-run report after metrics collection to refresh chart inputs.",
+                "Review results/run_all.log for module-level chart input errors.",
+            ],
+        )
 
 
 def _chart_ha(metrics) -> plt.Figure:
@@ -2118,7 +2149,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     _add_chart_page(
         pdf,
         "Data Population Snapshot",
-        _chart_data_population(metrics),
+        _safe_chart_render("Data Population Snapshot", lambda: _chart_data_population(metrics)),
         f"Scale: {manifest.get('scale', 'n/a')} | "
         f"Rows generated across schemas: {sum((manifest.get('counts') or {}).values()) if isinstance(manifest.get('counts'), dict) else 'n/a'} | "
         f"Generation time: {manifest.get('generation_duration_sec', 'n/a')} sec",
@@ -2126,50 +2157,74 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
 
     if _module_ran("01_baseline_perf"):
         _add_chart_page(pdf, "Baseline OLTP Performance",
-                        _chart_baseline(metrics),
+                        _safe_chart_render("Baseline OLTP Performance", lambda: _chart_baseline(metrics)),
                         "OLTP workload across configured concurrency levels. "
                         "Shows p99 latency and transactions per second.")
 
         _add_chart_page(
             pdf,
             "Warm Workload Stability",
-            _chart_warm_steady(metrics),
+            _safe_chart_render("Warm Workload Stability", lambda: _chart_warm_steady(metrics)),
             "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time. "
             + _warm_stability_comment(metrics),
         )
 
     if _module_ran("02_elastic_scale"):
         _add_chart_page(pdf, "Elastic Auto-Scaling",
-                        _chart_scale(metrics),
+                        _safe_chart_render("Elastic Auto-Scaling", lambda: _chart_scale(metrics)),
                         "Load ramped from baseline to peak. The bottom panel provides an inferred pay-as-you-grow control signal "
                         "(capacity index and cumulative capacity-hours) derived from measured TPS.")
 
     if _module_ran("03_high_availability"):
         _add_chart_page(pdf, "Availability Drill — Simulated Failure Window",
-                        _chart_ha(metrics),
+                        _safe_chart_render("Availability Drill — Simulated Failure Window", lambda: _chart_ha(metrics)),
                         "This module simulates a client-connection failure window and measures recovery behavior. "
                         "It is not a cloud control-plane node kill. For customer-grade RTO evidence, pair this with backup+restore drill timings.")
 
     if _module_ran("03b_write_contention"):
         _add_chart_page(pdf, "Write Contention — AUTO_RANDOM vs Sequential Keys",
-                        _chart_hotspot(metrics),
+                        _safe_chart_render("Write Contention — AUTO_RANDOM vs Sequential Keys", lambda: _chart_hotspot(metrics)),
                         "Sequential (AUTO_INCREMENT) PKs concentrate writes on a single "
                         "region leader (hot region). AUTO_RANDOM distributes writes evenly. "
                         "For a stronger delta, rerun with higher write concurrency and longer phase duration.")
 
     if _module_ran("04_htap_concurrent"):
         _add_chart_page(pdf, "HTAP — Concurrent Transactional & Analytical Workload",
-                        _chart_htap(metrics),
+                        _safe_chart_render("HTAP — Concurrent Transactional & Analytical Workload", lambda: _chart_htap(metrics)),
                         "TiFlash columnar replicas serve analytical queries without "
                         "interfering with TiKV row-store OLTP writes. This section also compares OLAP query behavior on TiFlash vs TiKV when captured.")
 
     if _module_ran("06_mysql_compat"):
-        _add_sql_compat_page(pdf, metrics)
-        _add_compat_index_page(pdf, metrics)
+        try:
+            _add_sql_compat_page(pdf, metrics)
+        except Exception as exc:
+            _add_chart_page(
+                pdf,
+                "SQL Compatibility",
+                _empty_chart(
+                    "SQL Compatibility output unavailable",
+                    reason=f"Renderer error: {type(exc).__name__}: {exc}",
+                    actions=["Review results/metrics_summary.json compat_checks section and rerun report build."],
+                ),
+                "A rendering issue occurred while building compatibility details.",
+            )
+        try:
+            _add_compat_index_page(pdf, metrics)
+        except Exception as exc:
+            _add_chart_page(
+                pdf,
+                "SQL Compatibility and Source Feature Index",
+                _empty_chart(
+                    "Compatibility index unavailable",
+                    reason=f"Renderer error: {type(exc).__name__}: {exc}",
+                    actions=["Rebuild report after validating compatibility detail rows in metrics_summary.json."],
+                ),
+                "A rendering issue occurred while building the full compatibility index.",
+            )
 
     if _module_ran("07_data_import"):
         _add_chart_page(pdf, "Data Import Speed",
-                        _chart_import(metrics),
+                        _safe_chart_render("Data Import Speed", lambda: _chart_import(metrics)),
                         "Bulk load throughput comparison: Batched INSERT, "
                         "LOAD DATA LOCAL INFILE, and IMPORT INTO (TiDB native loader). "
                         "For production-scale PoV, pre-stage industry data in S3 and prefer IMPORT INTO.")
@@ -2177,7 +2232,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     # TCO page
     pdf.add_page()
     pdf.section_title("3-Year Total Cost of Ownership")
-    tco_fig = make_tco_chart(tco_data)
+    tco_fig = _safe_chart_render("3-Year Total Cost of Ownership", lambda: make_tco_chart(tco_data))
     pdf.embed_figure(tco_fig, w=174)
     npv = tco_data["npv"]
     tco_cfg = (cfg.get("tco", {}) or {})
@@ -2197,7 +2252,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     if mod8.get("status") == "passed":
         ann = mod8.get("tidb", {})
         _add_chart_page(pdf, "Vector Search (AI Track)",
-                        _chart_vector(ann),
+                        _safe_chart_render("Vector Search (AI Track)", lambda: _chart_vector(ann)),
                         "ANN search latency (cosine distance, HNSW index) "
                         "at increasing concurrency levels.")
 
