@@ -930,6 +930,7 @@ validate_report_data_completeness() {
 import json
 import sys
 import yaml
+from pathlib import Path
 
 cfg_path = sys.argv[1]
 metrics_path = sys.argv[2]
