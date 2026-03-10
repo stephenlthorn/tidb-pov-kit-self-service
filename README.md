@@ -110,6 +110,11 @@ Safe small run (clean DB + EC2 cleanup before/after):
 bash scripts/pov_safe_small_e2e.sh config.yaml
 ```
 
+`pov_safe_small_e2e.sh` now also:
+- forces `industry.selected=general_auto`
+- enables `dataset_bootstrap` and publishes the `general_auto` dataset pack to your S3 path
+- enables all standard modules (M0–M8 + vector track), while keeping small-scale defaults
+
 ### 4) Enforce S3 Upload (recommended)
 
 ```bash
