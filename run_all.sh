@@ -918,7 +918,8 @@ run_module() {
 
 validate_report_data_completeness() {
   local strict_raw strict_mode
-  strict_raw="${POV_REQUIRE_COMPLETE_REPORT_DATA:-false}"
+  # Strict completeness by default so reports cannot ship with blank/missing sections.
+  strict_raw="${POV_REQUIRE_COMPLETE_REPORT_DATA:-true}"
   strict_mode="false"
   if is_true "${strict_raw}"; then
     strict_mode="true"

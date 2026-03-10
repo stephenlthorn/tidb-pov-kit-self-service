@@ -139,6 +139,10 @@ export POV_S3_REGION=us-east-1
 
 With enforcement enabled, the run hard-fails if artifacts cannot be archived to S3.
 
+Report completeness is now strict by default: the run fails if selected modules do
+not produce required report data (prevents blank sections/pages in final PDF). If
+you need a one-off relaxed run, set `POV_REQUIRE_COMPLETE_REPORT_DATA=false`.
+
 ### 5) Output Locations
 
 Local:
