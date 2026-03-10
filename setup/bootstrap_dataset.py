@@ -16,6 +16,7 @@ import os
 import sys
 import time
 from typing import Dict, Tuple
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import yaml
 
@@ -141,7 +142,8 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
     cur = conn.cursor()
     imported_uris = []
     start = time.time()
-    for uri in uris:
+    effective_uris = [_augment_s3_uri_auth(uri, cfg) for uri in uris]
+    for uri in effective_uris:
         sql = (
             f"IMPORT INTO `{table}` ({', '.join(columns)}) "
             f"FROM '{uri}' FORMAT 'CSV'"
@@ -151,7 +153,7 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
             cur.fetchall()
         except Exception:
             pass
-        imported_uris.append(uri)
+        imported_uris.append(_redact_uri(uri))
     cur.execute(f"SELECT COUNT(*) FROM `{table}`")
     row = cur.fetchone()
     conn.close()
@@ -174,6 +176,62 @@ def _enable_tiflash(cfg: Dict, table: str):
         cur.execute(f"ALTER TABLE `{table}` SET TIFLASH REPLICA 1")
     finally:
         conn.close()
+
+
+def _augment_s3_uri_auth(uri: str, cfg: Dict) -> str:
+    raw = str(uri or "").strip()
+    if not raw.lower().startswith("s3://"):
+        return raw
+    parts = urlsplit(raw)
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if any(k in params for k in ("access-key", "secret-access-key", "role-arn")):
+        return raw
+
+    ds_cfg = cfg.get("dataset_bootstrap") or {}
+    role_arn = str(ds_cfg.get("s3_role_arn") or os.environ.get("POV_DATASET_S3_ROLE_ARN") or "").strip()
+    external_id = str(ds_cfg.get("s3_external_id") or os.environ.get("POV_DATASET_S3_EXTERNAL_ID") or "").strip()
+    access_key = str(
+        ds_cfg.get("s3_access_key_id")
+        or os.environ.get("POV_DATASET_S3_ACCESS_KEY_ID")
+        or os.environ.get("AWS_ACCESS_KEY_ID")
+        or ""
+    ).strip()
+    secret_key = str(
+        ds_cfg.get("s3_secret_access_key")
+        or os.environ.get("POV_DATASET_S3_SECRET_ACCESS_KEY")
+        or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or ""
+    ).strip()
+    session_token = str(
+        ds_cfg.get("s3_session_token")
+        or os.environ.get("POV_DATASET_S3_SESSION_TOKEN")
+        or os.environ.get("AWS_SESSION_TOKEN")
+        or ""
+    ).strip()
+
+    if role_arn:
+        params["role-arn"] = role_arn
+        if external_id:
+            params["external-id"] = external_id
+    elif access_key and secret_key:
+        params["access-key"] = access_key
+        params["secret-access-key"] = secret_key
+        if session_token:
+            params["session-token"] = session_token
+    else:
+        return raw
+
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+
+
+def _redact_uri(uri: str) -> str:
+    parts = urlsplit(str(uri or ""))
+    if not parts.query:
+        return str(uri or "")
+    redacted = []
+    for k, _v in parse_qsl(parts.query, keep_blank_values=True):
+        redacted.append((k, "***"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(redacted), parts.fragment))
 
 
 def run(cfg: Dict, strict: bool = False) -> Dict:
