@@ -13,7 +13,7 @@ Note: IMPORT INTO requires TiDB >= 7.2 and S3/GCS or a local file path
 accessible to TiDB server.  The test gracefully falls back to LOAD DATA
 or INSERT-only if IMPORT INTO is unavailable.
 """
-import sys, os, time, csv, io, random, tempfile, math
+import sys, os, time, csv, io, random, tempfile, math, re
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
@@ -51,6 +51,10 @@ def run(cfg: dict):
         methods = ["batched_insert", "load_data_infile", "import_into"]
     import_into_source_uri = str(test_cfg.get("import_into_source_uri", "") or "").strip()
     import_source_size_gb = float(test_cfg.get("import_source_size_gb", 0.0) or 0.0)
+    try:
+        import_into_threads = max(0, int(test_cfg.get("import_into_threads", 0) or 0))
+    except (TypeError, ValueError):
+        import_into_threads = 0
 
     print(f"\n{'='*60}")
     print(f"  Module 7: Data Import Speed")
@@ -131,7 +135,13 @@ def run(cfg: dict):
             if not source_uri:
                 source_uri = f"file://{csv_path}"
             t0 = time.time()
-            rows_a = _import_into(cur, conn, f"import_test_native_{industry_key}", source_uri)
+            rows_a = _import_into(
+                cur,
+                conn,
+                f"import_test_native_{industry_key}",
+                source_uri,
+                import_threads=import_into_threads,
+            )
             dur_a = time.time() - t0
             import_size_gb = max(file_size_gb, import_source_size_gb)
             results["import_into"] = _metrics(rows_a, import_size_gb, dur_a)
@@ -274,19 +284,30 @@ def _load_data_infile(tidb_cfg: dict, table: str, csv_path: str) -> int:
     return rows
 
 
-def _import_into(cur, conn, table: str, source_uri: str) -> int:
+def _import_into(cur, conn, table: str, source_uri: str, import_threads: int = 0) -> int:
     """
     Use TiDB IMPORT INTO statement (TiDB >= 7.2).
     Requires the CSV to be accessible from TiDB server or an S3/GCS URI.
     Falls back gracefully if not supported.
     """
-    # IMPORT INTO supports 'file://' URIs for local dev; real deployments use S3
-    sql = f"""
-        IMPORT INTO {table} (source, event_type, user_id, session_id)
-        FROM '{source_uri}'
-        FORMAT 'CSV'
-    """
-    cur.execute(sql)
+    active_threads = import_threads if import_threads > 0 else None
+    while True:
+        sql = (
+            f"IMPORT INTO {table} (source, event_type, user_id, session_id) "
+            f"FROM '{source_uri}' FORMAT 'CSV'"
+        )
+        if active_threads:
+            sql += f" WITH thread={int(active_threads)}"
+        try:
+            cur.execute(sql)
+            break
+        except Exception as e:
+            fallback = _derive_cpu_safe_threads(str(e))
+            if fallback and (active_threads is None or fallback < active_threads):
+                active_threads = fallback
+                print(f"    IMPORT INTO retry with WITH thread={fallback} (cluster cpu guardrail detected).")
+                continue
+            raise
     # IMPORT INTO is async in some versions — poll for completion
     try:
         result = cur.fetchone()
@@ -297,6 +318,18 @@ def _import_into(cur, conn, table: str, source_uri: str) -> int:
     cur.execute(f"SELECT COUNT(*) FROM {table}")
     row = cur.fetchone()
     return row[0] if row else 0
+
+
+def _derive_cpu_safe_threads(err_text: str) -> int | None:
+    msg = str(err_text or "")
+    m = re.search(r"task concurrency\((\d+)\)\s+larger than cpu count\((\d+)\)", msg, flags=re.IGNORECASE)
+    if not m:
+        return None
+    try:
+        cpu = int(m.group(2))
+    except (TypeError, ValueError):
+        return None
+    return max(1, cpu)
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────

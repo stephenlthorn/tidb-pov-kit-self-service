@@ -254,6 +254,8 @@ test:
   warm_phase_concurrency: 32
   ramp_duration_seconds: 300
   import_rows:          1000000
+  import_batch_size:    5000
+  import_into_threads:  0         # 0=auto; set 1 for tiny tiers
   import_into_source_uri: ""        # optional s3://bucket/path/file.csv
   import_source_size_gb: 0.0        # optional, for GB/min with remote import
 
@@ -272,6 +274,8 @@ dataset_bootstrap:
   s3_access_key_id: ""
   s3_secret_access_key: ""
   s3_session_token: ""
+  import_threads: 0                 # 0=auto; set 1 for tiny tiers
+  parallel_import_jobs: 2
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"
   enable_tiflash_for_olap: true

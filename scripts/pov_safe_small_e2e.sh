@@ -165,6 +165,7 @@ test["warm_phase_duration_seconds"] = int(test.get("warm_phase_duration_seconds"
 test["warm_phase_concurrency"] = int(test.get("warm_phase_concurrency", 16) or 16)
 test["import_rows"] = int(test.get("import_rows", 250000) or 250000)
 test["import_batch_size"] = int(test.get("import_batch_size", 2500) or 2500)
+test["import_into_threads"] = int(test.get("import_into_threads", 1) or 1)
 
 runner["instance_size"] = "small"
 runner["auto_shutdown_minutes"] = int(runner.get("auto_shutdown_minutes", 10) or 10)
@@ -175,6 +176,7 @@ bootstrap["required"] = True
 bootstrap["profile_key"] = "general_auto"
 bootstrap["s3_prefix"] = str(bootstrap.get("s3_prefix") or "tidb-pov/datasets")
 bootstrap["aws_region"] = str(bootstrap.get("aws_region") or "us-east-1")
+bootstrap["import_threads"] = int(bootstrap.get("import_threads", 1) or 1)
 bootstrap["skip_synthetic_generation"] = False
 
 # Force all standard modules on for full test sweep.

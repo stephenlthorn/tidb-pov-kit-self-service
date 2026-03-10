@@ -100,6 +100,7 @@ test:
   read_weight_multiplier: 1.0
   write_weight_multiplier: 1.0
   import_batch_size:      5000
+  import_into_threads:    0          # 0=auto; set 1 for tiny tiers if IMPORT INTO hits CPU guardrail
   import_methods:         ["batched_insert", "load_data_infile", "import_into"]
   import_into_source_uri: ""          # Optional: s3://bucket/path/file.csv for TiDB Cloud IMPORT INTO
   import_source_size_gb:   0.0        # Optional: set when using remote source URI for GB/min calc
