@@ -73,9 +73,22 @@ def run(cfg: dict):
     )
 
     ts_data = get_time_series(MODULE, bucket_sec=30)
-    end_module(MODULE, "passed",
-               f"Ramped from {base_concurrency} to {peak_concurrency} threads over {ramp_sec}s")
-    print(f"\n  Complete — {len(ts_data)} time buckets captured.")
+    bucket_count = len(ts_data)
+    if bucket_count <= 0:
+        note = (
+            "No elastic-scale time buckets captured. Increase "
+            "test.ramp_duration_seconds and/or test.ramp_sustain_seconds for chart evidence."
+        )
+        end_module(MODULE, "warning", note)
+        print(f"\n  Complete — {bucket_count} time buckets captured.")
+        print(f"  Warning: {note}")
+    else:
+        end_module(
+            MODULE,
+            "passed",
+            f"Ramped from {base_concurrency} to {peak_concurrency} threads over {ramp_sec}s",
+        )
+        print(f"\n  Complete — {bucket_count} time buckets captured.")
     return {"time_series": ts_data, "annotations": annotations}
 
 

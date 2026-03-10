@@ -64,6 +64,9 @@ def run(cfg: dict):
     if stats_a.get("p99_ms") and stats_b.get("p99_ms"):
         improvement = (stats_a["p99_ms"] - stats_b["p99_ms"]) / stats_a["p99_ms"] * 100
 
+    seq_count = int(stats_a.get("count", 0) or 0)
+    auto_count = int(stats_b.get("count", 0) or 0)
+
     summary = {
         "sequential": stats_a,
         "autorand": stats_b,
@@ -71,8 +74,16 @@ def run(cfg: dict):
         "kv_diagnostics": kv_before,
         "upsert_comparison": upsert_results,
     }
-    end_module(MODULE, "passed",
-               f"AUTO_RANDOM reduced p99 by {improvement:.1f}%")
+    if seq_count <= 0 or auto_count <= 0:
+        note = (
+            "Insufficient write-contention samples captured "
+            f"(sequential={seq_count}, autorand={auto_count}). "
+            "Increase test.write_contention_phase_seconds and/or "
+            "test.write_contention_concurrency."
+        )
+        end_module(MODULE, "warning", note)
+    else:
+        end_module(MODULE, "passed", f"AUTO_RANDOM reduced p99 by {improvement:.1f}%")
     print(f"\n  p99 improvement: {improvement:.1f}% "
           f"({stats_a.get('p99_ms',0):.1f}ms → {stats_b.get('p99_ms',0):.1f}ms)")
     return summary

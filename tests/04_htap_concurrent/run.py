@@ -133,9 +133,19 @@ def run(cfg: dict):
         "p99_degradation_pct": round(degradation, 1),
         "tiflash_replicated": tiflash_ok,
     }
-    status = "passed" if abs(degradation) < 30 else "warning"
-    end_module(MODULE, status,
-               f"OLTP p99 degradation under analytics load: {degradation:.1f}%")
+    base_count = int(stats_baseline.get("count", 0) or 0)
+    htap_count = int(stats_htap.get("count", 0) or 0)
+    if base_count <= 0 or htap_count <= 0:
+        status = "warning"
+        note = (
+            "Insufficient HTAP OLTP samples captured "
+            f"(oltp_only={base_count}, htap={htap_count}). "
+            "Increase test.htap_phase_seconds and/or test.htap_oltp_concurrency."
+        )
+    else:
+        status = "passed" if abs(degradation) < 30 else "warning"
+        note = f"OLTP p99 degradation under analytics load: {degradation:.1f}%"
+    end_module(MODULE, status, note)
     print(f"\n  OLTP p99 degradation with analytics: {degradation:+.1f}%")
     print(f"  TiFlash replicas active: {tiflash_ok}")
     return summary
