@@ -235,18 +235,22 @@ s3_upload_required() {
 
 print_s3_download_links() {
   local latest_manifest
+  local links_file
   latest_manifest="$(ls -1t "${RESULTS_DIR}"/s3_upload_manifest_*.json 2>/dev/null | head -n 1 || true)"
   if [[ -z "${latest_manifest}" || ! -f "${latest_manifest}" ]]; then
     return 0
   fi
+  links_file="${RESULTS_DIR}/s3_download_links.txt"
 
   echo ""
-  echo "  S3 downloads:"
-  "${PYTHON}" - "${latest_manifest}" <<'PY'
+  echo "  S3 downloads (copy/paste friendly):"
+  "${PYTHON}" - "${latest_manifest}" "${links_file}" <<'PY'
 import json
 import sys
+from pathlib import Path
 
 path = sys.argv[1]
+links_path = Path(sys.argv[2])
 try:
     payload = json.load(open(path))
 except Exception:
@@ -263,13 +267,23 @@ def pick(suffix: str):
 report = pick("/results/tidb_pov_report.pdf")
 metrics = pick("/results/metrics_summary.json")
 manifest_url = str(payload.get("manifest_download_url") or "").strip()
+entries = []
 
 if report:
-    print(f"    - Report download : {report.get('download_url') or report.get('s3_uri')}")
+    entries.append(("REPORT_URL", report.get("download_url") or report.get("s3_uri") or ""))
 if metrics:
-    print(f"    - Metrics download: {metrics.get('download_url') or metrics.get('s3_uri')}")
+    entries.append(("METRICS_URL", metrics.get("download_url") or metrics.get("s3_uri") or ""))
 if manifest_url:
-    print(f"    - Manifest        : {manifest_url}")
+    entries.append(("MANIFEST_URL", manifest_url))
+
+if entries:
+    links_path.parent.mkdir(parents=True, exist_ok=True)
+    with links_path.open("w", encoding="utf-8") as fh:
+        for k, v in entries:
+            fh.write(f"{k}={v}\n")
+    for k, v in entries:
+        print(f"    {k}={v}")
+    print(f"    LINKS_FILE={links_path}")
 PY
 }
 
@@ -901,6 +915,127 @@ run_module() {
   fi
 }
 
+validate_report_data_completeness() {
+  local strict_raw strict_mode
+  strict_raw="${POV_REQUIRE_COMPLETE_REPORT_DATA:-false}"
+  strict_mode="false"
+  if is_true "${strict_raw}"; then
+    strict_mode="true"
+  fi
+
+  set +e
+  local validation_output
+  validation_output="$("${PYTHON}" - "${CONFIG_EFFECTIVE}" "${RESULTS_DIR}/metrics_summary.json" <<'PY'
+import json
+import sys
+import yaml
+
+cfg_path = sys.argv[1]
+metrics_path = sys.argv[2]
+
+cfg = yaml.safe_load(open(cfg_path)) or {}
+metrics = {}
+try:
+    metrics = json.load(open(metrics_path))
+except Exception:
+    print("report-data-check: metrics_summary.json missing or unreadable")
+    sys.exit(2)
+
+mods_cfg = cfg.get("modules") or {}
+module_rows = [
+    ("00_customer_queries", ["customer_queries", "customer_query_validation"], "latency"),
+    ("01_baseline_perf", ["baseline_perf"], "latency"),
+    ("02_elastic_scale", ["elastic_scale"], "latency"),
+    ("03_high_availability", ["high_availability"], "latency"),
+    ("03b_write_contention", ["write_contention"], "latency"),
+    ("04_htap_concurrent", ["htap"], "latency"),
+    ("05_online_ddl", ["online_ddl"], "latency"),
+    ("06_mysql_compat", ["mysql_compat"], "compat"),
+    ("07_data_import", ["data_import"], "import"),
+    ("08_vector_search", ["vector_search"], "latency"),
+]
+
+def enabled(keys):
+    for key in keys:
+        if key in mods_cfg:
+            return bool(mods_cfg.get(key))
+    return True
+
+def point_count(entry):
+    total = 0
+    tidb = entry.get("tidb", {}) if isinstance(entry, dict) else {}
+    if isinstance(tidb, dict):
+        for stats in tidb.values():
+            if isinstance(stats, dict):
+                try:
+                    total += int(stats.get("count", 0) or 0)
+                except Exception:
+                    pass
+    return total
+
+issues = []
+mods_metrics = metrics.get("modules", {}) or {}
+compat = metrics.get("compat_checks", {}) or {}
+imports = metrics.get("import_stats", []) or []
+
+for module_key, config_keys, mode in module_rows:
+    if not enabled(config_keys):
+        continue
+    entry = mods_metrics.get(module_key, {}) or {}
+    status = str(entry.get("status") or "not_run").strip().lower()
+    notes = str(entry.get("notes") or "").strip()
+    points = point_count(entry)
+
+    if status == "not_run":
+        issues.append(f"{module_key}: status not_run")
+        continue
+
+    if mode == "compat":
+        total_checks = int(compat.get("total", 0) or 0)
+        if total_checks <= 0:
+            issues.append(f"{module_key}: no compatibility checks captured")
+        continue
+
+    if mode == "import":
+        if len(imports) == 0:
+            issues.append(f"{module_key}: no import stats captured")
+        continue
+
+    if module_key == "08_vector_search" and status == "skipped":
+        if not notes:
+            issues.append(f"{module_key}: skipped without reason")
+        continue
+
+    if status == "passed" and points <= 0:
+        issues.append(f"{module_key}: passed but recorded 0 data points")
+    elif status in {"failed", "warning", "skipped"} and points <= 0 and not notes:
+        issues.append(f"{module_key}: {status} with no data points and no notes")
+
+if issues:
+    print("report-data-check: FAILED")
+    for item in issues:
+        print(f"  - {item}")
+    sys.exit(2)
+
+print("report-data-check: OK")
+PY
+)"
+  local validation_rc=$?
+  set -e
+
+  if [[ ${validation_rc} -ne 0 ]]; then
+    if [[ "${strict_mode}" == "true" ]]; then
+      err "Data completeness validation failed."
+      echo "${validation_output}"
+      exit ${validation_rc}
+    fi
+    warn "Data completeness validation reported gaps (continuing)."
+    echo "${validation_output}"
+  else
+    ok "Data completeness validation passed."
+  fi
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 5-9. Test Modules
 # ─────────────────────────────────────────────────────────────────────────────
@@ -981,6 +1116,7 @@ fi
 step "10/10" "Generating PDF report"
 "${PYTHON}" report/collect_metrics.py --quiet
 ok "Metrics JSON written to ${RESULTS_DIR}/metrics_summary.json"
+validate_report_data_completeness
 "${PYTHON}" report/generate_report.py "${CONFIG_EFFECTIVE}"
 ok "Report written to ${RESULTS_DIR}/tidb_pov_report.pdf"
 s3_upload_required "10b/10"

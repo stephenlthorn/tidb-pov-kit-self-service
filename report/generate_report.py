@@ -36,6 +36,7 @@ from fpdf.enums import XPos, YPos
 
 from report.collect_metrics import collect
 from report.tco_model import compute as compute_tco, make_chart as make_tco_chart
+from lib.industry_profiles import get_industry_profile
 
 # ── Brand colours ─────────────────────────────────────────────────────────────
 RED        = (220, 50,  47)
@@ -251,7 +252,7 @@ class PoVReport(FPDF):
             max_width=max(6.0, w - 4),
             style="B",
             start_size=16.0,
-            min_size=7.5,
+            min_size=6.0,
         )
         self.set_font("Helvetica", "B", fitted_size)
         self.set_text_color(*color)
@@ -282,6 +283,115 @@ class PoVReport(FPDF):
         x = self.l_margin
         self.image(buf, x=x, y=self.get_y(), w=w, h=h)
         self.ln(h + 4)
+
+
+def _split_value_bullets(text: str, max_items: int = 4) -> list[str]:
+    raw = str(text or "").replace("\n", " ").strip()
+    if not raw:
+        return ["No validated value captured in this run."]
+    parts = [p.strip(" .") for p in re.split(r";|\.\s+", raw) if p and p.strip(" .")]
+    if not parts:
+        parts = [raw]
+    return parts[:max_items]
+
+
+def _safe_table_lines(pdf: PoVReport, text: str, width: float, line_h: float, style: str, size: float) -> list[str]:
+    content = pdf.normalize_text(str(text or ""))
+    pdf.set_font("Helvetica", style, size)
+    usable_w = max(4.0, width)
+    try:
+        lines = pdf.multi_cell(usable_w, line_h, content, dry_run=True, output="LINES")
+    except Exception:
+        lines = [content]
+    if not lines:
+        return [""]
+    return [pdf.normalize_text(str(line)) for line in lines]
+
+
+def _draw_wrapped_table_row(
+    pdf: PoVReport,
+    col_widths: list[float],
+    cells: list[str],
+    *,
+    styles: list[str] | None = None,
+    font_sizes: list[float] | None = None,
+    text_colors: list[tuple[int, int, int]] | None = None,
+    aligns: list[str] | None = None,
+    fill_color: tuple[int, int, int] = WHITE,
+    line_h: float = 3.8,
+    padding: float = 0.8,
+) -> bool:
+    n = len(col_widths)
+    styles = list(styles or ([""] * n))
+    font_sizes = list(font_sizes or ([7.0] * n))
+    text_colors = list(text_colors or ([(0, 0, 0)] * n))
+    aligns = list(aligns or (["L"] * n))
+    if len(cells) < n:
+        cells = list(cells) + ([""] * (n - len(cells)))
+
+    wrapped = []
+    max_lines = 1
+    for idx, width in enumerate(col_widths):
+        lines = _safe_table_lines(
+            pdf,
+            str(cells[idx]),
+            width - (padding * 2),
+            line_h,
+            styles[idx] if idx < len(styles) else "",
+            font_sizes[idx] if idx < len(font_sizes) else 7.0,
+        )
+        wrapped.append(lines)
+        if len(lines) > max_lines:
+            max_lines = len(lines)
+
+    row_h = max_lines * line_h + (padding * 2)
+    if pdf.get_y() + row_h > (pdf.h - pdf.b_margin):
+        return False
+
+    y0 = pdf.get_y()
+    x0 = pdf.l_margin
+    pdf.set_x(x0)
+    for idx, width in enumerate(col_widths):
+        x = pdf.get_x()
+        pdf.set_fill_color(*fill_color)
+        pdf.rect(x, y0, width, row_h, style="FD")
+        pdf.set_xy(x + padding, y0 + padding)
+        pdf.set_font(
+            "Helvetica",
+            styles[idx] if idx < len(styles) else "",
+            font_sizes[idx] if idx < len(font_sizes) else 7.0,
+        )
+        color = text_colors[idx] if idx < len(text_colors) else (0, 0, 0)
+        pdf.set_text_color(*color)
+        pdf.multi_cell(
+            width - (padding * 2),
+            line_h,
+            "\n".join(wrapped[idx]),
+            border=0,
+            align=aligns[idx] if idx < len(aligns) else "L",
+            new_x=XPos.RIGHT,
+            new_y=YPos.TOP,
+        )
+        pdf.set_xy(x + width, y0)
+
+    pdf.set_xy(x0, y0 + row_h)
+    pdf.set_text_color(0, 0, 0)
+    return True
+
+
+def _draw_wrapped_table_header(pdf: PoVReport, col_widths: list[float], headers: list[str]) -> bool:
+    return _draw_wrapped_table_row(
+        pdf,
+        col_widths,
+        headers,
+        styles=["B"] * len(col_widths),
+        font_sizes=[7.5] * len(col_widths),
+        text_colors=[WHITE] * len(col_widths),
+        aligns=["L"] * len(col_widths),
+        fill_color=RED,
+        line_h=3.9,
+        padding=0.8,
+    )
 
 
 # ── Chart generators ──────────────────────────────────────────────────────────
@@ -986,14 +1096,12 @@ def _add_run_coverage_page(pdf, metrics):
 
     col_widths = [74, 24, 18, 18, 42]
     headers = ["Module", "Status", "Secs", "Points", "Interpretation"]
-    pdf.set_font("Helvetica", "B", 8)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_widths, headers):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 7)
+    def draw_header(title_suffix: str = ""):
+        if title_suffix:
+            pdf.section_title(f"Run Coverage and Data Completeness {title_suffix}")
+        _draw_wrapped_table_header(pdf, col_widths, headers)
+
+    draw_header()
 
     for key in MODULE_DISPLAY:
         mod = (metrics.get("modules", {}) or {}).get(key, {}) or {}
@@ -1012,15 +1120,31 @@ def _add_run_coverage_page(pdf, metrics):
         else:
             interp = "Not selected in this run."
             color = DARK_GREY
-        pdf.set_fill_color(*LIGHT_GREY)
-        pdf.cell(col_widths[0], 6, MODULE_DISPLAY[key], border=1, fill=True)
-        pdf.set_text_color(*color)
-        pdf.cell(col_widths[1], 6, status.upper(), border=1, fill=True)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_widths[2], 6, dur, border=1, fill=True)
-        pdf.cell(col_widths[3], 6, points, border=1, fill=True)
-        pdf.cell(col_widths[4], 6, interp[:60], border=1, fill=True)
-        pdf.ln()
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_widths,
+            [MODULE_DISPLAY[key], status.upper(), dur, points, interp],
+            styles=["", "B", "", "", ""],
+            font_sizes=[7.0, 7.0, 7.0, 7.0, 7.0],
+            text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+            aligns=["L", "C", "C", "C", "L"],
+            fill_color=LIGHT_GREY,
+            line_h=3.7,
+        )
+        if not row_ok:
+            pdf.add_page()
+            draw_header("(Continued)")
+            _draw_wrapped_table_row(
+                pdf,
+                col_widths,
+                [MODULE_DISPLAY[key], status.upper(), dur, points, interp],
+                styles=["", "B", "", "", ""],
+                font_sizes=[7.0, 7.0, 7.0, 7.0, 7.0],
+                text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                aligns=["L", "C", "C", "C", "L"],
+                fill_color=LIGHT_GREY,
+                line_h=3.7,
+            )
 
     pdf.ln(4)
     pdf.body_text(
@@ -1037,24 +1161,71 @@ def _add_module_interpretation_page(pdf, metrics):
         size=8,
     )
 
+    block_w = pdf.w - pdf.l_margin - pdf.r_margin
+    inner_w = block_w - 4
+
     for mod_key in MODULE_DISPLAY:
-        if pdf.get_y() > 245:
+        signal, technical, business = _module_interpretation(metrics, mod_key)
+        technical_points = _split_value_bullets(technical)
+        business_points = _split_value_bullets(business)
+
+        title_lines = _safe_table_lines(pdf, MODULE_DISPLAY[mod_key], inner_w, 4.2, "B", 8)
+        observed_lines = _safe_table_lines(pdf, str(signal), inner_w, 4.0, "", 8)
+        tech_lines = []
+        for item in technical_points:
+            tech_lines.extend(_safe_table_lines(pdf, f"- {item}", inner_w, 4.0, "", 8))
+        biz_lines = []
+        for item in business_points:
+            biz_lines.extend(_safe_table_lines(pdf, f"- {item}", inner_w, 4.0, "", 8))
+
+        line_count = (
+            len(title_lines)
+            + 1 + len(observed_lines)
+            + 1 + len(tech_lines)
+            + 1 + len(biz_lines)
+        )
+        block_h = line_count * 4.0 + 6
+        if pdf.get_y() + block_h > (pdf.h - pdf.b_margin):
             pdf.add_page()
             pdf.section_title("Module Interpretation — Continued")
-        signal, technical, business = _module_interpretation(metrics, mod_key)
-        pdf.set_font("Helvetica", "B", 8)
+
+        x = pdf.l_margin
+        y = pdf.get_y()
+        pdf.set_fill_color(*LIGHT_GREY)
+        pdf.set_draw_color(210, 210, 210)
+        pdf.rect(x, y, block_w, block_h, style="FD")
+        pdf.set_xy(x + 2, y + 2)
+
         pdf.set_text_color(*RED)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 5, MODULE_DISPLAY[mod_key])
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_x(x + 2)
+        pdf.multi_cell(inner_w, 4.2, MODULE_DISPLAY[mod_key])
         pdf.set_text_color(0, 0, 0)
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_x(x + 2)
+        pdf.multi_cell(inner_w, 4.0, "Observed")
         pdf.set_font("Helvetica", "", 8)
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 4.5, f"Observed: {signal}")
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 4.5, f"Technical: {technical}")
-        pdf.set_x(pdf.l_margin)
-        pdf.multi_cell(0, 4.5, f"Business: {business}")
-        pdf.ln(1)
+        pdf.set_x(x + 2)
+        pdf.multi_cell(inner_w, 4.0, str(signal))
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_x(x + 2)
+        pdf.multi_cell(inner_w, 4.0, "Technical Value")
+        pdf.set_font("Helvetica", "", 8)
+        for item in technical_points:
+            pdf.set_x(x + 2)
+            pdf.multi_cell(inner_w, 4.0, f"- {item}")
+
+        pdf.set_font("Helvetica", "B", 8)
+        pdf.set_x(x + 2)
+        pdf.multi_cell(inner_w, 4.0, "Business Value")
+        pdf.set_font("Helvetica", "", 8)
+        for item in business_points:
+            pdf.set_x(x + 2)
+            pdf.multi_cell(inner_w, 4.0, f"- {item}")
+
+        pdf.set_xy(pdf.l_margin, y + block_h + 1.2)
 
 
 def _add_compat_index_page(pdf, metrics):
@@ -1093,23 +1264,36 @@ def _add_compat_index_page(pdf, metrics):
     pdf.sub_title("Category Summary")
     col_w = [36, 18, 18, 102]
     hdr = ["Category", "Pass", "Fail", "Recommended Fix Direction"]
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_w, hdr):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(*WHITE)
+    _draw_wrapped_table_header(pdf, col_w, hdr)
     for category in sorted(by_category.keys()):
         rec = _compat_fix_text(category, "")
-        row = [category, str(by_category[category]["pass"]), str(by_category[category]["fail"]), rec]
-        for w, cell in zip(col_w, row):
-            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
-            pdf.set_font("Helvetica", "", sz)
-            pdf.cell(w, 6, txt, border=1, fill=True)
-        pdf.ln()
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_w,
+            [category, str(by_category[category]["pass"]), str(by_category[category]["fail"]), rec],
+            styles=["", "", "", ""],
+            font_sizes=[7.0, 7.0, 7.0, 7.0],
+            text_colors=[(0, 0, 0)] * 4,
+            aligns=["L", "C", "C", "L"],
+            fill_color=WHITE,
+            line_h=3.6,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("SQL Compatibility and Source Feature Index (Continued)")
+            pdf.sub_title("Category Summary (Continued)")
+            _draw_wrapped_table_header(pdf, col_w, hdr)
+            _draw_wrapped_table_row(
+                pdf,
+                col_w,
+                [category, str(by_category[category]["pass"]), str(by_category[category]["fail"]), rec],
+                styles=["", "", "", ""],
+                font_sizes=[7.0, 7.0, 7.0, 7.0],
+                text_colors=[(0, 0, 0)] * 4,
+                aligns=["L", "C", "C", "L"],
+                fill_color=WHITE,
+                line_h=3.6,
+            )
 
     pdf.ln(3)
     pdf.sub_title("Failed Check Index")
@@ -1119,36 +1303,41 @@ def _add_compat_index_page(pdf, metrics):
 
     col_w2 = [24, 54, 40, 56]
     hdr2 = ["Category", "Check", "Observed Error", "How to Fix"]
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_w2, hdr2):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_font("Helvetica", "", 7)
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(*WHITE)
+    _draw_wrapped_table_header(pdf, col_w2, hdr2)
     for category, name, note, fix in failed_rows:
-        row = [category, name, note or "n/a", fix]
-        for w, cell in zip(col_w2, row):
-            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
-            pdf.set_font("Helvetica", "", sz)
-            pdf.cell(w, 6, txt, border=1, fill=True)
-        pdf.ln()
-    pdf.set_font("Helvetica", "", 7)
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_w2,
+            [category, name, note or "n/a", fix],
+            styles=["", "", "", ""],
+            font_sizes=[7.0, 7.0, 7.0, 7.0],
+            text_colors=[(0, 0, 0)] * 4,
+            aligns=["L", "L", "L", "L"],
+            fill_color=WHITE,
+            line_h=3.6,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("SQL Compatibility and Source Feature Index (Continued)")
+            pdf.sub_title("Failed Check Index (Continued)")
+            _draw_wrapped_table_header(pdf, col_w2, hdr2)
+            _draw_wrapped_table_row(
+                pdf,
+                col_w2,
+                [category, name, note or "n/a", fix],
+                styles=["", "", "", ""],
+                font_sizes=[7.0, 7.0, 7.0, 7.0],
+                text_colors=[(0, 0, 0)] * 4,
+                aligns=["L", "L", "L", "L"],
+                fill_color=WHITE,
+                line_h=3.6,
+            )
 
     pdf.ln(3)
     pdf.sub_title("All Compatibility Checks (Full Index)")
     col_w3 = [24, 106, 22, 24]
     hdr3 = ["Category", "Check", "Status", "Fix Ref"]
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_w3, hdr3):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_fill_color(*WHITE)
+    _draw_wrapped_table_header(pdf, col_w3, hdr3)
 
     for row in details:
         if not isinstance(row, dict):
@@ -1159,19 +1348,34 @@ def _add_compat_index_page(pdf, metrics):
         if status not in {"PASS", "FAIL"}:
             status = "FAIL"
         ref = "See failed index" if status == "FAIL" else "-"
-        cells = [category, name, status, ref]
-        for w, cell in zip(col_w3, cells):
-            txt, sz = pdf._fit_single_line_text(str(cell), max(6.0, w - 2), style="", start_size=7.0, min_size=5.5)
-            pdf.set_font("Helvetica", "", sz)
-            if cell == "FAIL":
-                pdf.set_text_color(*RED)
-            elif cell == "PASS":
-                pdf.set_text_color(*GREEN)
-            else:
-                pdf.set_text_color(0, 0, 0)
-            pdf.cell(w, 6, txt, border=1, fill=True)
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln()
+        status_color = RED if status == "FAIL" else GREEN
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_w3,
+            [category, name, status, ref],
+            styles=["", "", "B", ""],
+            font_sizes=[7.0, 7.0, 7.0, 7.0],
+            text_colors=[(0, 0, 0), (0, 0, 0), status_color, (0, 0, 0)],
+            aligns=["L", "L", "C", "L"],
+            fill_color=WHITE,
+            line_h=3.6,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("SQL Compatibility and Source Feature Index (Continued)")
+            pdf.sub_title("All Compatibility Checks (Full Index) (Continued)")
+            _draw_wrapped_table_header(pdf, col_w3, hdr3)
+            _draw_wrapped_table_row(
+                pdf,
+                col_w3,
+                [category, name, status, ref],
+                styles=["", "", "B", ""],
+                font_sizes=[7.0, 7.0, 7.0, 7.0],
+                text_colors=[(0, 0, 0), (0, 0, 0), status_color, (0, 0, 0)],
+                aligns=["L", "L", "C", "L"],
+                fill_color=WHITE,
+                line_h=3.6,
+            )
 
 
 def _normalize_tier_key(raw: str | None) -> str:
@@ -1271,24 +1475,38 @@ def _add_kpi_appendix_page(pdf, metrics, tier_key: str, thresholds_by_tier: dict
 
     col_w = [48, 24, 18, 18, 18, 18, 20, 36]
     hdrs = ["Module / Phase", "Status", "Count", "p50", "p95", "p99", "TPS", "Evaluation"]
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_w, hdrs):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 7)
+    _draw_wrapped_table_header(pdf, col_w, hdrs)
 
     for mod_key in MODULE_DISPLAY:
         mod = (metrics.get("modules", {}) or {}).get(mod_key, {}) or {}
         tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
         if not tidb:
-            pdf.set_fill_color(*LIGHT_GREY)
-            row = [mod_key, "NO DATA", "-", "-", "-", "-", "-", "Module not run or no rows"]
-            for w, cell in zip(col_w, row):
-                pdf.cell(w, 5, str(cell)[:60], border=1, fill=True)
-            pdf.ln()
+            row_ok = _draw_wrapped_table_row(
+                pdf,
+                col_w,
+                [mod_key, "NO DATA", "-", "-", "-", "-", "-", "Module not run or no rows"],
+                styles=["", "B", "", "", "", "", "", ""],
+                font_sizes=[7.0] * 8,
+                text_colors=[(0, 0, 0), DARK_GREY, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                fill_color=LIGHT_GREY,
+                line_h=3.5,
+            )
+            if not row_ok:
+                pdf.add_page()
+                pdf.section_title("Appendix — KPI Threshold Evaluation (Continued)")
+                _draw_wrapped_table_header(pdf, col_w, hdrs)
+                _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    [mod_key, "NO DATA", "-", "-", "-", "-", "-", "Module not run or no rows"],
+                    styles=["", "B", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0), DARK_GREY, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
             continue
 
         for phase, s in tidb.items():
@@ -1304,18 +1522,50 @@ def _add_kpi_appendix_page(pdf, metrics, tier_key: str, thresholds_by_tier: dict
             else:
                 color = DARK_GREY
 
-            pdf.set_fill_color(*LIGHT_GREY)
-            pdf.cell(col_w[0], 5, f"{mod_key[:14]}/{str(phase)[:20]}", border=1, fill=True)
-            pdf.set_text_color(*color)
-            pdf.cell(col_w[1], 5, verdict, border=1, fill=True)
-            pdf.set_text_color(0, 0, 0)
-            pdf.cell(col_w[2], 5, str(int(s.get("count", 0) or 0)), border=1, fill=True)
-            pdf.cell(col_w[3], 5, f"{float(s.get('p50_ms', 0) or 0):.1f}", border=1, fill=True)
-            pdf.cell(col_w[4], 5, f"{float(s.get('p95_ms', 0) or 0):.1f}", border=1, fill=True)
-            pdf.cell(col_w[5], 5, f"{float(s.get('p99_ms', 0) or 0):.1f}", border=1, fill=True)
-            pdf.cell(col_w[6], 5, f"{float(s.get('tps', 0) or 0):.0f}", border=1, fill=True)
-            pdf.cell(col_w[7], 5, note[:80], border=1, fill=True)
-            pdf.ln()
+            row_ok = _draw_wrapped_table_row(
+                pdf,
+                col_w,
+                [
+                    f"{mod_key}/{str(phase)}",
+                    verdict,
+                    str(int(s.get("count", 0) or 0)),
+                    f"{float(s.get('p50_ms', 0) or 0):.1f}",
+                    f"{float(s.get('p95_ms', 0) or 0):.1f}",
+                    f"{float(s.get('p99_ms', 0) or 0):.1f}",
+                    f"{float(s.get('tps', 0) or 0):.0f}",
+                    note,
+                ],
+                styles=["", "B", "", "", "", "", "", ""],
+                font_sizes=[7.0] * 8,
+                text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                fill_color=LIGHT_GREY,
+                line_h=3.5,
+            )
+            if not row_ok:
+                pdf.add_page()
+                pdf.section_title("Appendix — KPI Threshold Evaluation (Continued)")
+                _draw_wrapped_table_header(pdf, col_w, hdrs)
+                _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    [
+                        f"{mod_key}/{str(phase)}",
+                        verdict,
+                        str(int(s.get("count", 0) or 0)),
+                        f"{float(s.get('p50_ms', 0) or 0):.1f}",
+                        f"{float(s.get('p95_ms', 0) or 0):.1f}",
+                        f"{float(s.get('p99_ms', 0) or 0):.1f}",
+                        f"{float(s.get('tps', 0) or 0):.0f}",
+                        note,
+                    ],
+                    styles=["", "B", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0), (0, 0, 0)],
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "L"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
 
 
 def _rgb(color_tuple):
@@ -1385,6 +1635,18 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     display_tps = summary.get("warm_tps")
     latency_label = "Warm p99 Latency"
     tps_label = "Warm Throughput"
+    run_mode_key = str(summary.get("run_mode") or "validation").strip().lower()
+    schema_mode_key = str(summary.get("schema_mode") or "tidb_optimized").strip().lower()
+    industry_key = str(summary.get("industry") or "general_auto").strip().lower()
+    run_mode_display = "Performance" if run_mode_key == "performance" else "Validation"
+    schema_mode_display = {
+        "tidb_optimized": "TiDB Optimized",
+        "mysql_compatible": "MySQL Compatible",
+    }.get(schema_mode_key, schema_mode_key.replace("_", " ").title())
+    try:
+        industry_display = str(get_industry_profile(industry_key).get("label") or "General / Auto")
+    except Exception:
+        industry_display = industry_key.replace("_", " ").title()
     if summary.get("run_mode") == "performance":
         if display_latency is None:
             display_latency = summary.get("workload_p99_ms")
@@ -1394,9 +1656,9 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         tps_label = "Current Run Throughput"
 
     cards = [
-        ("Run Mode",            str(summary.get("run_mode") or "validation"), "",       (0, 128, 128)),
-        ("Schema Mode",         str(summary.get("schema_mode") or "tidb_optimized"), "", (100, 100, 180)),
-        ("Industry",            str(summary.get("industry") or "general_auto"), "", (120, 120, 160)),
+        ("Run Mode",            run_mode_display, "",       (0, 128, 128)),
+        ("Schema Mode",         schema_mode_display, "", (100, 100, 180)),
+        ("Industry",            industry_display, "", (120, 120, 160)),
         (latency_label,         _fmt(display_latency, 1), "ms",       BLUE),
         (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
@@ -1467,29 +1729,40 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     pdf.section_title("Test Module Status")
     col_widths = [80, 22, 22, 50]
     headers    = ["Module", "Status", "Duration", "Notes"]
-    pdf.set_font("Helvetica", "B", 9)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_widths, headers):
-        pdf.cell(w, 7, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(0, 0, 0)
+    _draw_wrapped_table_header(pdf, col_widths, headers)
 
     for mod_key, mod_label in MODULE_DISPLAY.items():
         mod  = metrics["modules"].get(mod_key, {})
         stat = mod.get("status", "not_run")
         dur  = f"{mod.get('duration_sec', 0):.0f}s" if mod.get("duration_sec") else "—"
-        note = (mod.get("notes") or "")[:55]
+        note = mod.get("notes") or ""
         color = GREEN if stat == "passed" else (ORANGE if stat == "skipped" else RED)
-        pdf.set_fill_color(*LIGHT_GREY)
-        pdf.set_font("Helvetica", "", 8)
-        pdf.cell(col_widths[0], 6, mod_label, border=1, fill=True)
-        pdf.set_text_color(*color)
-        pdf.cell(col_widths[1], 6, stat.upper(), border=1, fill=True)
-        pdf.set_text_color(0, 0, 0)
-        pdf.cell(col_widths[2], 6, dur, border=1, fill=True)
-        pdf.cell(col_widths[3], 6, note, border=1, fill=True)
-        pdf.ln()
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_widths,
+            [mod_label, stat.upper(), dur, note],
+            styles=["", "B", "", ""],
+            font_sizes=[7.5, 7.5, 7.5, 7.5],
+            text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0)],
+            aligns=["L", "C", "C", "L"],
+            fill_color=LIGHT_GREY,
+            line_h=3.7,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("Test Module Status (Continued)")
+            _draw_wrapped_table_header(pdf, col_widths, headers)
+            _draw_wrapped_table_row(
+                pdf,
+                col_widths,
+                [mod_label, stat.upper(), dur, note],
+                styles=["", "B", "", ""],
+                font_sizes=[7.5, 7.5, 7.5, 7.5],
+                text_colors=[(0, 0, 0), color, (0, 0, 0), (0, 0, 0)],
+                aligns=["L", "C", "C", "L"],
+                fill_color=LIGHT_GREY,
+                line_h=3.7,
+            )
     pdf.ln(5)
 
     # ── Page 3: Coverage details ─────────────────────────────────────────────
@@ -1588,22 +1861,14 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     pdf.section_title("Appendix — Raw Latency Statistics")
     col_w = [55, 22, 18, 18, 18, 18, 18, 18]
     hdrs  = ["Module / Phase", "Count", "Avg ms", "p50", "p95", "p99", "Max", "TPS"]
-    pdf.set_font("Helvetica", "B", 7)
-    pdf.set_fill_color(*RED)
-    pdf.set_text_color(*WHITE)
-    for w, h in zip(col_w, hdrs):
-        pdf.cell(w, 6, h, border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(0, 0, 0)
-    pdf.set_font("Helvetica", "", 7)
+    _draw_wrapped_table_header(pdf, col_w, hdrs)
 
     for mod_key in MODULE_DISPLAY:
         mod  = metrics["modules"].get(mod_key, {})
         tidb = mod.get("tidb", {})
         for phase, s in tidb.items():
-            pdf.set_fill_color(*LIGHT_GREY)
             row = [
-                f"{mod_key[:18]}/{phase[:15]}",
+                f"{mod_key}/{phase}",
                 str(s.get("count", "")),
                 f"{s.get('avg_ms',0):.1f}",
                 f"{s.get('p50_ms',0):.1f}",
@@ -1612,9 +1877,32 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                 f"{s.get('max_ms',0):.1f}",
                 f"{s.get('tps',0):.0f}",
             ]
-            for w, cell in zip(col_w, row):
-                pdf.cell(w, 5, cell, border=1, fill=True)
-            pdf.ln()
+            row_ok = _draw_wrapped_table_row(
+                pdf,
+                col_w,
+                row,
+                styles=["", "", "", "", "", "", "", ""],
+                font_sizes=[7.0] * 8,
+                text_colors=[(0, 0, 0)] * 8,
+                aligns=["L", "C", "C", "C", "C", "C", "C", "C"],
+                fill_color=LIGHT_GREY,
+                line_h=3.5,
+            )
+            if not row_ok:
+                pdf.add_page()
+                pdf.section_title("Appendix — Raw Latency Statistics (Continued)")
+                _draw_wrapped_table_header(pdf, col_w, hdrs)
+                _draw_wrapped_table_row(
+                    pdf,
+                    col_w,
+                    row,
+                    styles=["", "", "", "", "", "", "", ""],
+                    font_sizes=[7.0] * 8,
+                    text_colors=[(0, 0, 0)] * 8,
+                    aligns=["L", "C", "C", "C", "C", "C", "C", "C"],
+                    fill_color=LIGHT_GREY,
+                    line_h=3.5,
+                )
 
     pdf.output(out_path)
     print(f"  Report written to: {out_path}")

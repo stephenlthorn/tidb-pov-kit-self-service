@@ -34,17 +34,17 @@ random.seed(42)
 # ─── Row counts per scale ─────────────────────────────────────────────────────
 SCALE_CONFIG = {
     "small": {
-        "users": 50_000,
-        "accounts": 75_000,
-        "transactions": 5_000_000,
-        "transaction_items": 10_000_000,
-        "audit_log": 2_000_000,
-        "events": 5_000_000,
-        "metrics": 2_000_000,
-        "sessions": 500_000,
-        "tenants": 1_000,
-        "tenant_users": 50_000,
-        "tenant_data": 1_000_000,
+        "users": 10_000,
+        "accounts": 15_000,
+        "transactions": 250_000,
+        "transaction_items": 500_000,
+        "audit_log": 100_000,
+        "events": 250_000,
+        "metrics": 100_000,
+        "sessions": 50_000,
+        "tenants": 200,
+        "tenant_users": 10_000,
+        "tenant_data": 100_000,
     },
     "medium": {
         "users": 500_000,

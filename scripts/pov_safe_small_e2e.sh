@@ -10,7 +10,6 @@ set -euo pipefail
 # 6) terminate leftover tagged EC2 again
 
 CONFIG_PATH="${1:-config.small.yaml}"
-TIER="${POV_TIER:-serverless}"
 STRICT_AWS_CHECK="${POV_STRICT_AWS_CHECK:-true}"
 OPEN_REPORT="${POV_OPEN_REPORT:-false}"
 PUBLISH_GENERAL_DATASET="${POV_PUBLISH_GENERAL_DATASET:-true}"
@@ -301,8 +300,10 @@ enforce_small_defaults
 publish_general_dataset_pack
 ensure_dataset_import_auth
 
+export POV_REQUIRE_COMPLETE_REPORT_DATA="${POV_REQUIRE_COMPLETE_REPORT_DATA:-true}"
+
 echo "[safe-e2e] starting PoV run..."
-./run_all.sh "${CONFIG_PATH}" --no-menu --no-wizard --tier "${TIER}"
+./run_all.sh "${CONFIG_PATH}" --no-menu --no-wizard
 
 echo "[safe-e2e] post-run EC2 cleanup..."
 terminate_tagged_instances
