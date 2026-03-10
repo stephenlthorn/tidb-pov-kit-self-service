@@ -245,6 +245,50 @@ PY
     --shards "${DATASET_SHARDS}"
 }
 
+ensure_dataset_import_auth() {
+  # If role-based auth is already configured, prefer it.
+  if [[ -n "${POV_DATASET_S3_ROLE_ARN:-}" ]]; then
+    echo "[safe-e2e] using role-based dataset import auth from env."
+    return 0
+  fi
+
+  # If explicit dataset keys already exist, use them.
+  if [[ -n "${POV_DATASET_S3_ACCESS_KEY_ID:-}" && -n "${POV_DATASET_S3_SECRET_ACCESS_KEY:-}" ]]; then
+    echo "[safe-e2e] using explicit dataset access key auth from env."
+    return 0
+  fi
+
+  # Reuse ambient AWS env credentials if present.
+  if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+    export POV_DATASET_S3_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+    export POV_DATASET_S3_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+    export POV_DATASET_S3_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}"
+    echo "[safe-e2e] using ambient AWS env credentials for TiDB S3 import auth."
+    return 0
+  fi
+
+  # Last fallback: export temp credentials from active AWS profile/session.
+  if command -v aws >/dev/null 2>&1; then
+    local profile
+    profile="${AWS_PROFILE:-default}"
+    if eval "$(aws configure export-credentials --profile "${profile}" --format env-no-export 2>/dev/null)"; then
+      if [[ -n "${AWS_ACCESS_KEY_ID:-}" && -n "${AWS_SECRET_ACCESS_KEY:-}" ]]; then
+        export POV_DATASET_S3_ACCESS_KEY_ID="${AWS_ACCESS_KEY_ID}"
+        export POV_DATASET_S3_SECRET_ACCESS_KEY="${AWS_SECRET_ACCESS_KEY}"
+        export POV_DATASET_S3_SESSION_TOKEN="${AWS_SESSION_TOKEN:-}"
+        echo "[safe-e2e] exported temp credentials from profile ${profile} for TiDB S3 import auth."
+        return 0
+      fi
+    fi
+  fi
+
+  echo "[safe-e2e] unable to resolve dataset import auth."
+  echo "           set one of:"
+  echo "           - POV_DATASET_S3_ROLE_ARN (+ POV_DATASET_S3_EXTERNAL_ID if needed), or"
+  echo "           - POV_DATASET_S3_ACCESS_KEY_ID / POV_DATASET_S3_SECRET_ACCESS_KEY (/ POV_DATASET_S3_SESSION_TOKEN)"
+  exit 2
+}
+
 echo "[safe-e2e] config: ${CONFIG_PATH}"
 echo "[safe-e2e] region: ${AWS_REGION}"
 aws_identity_check
@@ -252,6 +296,7 @@ terminate_tagged_instances
 reset_tidb_database
 enforce_small_defaults
 publish_general_dataset_pack
+ensure_dataset_import_auth
 
 echo "[safe-e2e] starting PoV run..."
 ./run_all.sh "${CONFIG_PATH}" --no-menu --no-wizard --tier "${TIER}"
