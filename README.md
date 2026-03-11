@@ -104,8 +104,12 @@ bash scripts/bootstrap_cli.sh
 
 Then:
 1. Use **Deployment Wizard** for guided setup (Industry + tests + tier).
-2. Save and run.
-3. Open report from `results/tidb_pov_report.pdf` (or S3 if enforced).
+2. For migration throughput showcase runs, select **Workload Preset = Import Benchmark**.
+   - Forces `IMPORT INTO` benchmark path
+   - Uses `__AUTO_DATASET_OLTP__` source resolution from `dataset_bootstrap` S3 manifest
+   - Enables dataset bootstrap requirement so import evidence is always captured
+3. Save and run.
+4. Open report from `results/tidb_pov_report.pdf` (or S3 if enforced).
 
 #### Path B — CLI (recommended for repeatable automation)
 

@@ -2757,6 +2757,11 @@
               <div class="field"><label>Write Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_write_weight_multiplier" value="{{ cfg.test.write_weight_multiplier }}" /></div>
               <div class="field"><label>Import Batch Size</label><input type="number" min="100" name="test_import_batch_size" value="{{ cfg.test.import_batch_size }}" /></div>
             </div>
+            <div class="grid cols-3">
+              <div class="field"><label>IMPORT INTO Threads (0=auto)</label><input type="number" min="0" name="test_import_into_threads" value="{{ cfg.test.import_into_threads }}" /></div>
+              <div class="field"><label>IMPORT Source Size (GB, optional)</label><input type="number" step="0.01" min="0" name="test_import_source_size_gb" value="{{ cfg.test.import_source_size_gb }}" /></div>
+              <div class="field"><label>IMPORT INTO Source URI</label><input type="text" name="test_import_into_source_uri" value="{{ cfg.test.import_into_source_uri }}" placeholder="s3://bucket/path/*.csv or __AUTO_DATASET_OLTP__" /></div>
+            </div>
             <div class="field">
               <label>Import Methods</label>
               <div class="check-wrap">
@@ -2764,6 +2769,7 @@
                   <label class="check"><input type="checkbox" name="test_import_method_{{ key }}" {% if key in cfg.test.import_methods %}checked{% endif %} /> {{ label }}</label>
                 {% endfor %}
               </div>
+              <div class="tiny">For strongest benchmark signal, use <code>IMPORT INTO</code> with a remote S3 source and keep source URI on <code>__AUTO_DATASET_OLTP__</code>.</div>
             </div>
           </div>
 

@@ -181,7 +181,10 @@ DEFAULT_CFG = {
         "read_weight_multiplier": 1.0,
         "write_weight_multiplier": 1.0,
         "import_batch_size": 5000,
+        "import_into_threads": 0,
         "import_methods": ["batched_insert", "load_data_infile", "import_into"],
+        "import_into_source_uri": "",
+        "import_source_size_gb": 0.0,
     },
     "customer_queries": [],
     "customer_query_ratio": 0.30,
@@ -579,12 +582,35 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "import_batch_size": 7500,
         },
     },
+    "import_benchmark": {
+        "label": "Import Benchmark",
+        "description": "S3-backed TiDB IMPORT INTO benchmark profile with aggressive thread tuning and migration-focused checks.",
+        "overrides": {
+            "data_scale": "small",
+            "duration_seconds": 90,
+            "concurrency_levels": [8, 16],
+            "ramp_duration_seconds": 180,
+            "warm_phase_enabled": True,
+            "warm_phase_duration_seconds": 180,
+            "warm_phase_concurrency": 16,
+            "import_rows": 1000000,
+            "import_batch_size": 5000,
+            "import_methods": ["import_into"],
+            "import_into_threads": 8,
+            "import_into_source_uri": "__AUTO_DATASET_OLTP__",
+            "import_source_size_gb": 2.0,
+            "workload_mix": "mixed",
+            "read_weight_multiplier": 1.0,
+            "write_weight_multiplier": 1.0,
+        },
+    },
 }
 
 QUICKSTART_PRESET_SUITES = {
     "fast_validation": "smoke",
     "balanced_poc": "oltp_migration",
     "stress_run": "all",
+    "import_benchmark": "oltp_migration",
 }
 
 QUICKSTART_PRESET_MODULES = {
@@ -695,6 +721,17 @@ def normalize_cfg(cfg: Dict) -> Dict:
     except (TypeError, ValueError):
         batch = 5000
     cfg["test"]["import_batch_size"] = max(100, batch)
+
+    cfg["test"]["import_into_source_uri"] = str(cfg.get("test", {}).get("import_into_source_uri", "")).strip()
+    try:
+        cfg["test"]["import_source_size_gb"] = max(0.0, float(cfg.get("test", {}).get("import_source_size_gb", 0.0)))
+    except (TypeError, ValueError):
+        cfg["test"]["import_source_size_gb"] = 0.0
+    cfg["test"]["import_into_threads"] = _to_int_safe(
+        cfg.get("test", {}).get("import_into_threads"),
+        0,
+        0,
+    )
 
     methods = cfg.get("test", {}).get("import_methods")
     if not isinstance(methods, list):
@@ -1234,6 +1271,9 @@ def build_workload_insights(cfg: Dict) -> Dict:
         "import_rows": parse_int(cfg.get("test", {}).get("import_rows"), 1_000_000),
         "import_batch_size": parse_int(cfg.get("test", {}).get("import_batch_size"), 5000),
         "import_methods": [m for m in import_methods if m in IMPORT_METHOD_LABELS],
+        "import_into_source_uri": str(cfg.get("test", {}).get("import_into_source_uri", "") or ""),
+        "import_source_size_gb": parse_float(cfg.get("test", {}).get("import_source_size_gb", 0.0), 0.0),
+        "import_into_threads": parse_int(cfg.get("test", {}).get("import_into_threads"), 0),
     }
 
 
@@ -3258,7 +3298,10 @@ def create_app(config_path: Path) -> Flask:
         test["read_weight_multiplier"] = to_float(request.form.get("test_read_weight_multiplier"), 1.0)
         test["write_weight_multiplier"] = to_float(request.form.get("test_write_weight_multiplier"), 1.0)
         test["import_batch_size"] = to_int(request.form.get("test_import_batch_size"), 5000)
+        test["import_into_threads"] = max(0, to_int(request.form.get("test_import_into_threads"), 0))
         test["import_methods"] = parse_import_methods_from_form(request.form, "test_import_method_")
+        test["import_into_source_uri"] = request.form.get("test_import_into_source_uri", "").strip()
+        test["import_source_size_gb"] = max(0.0, to_float(request.form.get("test_import_source_size_gb"), 0.0))
 
         raw_queries = request.form.get("customer_queries", "")
         q_lines = [ln.strip() for ln in raw_queries.splitlines() if ln.strip()]
@@ -3383,6 +3426,13 @@ def create_app(config_path: Path) -> Flask:
         preset_overrides = QUICKSTART_WORKLOAD_PRESETS[workload_preset]["overrides"]
         if preset_overrides:
             cfg["test"].update(preset_overrides)
+        if workload_preset == "import_benchmark":
+            ds = cfg.setdefault("dataset_bootstrap", {})
+            ds["enabled"] = True
+            ds["required"] = True
+            ds["profile_key"] = selected_industry
+            if not str(cfg["test"].get("import_into_source_uri") or "").strip():
+                cfg["test"]["import_into_source_uri"] = "__AUTO_DATASET_OLTP__"
         if not tests_touched:
             cfg["test"]["workload_mix"] = str(
                 industry_profile.get("default_workload_mix", cfg["test"].get("workload_mix", "mixed"))
@@ -3394,19 +3444,22 @@ def create_app(config_path: Path) -> Flask:
         enabled_module_count = sum(1 for key in MODULE_ORDER if cfg["modules"].get(key))
         scenario = infer_scenario_from_modules(cfg["modules"])
         cfg["industry"]["selected"] = selected_industry
+        decision_notes = [
+            f"Quickstart wizard profile: {workload_preset}",
+            f"Quickstart industry: {industry_profile.get('label', selected_industry)}",
+            f"Quickstart preset suite: {preset_suite}",
+            f"Quickstart selected tests: {enabled_module_count}/{len(MODULE_ORDER)}",
+            module_source_note,
+        ]
+        if workload_preset == "import_benchmark":
+            decision_notes.append("Quickstart import benchmark mode enabled (S3 IMPORT INTO auto source).")
 
         cfg["tier"].update(
             {
                 "selected": selected_tier,
                 "recommended": selected_tier,
                 "decision_tree_version": "quickstart-wizard",
-                "decision_notes": [
-                    f"Quickstart wizard profile: {workload_preset}",
-                    f"Quickstart industry: {industry_profile.get('label', selected_industry)}",
-                    f"Quickstart preset suite: {preset_suite}",
-                    f"Quickstart selected tests: {enabled_module_count}/{len(MODULE_ORDER)}",
-                    module_source_note,
-                ],
+                "decision_notes": decision_notes,
             }
         )
         cfg["pre_poc"]["scenario_template"] = scenario
@@ -3744,14 +3797,20 @@ def create_app(config_path: Path) -> Flask:
         write_mult = max(0.1, to_float(request.form.get("wl_write_multiplier"), 1.0))
         import_rows = max(10_000, to_int(request.form.get("wl_import_rows"), test.get("import_rows", 1_000_000)))
         import_batch_size = max(100, to_int(request.form.get("wl_import_batch_size"), test.get("import_batch_size", 5000)))
+        import_into_threads = max(0, to_int(request.form.get("wl_import_into_threads"), test.get("import_into_threads", 0)))
         import_methods = parse_import_methods_from_form(request.form, "wl_method_")
+        import_into_source_uri = str(request.form.get("wl_import_into_source_uri", test.get("import_into_source_uri", ""))).strip()
+        import_source_size_gb = max(0.0, to_float(request.form.get("wl_import_source_size_gb"), test.get("import_source_size_gb", 0.0)))
 
         test["workload_mix"] = mix
         test["read_weight_multiplier"] = read_mult
         test["write_weight_multiplier"] = write_mult
         test["import_rows"] = import_rows
         test["import_batch_size"] = import_batch_size
+        test["import_into_threads"] = import_into_threads
         test["import_methods"] = import_methods
+        test["import_into_source_uri"] = import_into_source_uri
+        test["import_source_size_gb"] = import_source_size_gb
         cfg["customer_query_ratio"] = customer_ratio
 
         if target == "baseline_perf":

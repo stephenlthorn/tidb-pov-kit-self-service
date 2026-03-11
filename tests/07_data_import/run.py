@@ -13,7 +13,8 @@ Note: IMPORT INTO requires TiDB >= 7.2 and S3/GCS or a local file path
 accessible to TiDB server.  The test gracefully falls back to LOAD DATA
 or INSERT-only if IMPORT INTO is unavailable.
 """
-import sys, os, time, csv, io, random, tempfile, math, re
+import sys, os, time, csv, io, random, tempfile, math, re, json
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
@@ -65,6 +66,18 @@ def run(cfg: dict):
     print(f"  Batched INSERT size: {batch_size:,}")
     print(f"  Enabled methods: {', '.join(methods)}")
     print(f"{'='*60}")
+
+    if "import_into" in methods and (
+        not import_into_source_uri or import_into_source_uri == "__AUTO_DATASET_OLTP__"
+    ):
+        auto_uri, auto_size, auto_note = _resolve_auto_import_source(cfg, industry_key)
+        if auto_uri:
+            import_into_source_uri = auto_uri
+            if import_source_size_gb <= 0 and auto_size > 0:
+                import_source_size_gb = auto_size
+            print(f"  Auto import source ({auto_note}): {_redact_uri(import_into_source_uri)}")
+        else:
+            print("  Auto import source not resolved; falling back to local CSV for import methods.")
 
     conn = get_connection(cfg["tidb"])
     cur  = conn.cursor()
@@ -140,6 +153,7 @@ def run(cfg: dict):
                 conn,
                 f"import_test_native_{industry_key}",
                 source_uri,
+                cfg=cfg,
                 import_threads=import_into_threads,
             )
             dur_a = time.time() - t0
@@ -284,17 +298,18 @@ def _load_data_infile(tidb_cfg: dict, table: str, csv_path: str) -> int:
     return rows
 
 
-def _import_into(cur, conn, table: str, source_uri: str, import_threads: int = 0) -> int:
+def _import_into(cur, conn, table: str, source_uri: str, cfg: dict, import_threads: int = 0) -> int:
     """
     Use TiDB IMPORT INTO statement (TiDB >= 7.2).
     Requires the CSV to be accessible from TiDB server or an S3/GCS URI.
     Falls back gracefully if not supported.
     """
+    resolved_uri = _augment_s3_uri_auth(source_uri, cfg)
     active_threads = import_threads if import_threads > 0 else None
     while True:
         sql = (
             f"IMPORT INTO {table} (source, event_type, user_id, session_id) "
-            f"FROM '{source_uri}' FORMAT 'CSV'"
+            f"FROM '{resolved_uri}' FORMAT 'CSV'"
         )
         if active_threads:
             sql += f" WITH thread={int(active_threads)}"
@@ -330,6 +345,141 @@ def _derive_cpu_safe_threads(err_text: str) -> int | None:
     except (TypeError, ValueError):
         return None
     return max(1, cpu)
+
+
+def _resolve_auto_import_source(cfg: dict, industry_key: str) -> tuple[str, float, str]:
+    ds_cfg = cfg.get("dataset_bootstrap") or {}
+    bucket = str(ds_cfg.get("s3_bucket") or "").strip()
+    prefix = str(ds_cfg.get("s3_prefix") or "tidb-pov/datasets").strip().strip("/")
+    profile = str(ds_cfg.get("profile_key") or industry_key or "general_auto").strip().lower()
+    if not profile:
+        profile = "general_auto"
+
+    manifest_uri = str(ds_cfg.get("manifest_uri") or "").strip()
+    if not manifest_uri and bucket:
+        manifest_uri = f"s3://{bucket}/{prefix}/manifest.json"
+
+    manifest = _load_manifest_from_uri(manifest_uri, cfg)
+    if manifest:
+        datasets = manifest.get("datasets") if isinstance(manifest.get("datasets"), dict) else {}
+        for key in [profile, industry_key, "general_auto"]:
+            entry = datasets.get(key) if isinstance(datasets, dict) else None
+            if not isinstance(entry, dict):
+                continue
+            oltp = entry.get("oltp") if isinstance(entry.get("oltp"), dict) else {}
+            uris = oltp.get("uris") if isinstance(oltp.get("uris"), list) else []
+            if not uris:
+                continue
+            first = str(uris[0]).split("?", 1)[0]
+            base = first.rsplit("/", 1)[0] if "/" in first else first
+            wildcard = f"{base}/*.csv"
+            try:
+                approx = float(oltp.get("approx_size_gb") or 0.0)
+            except (TypeError, ValueError):
+                approx = 0.0
+            return wildcard, max(0.0, approx), f"manifest:{key}"
+
+    if bucket:
+        return f"s3://{bucket}/{prefix}/{profile}/oltp/oltp_part_*.csv", 0.0, "derived"
+    return "", 0.0, "none"
+
+
+def _load_manifest_from_uri(uri: str, cfg: dict) -> dict:
+    uri = str(uri or "").strip()
+    if not uri:
+        return {}
+    if not uri.lower().startswith("s3://"):
+        if not os.path.exists(uri):
+            return {}
+        try:
+            with open(uri, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    try:
+        import boto3
+        from botocore.config import Config as BotoConfig
+    except Exception:
+        return {}
+
+    parts = urlsplit(uri)
+    bucket = str(parts.netloc or "").strip()
+    key = str(parts.path or "").lstrip("/")
+    if not bucket or not key:
+        return {}
+
+    region = (
+        str((cfg.get("dataset_bootstrap") or {}).get("aws_region") or "").strip()
+        or str(os.environ.get("AWS_REGION", "")).strip()
+        or str(os.environ.get("POV_S3_REGION", "")).strip()
+        or None
+    )
+    kwargs = {"config": BotoConfig(signature_version="s3v4")}
+    if region:
+        kwargs["region_name"] = region
+    try:
+        client = boto3.client("s3", **kwargs)
+        obj = client.get_object(Bucket=bucket, Key=key)
+        return json.loads(obj["Body"].read().decode("utf-8"))
+    except Exception:
+        return {}
+
+
+def _augment_s3_uri_auth(uri: str, cfg: dict) -> str:
+    raw = str(uri or "").strip()
+    if not raw.lower().startswith("s3://"):
+        return raw
+    parts = urlsplit(raw)
+    params = dict(parse_qsl(parts.query, keep_blank_values=True))
+    if any(k in params for k in ("access-key", "secret-access-key", "role-arn")):
+        return raw
+
+    ds_cfg = cfg.get("dataset_bootstrap") or {}
+    role_arn = str(ds_cfg.get("s3_role_arn") or os.environ.get("POV_DATASET_S3_ROLE_ARN") or "").strip()
+    external_id = str(ds_cfg.get("s3_external_id") or os.environ.get("POV_DATASET_S3_EXTERNAL_ID") or "").strip()
+    access_key = str(
+        ds_cfg.get("s3_access_key_id")
+        or os.environ.get("POV_DATASET_S3_ACCESS_KEY_ID")
+        or os.environ.get("AWS_ACCESS_KEY_ID")
+        or ""
+    ).strip()
+    secret_key = str(
+        ds_cfg.get("s3_secret_access_key")
+        or os.environ.get("POV_DATASET_S3_SECRET_ACCESS_KEY")
+        or os.environ.get("AWS_SECRET_ACCESS_KEY")
+        or ""
+    ).strip()
+    session_token = str(
+        ds_cfg.get("s3_session_token")
+        or os.environ.get("POV_DATASET_S3_SESSION_TOKEN")
+        or os.environ.get("AWS_SESSION_TOKEN")
+        or ""
+    ).strip()
+
+    if role_arn:
+        params["role-arn"] = role_arn
+        if external_id:
+            params["external-id"] = external_id
+    elif access_key and secret_key:
+        params["access-key"] = access_key
+        params["secret-access-key"] = secret_key
+        if session_token:
+            params["session-token"] = session_token
+    else:
+        return raw
+
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(params), parts.fragment))
+
+
+def _redact_uri(uri: str) -> str:
+    parts = urlsplit(str(uri or ""))
+    if not parts.query:
+        return str(uri or "")
+    redacted = []
+    for k, _v in parse_qsl(parts.query, keep_blank_values=True):
+        redacted.append((k, "***"))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(redacted), parts.fragment))
 
 
 # ── Utility ───────────────────────────────────────────────────────────────────
