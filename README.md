@@ -16,7 +16,7 @@ produces a professional PDF report with:
 | Module | What it proves |
 |--------|---------------|
 | M0 — Customer Query Validation | Your SQL queries run on TiDB without changes |
-| M1 — Baseline OLTP Performance | Raw throughput and latency under concurrent load, including pre-warm + warm steady-state phase |
+| M1 — Baseline OLTP Performance | Raw throughput and latency under concurrent load, including pre-warm, warm steady-state, and dedicated point-get lookup phase |
 | M2 — Elastic Auto-Scaling | TiDB Cloud adds capacity automatically; p99 stays flat |
 | M3 — High Availability | Sub-30s RTO after a node failure with zero manual intervention |
 | M3b — Write Contention | AUTO_RANDOM eliminates hot-region bottlenecks vs AUTO_INCREMENT |
@@ -285,6 +285,9 @@ test:
   warm_phase_enabled:   true
   warm_phase_duration_seconds: 300
   warm_phase_concurrency: 32
+  point_get_phase_enabled: true
+  point_get_duration_seconds: 120
+  point_get_concurrency: 32
   ramp_duration_seconds: 300
   import_rows:          1000000
   import_batch_size:    5000
@@ -384,6 +387,7 @@ Notes:
 1. These are targets, not guarantees. Final QPS depends on query shape, latency, network path, and cluster tier.
 2. For 500k+ QPS, use multi-loadgen Workload Generator mode (`rawsql`) and keep load generators in the same region/VPC path as TiDB.
 3. Keep `POV_ENFORCE_S3_UPLOAD=true` so runs fail closed if S3 write/read is not available.
+4. To highlight low-latency API lookups, keep `point_get_phase_enabled=true` and run from EC2 in the same region/path as TiDB Cloud.
 
 ---
 

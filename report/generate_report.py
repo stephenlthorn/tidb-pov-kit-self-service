@@ -65,7 +65,7 @@ MODULE_DISPLAY = {
 
 MODULE_SCOPE_SUMMARY = {
     "00_customer_queries": "Runs customer SQL samples with EXPLAIN checks to validate immediate query portability.",
-    "01_baseline_perf": "Measures warm OLTP p99 latency and throughput across configured concurrency levels.",
+    "01_baseline_perf": "Measures OLTP p99/TPS across concurrency levels plus a dedicated point-get micro-latency phase.",
     "02_elastic_scale": "Ramps load and records latency/throughput response under demand changes.",
     "03_high_availability": "Runs an application-level failure-window drill to estimate recovery behavior.",
     "03b_write_contention": "Compares sequential keys vs AUTO_RANDOM under write contention.",
@@ -517,6 +517,66 @@ def _chart_warm_steady(metrics) -> plt.Figure:
 
     reason, actions = _module_missing_reason(metrics, "01_baseline_perf", "No warm workload data")
     return _empty_chart("Warm workload data unavailable", reason=reason, actions=actions)
+
+
+def _chart_point_get(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("01_baseline_perf", {})
+    tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
+    comp = mod.get("comparison", {}) if isinstance(mod.get("comparison"), dict) else {}
+    comp_label = metrics.get("comparison_label") or "Comparison DB"
+
+    pg = tidb.get("point_get", {}) if isinstance(tidb, dict) else {}
+    if not pg or int(pg.get("count", 0) or 0) <= 0:
+        reason, actions = _module_missing_reason(metrics, "01_baseline_perf", "No point_get phase data")
+        return _empty_chart("Point-get data unavailable", reason=reason, actions=actions)
+
+    lat_labels = ["p50", "p95", "p99"]
+    tidb_lat = [float(pg.get("p50_ms", 0) or 0), float(pg.get("p95_ms", 0) or 0), float(pg.get("p99_ms", 0) or 0)]
+    comp_pg = comp.get("point_get", {}) if isinstance(comp, dict) else {}
+    comp_lat = []
+    if comp_pg and int(comp_pg.get("count", 0) or 0) > 0:
+        comp_lat = [
+            float(comp_pg.get("p50_ms", 0) or 0),
+            float(comp_pg.get("p95_ms", 0) or 0),
+            float(comp_pg.get("p99_ms", 0) or 0),
+        ]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    x = np.arange(len(lat_labels))
+    if comp_lat:
+        ax1.bar(x - 0.18, tidb_lat, width=0.36, color=_rgb(BLUE), label="TiDB Cloud")
+        ax1.bar(x + 0.18, comp_lat, width=0.36, color=_rgb(ORANGE), label=comp_label)
+        for idx, val in enumerate(tidb_lat):
+            ax1.text(x[idx] - 0.18, val, f"{val:.1f}", ha="center", va="bottom", fontsize=8)
+        for idx, val in enumerate(comp_lat):
+            ax1.text(x[idx] + 0.18, val, f"{val:.1f}", ha="center", va="bottom", fontsize=8)
+    else:
+        ax1.bar(x, tidb_lat, width=0.5, color=_rgb(BLUE), label="TiDB Cloud")
+        for idx, val in enumerate(tidb_lat):
+            ax1.text(x[idx], val, f"{val:.1f}", ha="center", va="bottom", fontsize=8)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(lat_labels)
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("Point-Get Latency Distribution")
+    ax1.grid(axis="y", alpha=0.3)
+    ax1.legend()
+
+    tps_labels = ["TiDB Cloud"]
+    tps_vals = [float(pg.get("tps", 0) or 0)]
+    tps_colors = [_rgb(BLUE)]
+    if comp_pg and int(comp_pg.get("count", 0) or 0) > 0:
+        tps_labels.append(comp_label)
+        tps_vals.append(float(comp_pg.get("tps", 0) or 0))
+        tps_colors.append(_rgb(ORANGE))
+    bars = ax2.bar(tps_labels, tps_vals, color=tps_colors)
+    for bar, val in zip(bars, tps_vals):
+        ax2.text(bar.get_x() + bar.get_width() / 2, val, f"{val:.0f}", ha="center", va="bottom", fontsize=8)
+    ax2.set_ylabel("Transactions / sec")
+    ax2.set_title("Point-Get Throughput")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
 
 
 def _chart_data_population(metrics) -> plt.Figure:
@@ -980,17 +1040,27 @@ def _module_interpretation(metrics: dict, module_key: str) -> tuple[str, str, st
 
     if module_key == "01_baseline_perf":
         warm = tidb.get("warm_steady", {}) if isinstance(tidb, dict) else {}
+        point_get = tidb.get("point_get", {}) if isinstance(tidb, dict) else {}
         p99 = warm.get("p99_ms")
         tps = warm.get("tps")
         max_qps = _maybe_float(summary.get("max_qps"))
         avg_qps = _maybe_float(summary.get("avg_qps"))
+        pg_p99 = _maybe_float(point_get.get("p99_ms"))
+        pg_tps = _maybe_float(point_get.get("tps"))
         qps_line = ""
         if max_qps is not None and avg_qps is not None:
             qps_line = f" | max/avg QPS={max_qps:.0f}/{avg_qps:.0f}"
+        point_line = ""
+        if pg_p99 is not None:
+            point_line = f" | point-get p99={pg_p99:.1f}ms"
+            if pg_tps is not None:
+                point_line += f", TPS={pg_tps:.0f}"
         return (
-            f"Warm p99={p99:.1f}ms, TPS={tps:.0f}{qps_line}" if p99 and tps else "Baseline phases captured",
-            _warm_stability_comment(metrics),
-            "Defines steady-state user experience and sets SLA-confidence baseline for migration approval.",
+            f"Warm p99={p99:.1f}ms, TPS={tps:.0f}{qps_line}{point_line}" if p99 and tps else "Baseline phases captured",
+            _warm_stability_comment(metrics)
+            + (" Point-get phase isolates single-row key lookups and provides clean low-latency evidence." if pg_p99 is not None else ""),
+            "Defines steady-state user experience and sets SLA-confidence baseline for migration approval. "
+            + ("Point-get results map directly to customer-facing API/detail lookup response times." if pg_p99 is not None else ""),
         )
     if module_key == "02_elastic_scale":
         ts = (mod.get("time_series", {}) or {})
@@ -2036,6 +2106,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
         ("Max QPS",             _fmt(display_max_qps, 0), "QPS",      BLUE),
         ("Avg QPS",             _fmt(display_avg_qps, 0), "QPS",      BLUE),
+        ("Point-Get p99",       _fmt(summary.get("point_get_p99_ms"), 1), "ms", BLUE),
+        ("Point-Get TPS",       _fmt(summary.get("point_get_tps"), 0), "TPS", GREEN),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
         ("Drill Recovery (sim)", _fmt(summary.get("rto_sec"),    1), "seconds",  ORANGE),
@@ -2172,7 +2244,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     if _module_ran("01_baseline_perf"):
         baseline_caption = (
             "OLTP workload across configured concurrency levels. "
-            "Shows p99 latency and transactions per second."
+            "Shows p99 latency and transactions per second. "
+            "Point-get micro-latency is shown on the next page."
         )
         max_qps = _maybe_float(summary.get("max_qps"))
         avg_qps = _maybe_float(summary.get("avg_qps"))
@@ -2193,6 +2266,14 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
             _safe_chart_render("Warm Workload Stability", lambda: _chart_warm_steady(metrics)),
             "Steady-state warm workload after data load. This phase reflects customer-expected latency drift and TPS consistency over time. "
             + _warm_stability_comment(metrics),
+        )
+
+        _add_chart_page(
+            pdf,
+            "Point-Get Latency (Primary-Key Lookups)",
+            _safe_chart_render("Point-Get Latency (Primary-Key Lookups)", lambda: _chart_point_get(metrics)),
+            "Dedicated microbenchmark for single-row primary-key lookups. "
+            "Use this as the cleanest low-latency read signal for customer API/detail endpoints.",
         )
 
     if _module_ran("02_elastic_scale"):

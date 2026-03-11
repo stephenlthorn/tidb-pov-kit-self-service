@@ -18,7 +18,12 @@ class SmallDefaultTests(unittest.TestCase):
             profile = tier_test_profile(tier)
             self.assertEqual(profile["data_scale"], "small")
 
+    def test_normalize_cfg_point_get_defaults(self):
+        cfg = normalize_cfg({"test": {}})
+        self.assertTrue(cfg["test"]["point_get_phase_enabled"])
+        self.assertGreaterEqual(int(cfg["test"]["point_get_duration_seconds"]), 30)
+        self.assertGreaterEqual(int(cfg["test"]["point_get_concurrency"]), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
-

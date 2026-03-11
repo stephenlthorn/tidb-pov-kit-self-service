@@ -538,6 +538,9 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 300,
             "warm_phase_concurrency": 32,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 120,
+            "point_get_concurrency": 32,
         },
         "essential": {
             "data_scale": "small",
@@ -547,6 +550,9 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 420,
             "warm_phase_concurrency": 64,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 150,
+            "point_get_concurrency": 64,
         },
         "premium": {
             "data_scale": "small",
@@ -556,6 +562,9 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 420,
             "warm_phase_concurrency": 64,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 150,
+            "point_get_concurrency": 64,
         },
         "dedicated": {
             "data_scale": "small",
@@ -565,6 +574,9 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 600,
             "warm_phase_concurrency": 256,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 180,
+            "point_get_concurrency": 256,
         },
         "byoc": {
             "data_scale": "small",
@@ -574,6 +586,9 @@ def tier_test_profile(tier: str) -> Dict:
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 600,
             "warm_phase_concurrency": 256,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 180,
+            "point_get_concurrency": 256,
         },
     }
     return profiles[tier]

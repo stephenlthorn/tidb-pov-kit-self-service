@@ -176,6 +176,9 @@ DEFAULT_CFG = {
         "warm_phase_enabled": True,
         "warm_phase_duration_seconds": 300,
         "warm_phase_concurrency": 32,
+        "point_get_phase_enabled": True,
+        "point_get_duration_seconds": 120,
+        "point_get_concurrency": 32,
         "import_rows": 1000000,
         "workload_mix": "mixed",
         "read_weight_multiplier": 1.0,
@@ -286,7 +289,7 @@ MODULE_INSIGHTS = {
     },
     "baseline_perf": {
         "focus": "OLTP baseline",
-        "runs": "Runs schema-A OLTP workload at configured concurrency levels; captures TPS plus p50/p95/p99 latency. Optional side-by-side target comparison is included when supported.",
+        "runs": "Runs OLTP workload at configured concurrency levels, captures warm steady-state metrics, and runs a dedicated point-get phase for low-latency key lookups. Optional side-by-side target comparison is included when supported.",
         "value": "Establishes migration baseline and throughput/latency envelope.",
     },
     "elastic_scale": {
@@ -338,7 +341,7 @@ MODULE_DETAIL_NOTES = {
         "artifacts": "results/metrics_summary.json (module status) and query-level logs in results DB/logs.",
     },
     "baseline_perf": {
-        "validates": "Validates baseline OLTP throughput/latency at configured concurrency levels.",
+        "validates": "Validates baseline OLTP throughput/latency plus a dedicated point-get micro-latency phase.",
         "pass_signal": "Stable TPS with acceptable p99 against baseline target envelope.",
         "artifacts": "TPS/p99 tables + time-series in metrics_summary.json.",
     },
@@ -552,6 +555,9 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 180,
             "warm_phase_concurrency": 16,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 90,
+            "point_get_concurrency": 16,
             "import_rows": 250000,
             "workload_mix": "mixed",
             "read_weight_multiplier": 1.0,
@@ -575,6 +581,9 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 600,
             "warm_phase_concurrency": 64,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 180,
+            "point_get_concurrency": 64,
             "import_rows": 3000000,
             "workload_mix": "mixed",
             "read_weight_multiplier": 1.2,
@@ -593,6 +602,9 @@ QUICKSTART_WORKLOAD_PRESETS = {
             "warm_phase_enabled": True,
             "warm_phase_duration_seconds": 180,
             "warm_phase_concurrency": 16,
+            "point_get_phase_enabled": True,
+            "point_get_duration_seconds": 90,
+            "point_get_concurrency": 16,
             "import_rows": 1000000,
             "import_batch_size": 5000,
             "import_methods": ["import_into"],
@@ -713,6 +725,17 @@ def normalize_cfg(cfg: Dict) -> Dict:
     cfg["test"]["warm_phase_concurrency"] = _to_int_safe(
         cfg.get("test", {}).get("warm_phase_concurrency"),
         max(cfg.get("test", {}).get("concurrency_levels", [8, 16, 32])),
+        1,
+    )
+    cfg["test"]["point_get_phase_enabled"] = bool(cfg.get("test", {}).get("point_get_phase_enabled", True))
+    cfg["test"]["point_get_duration_seconds"] = _to_int_safe(
+        cfg.get("test", {}).get("point_get_duration_seconds"),
+        max(60, _to_int_safe(cfg.get("test", {}).get("duration_seconds"), 120, 30)),
+        30,
+    )
+    cfg["test"]["point_get_concurrency"] = _to_int_safe(
+        cfg.get("test", {}).get("point_get_concurrency"),
+        cfg["test"]["warm_phase_concurrency"],
         1,
     )
 
@@ -1477,6 +1500,8 @@ def build_report_dashboard() -> Dict:
     best_p99 = parse_float(summary.get("best_p99_ms"), 0.0)
     warm_tps = parse_float(summary.get("warm_tps"), 0.0)
     warm_p99 = parse_float(summary.get("warm_p99_ms"), 0.0)
+    point_get_tps = parse_float(summary.get("point_get_tps"), 0.0)
+    point_get_p99 = parse_float(summary.get("point_get_p99_ms"), 0.0)
     max_qps = parse_float(summary.get("max_qps"), 0.0)
     avg_qps = parse_float(summary.get("avg_qps"), 0.0)
     run_mode = str(summary.get("run_mode") or "validation")
@@ -1497,6 +1522,8 @@ def build_report_dashboard() -> Dict:
         {"label": "Avg QPS", "value": f"{avg_qps:,.1f}" if avg_qps > 0 else "n/a", "sub": "Average observed rate"},
         {"label": "Warm TPS", "value": f"{warm_tps:,.1f}" if warm_tps > 0 else "n/a", "sub": "Steady-state throughput"},
         {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
+        {"label": "Point-Get TPS", "value": f"{point_get_tps:,.1f}" if point_get_tps > 0 else "n/a", "sub": "Primary-key lookup throughput"},
+        {"label": "Point-Get P99 (ms)", "value": f"{point_get_p99:,.2f}" if point_get_p99 > 0 else "n/a", "sub": "Primary-key lookup latency"},
         {"label": "Best TPS", "value": f"{best_tps:,.1f}", "sub": "Higher is better"},
         {"label": "Best P99 (ms)", "value": f"{best_p99:,.2f}", "sub": "Best observed across phases"},
         {"label": "SQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "TiDB SQL + source feature checks"},
@@ -3293,6 +3320,9 @@ def create_app(config_path: Path) -> Flask:
         test["warm_phase_enabled"] = to_bool(request.form.get("test_warm_phase_enabled"), True)
         test["warm_phase_duration_seconds"] = max(30, to_int(request.form.get("test_warm_phase_duration_seconds"), 300))
         test["warm_phase_concurrency"] = max(1, to_int(request.form.get("test_warm_phase_concurrency"), max(test["concurrency_levels"])))
+        test["point_get_phase_enabled"] = to_bool(request.form.get("test_point_get_phase_enabled"), True)
+        test["point_get_duration_seconds"] = max(30, to_int(request.form.get("test_point_get_duration_seconds"), max(60, test["duration_seconds"])))
+        test["point_get_concurrency"] = max(1, to_int(request.form.get("test_point_get_concurrency"), test["warm_phase_concurrency"]))
         test["import_rows"] = to_int(request.form.get("test_import_rows"), 1000000)
         test["workload_mix"] = request.form.get("test_workload_mix", "mixed")
         test["read_weight_multiplier"] = to_float(request.form.get("test_read_weight_multiplier"), 1.0)

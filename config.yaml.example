@@ -94,6 +94,9 @@ test:
   warm_phase_enabled:    true
   warm_phase_duration_seconds: 300
   warm_phase_concurrency: 32
+  point_get_phase_enabled: true
+  point_get_duration_seconds: 120
+  point_get_concurrency: 32
   ramp_duration_seconds: 300
   import_rows:           1000000
   workload_mix:          "mixed"      # mixed | read_heavy | write_heavy

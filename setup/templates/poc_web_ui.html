@@ -2750,6 +2750,17 @@
               </div>
               <div class="field"><label>Warm Phase Duration Seconds</label><input type="number" min="30" name="test_warm_phase_duration_seconds" value="{{ cfg.test.warm_phase_duration_seconds }}" /></div>
               <div class="field"><label>Warm Phase Concurrency</label><input type="number" min="1" name="test_warm_phase_concurrency" value="{{ cfg.test.warm_phase_concurrency }}" /></div>
+              <div class="field"><label>Point-Get Phase Enabled</label>
+                <select name="test_point_get_phase_enabled">
+                  <option value="true" {% if cfg.test.point_get_phase_enabled %}selected{% endif %}>true</option>
+                  <option value="false" {% if not cfg.test.point_get_phase_enabled %}selected{% endif %}>false</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid cols-4">
+              <div class="field"><label>Point-Get Duration Seconds</label><input type="number" min="30" name="test_point_get_duration_seconds" value="{{ cfg.test.point_get_duration_seconds }}" /></div>
+              <div class="field"><label>Point-Get Concurrency</label><input type="number" min="1" name="test_point_get_concurrency" value="{{ cfg.test.point_get_concurrency }}" /></div>
+              <div class="field"></div>
               <div class="field"></div>
             </div>
             <div class="grid cols-3">

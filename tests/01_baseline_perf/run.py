@@ -14,6 +14,7 @@ from load.load_runner import LoadRunner
 from load.workload_definitions import (
     apply_workload_profile,
     build_weighted_pool,
+    point_get_workload_for_cfg,
     transactional_workload_for_cfg,
 )
 
@@ -35,6 +36,9 @@ def run(cfg: dict):
     warm_default_duration = max(300, duration)
     warm_duration = max(30, int(test_cfg.get("warm_phase_duration_seconds", warm_default_duration)))
     warm_concurrency = max(1, int(test_cfg.get("warm_phase_concurrency", max(concurrency_levels or [16]))))
+    point_get_enabled = bool(test_cfg.get("point_get_phase_enabled", True))
+    point_get_duration = max(30, int(test_cfg.get("point_get_duration_seconds", max(60, duration))))
+    point_get_concurrency = max(1, int(test_cfg.get("point_get_concurrency", warm_concurrency)))
     customer_queries = cfg.get("customer_queries", [])
     customer_ratio = cfg.get("customer_query_ratio", 0.3)
 
@@ -57,6 +61,8 @@ def run(cfg: dict):
         write_multiplier=cfg.get("test", {}).get("write_weight_multiplier", 1.0),
     )
     pool = build_weighted_pool(workload)
+    point_get_workload = point_get_workload_for_cfg(cfg, counts)
+    point_get_pool = build_weighted_pool(point_get_workload)
 
     print(f"\n{'='*60}")
     print(f"  Module 1: Baseline Performance")
@@ -80,6 +86,12 @@ def run(cfg: dict):
         print(f"  Warm workload phase: enabled ({warm_concurrency} threads, {warm_duration}s)")
     else:
         print("  Warm workload phase: disabled")
+    if point_get_enabled and point_get_pool:
+        print(f"  Point-get phase: enabled ({point_get_concurrency} threads, {point_get_duration}s)")
+    elif point_get_enabled:
+        print("  Point-get phase: enabled but no point-get queries were detected; phase will be skipped")
+    else:
+        print("  Point-get phase: disabled")
     print(f"{'='*60}")
 
     summary = {}
@@ -125,6 +137,30 @@ def run(cfg: dict):
             any_success = True
         summary[phase] = {
             "concurrency": warm_concurrency,
+            "tidb": tidb_stats,
+        }
+        if has_comparison:
+            summary[phase]["comparison"] = get_latency_stats(
+                MODULE, phase=phase, db_label=comparison_label
+            )
+
+    if point_get_enabled and point_get_pool:
+        phase = "point_get"
+        print(f"\n  Point-get run: concurrency={point_get_concurrency}, duration={point_get_duration}s")
+        # Keep this phase as clean key-lookup evidence (no injected customer SQL).
+        runner.run(
+            point_get_pool,
+            concurrency=point_get_concurrency,
+            duration_sec=point_get_duration,
+            phase=phase,
+            customer_queries=[],
+            customer_ratio=0.0,
+        )
+        tidb_stats = get_latency_stats(MODULE, phase=phase, db_label="tidb")
+        if tidb_stats.get("count", 0) > 0:
+            any_success = True
+        summary[phase] = {
+            "concurrency": point_get_concurrency,
             "tidb": tidb_stats,
         }
         if has_comparison:

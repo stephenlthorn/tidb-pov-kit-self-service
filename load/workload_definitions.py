@@ -5,6 +5,7 @@ All queries use %s placeholders (mysql-connector style).
 Each definition is a dict: {sql, params_fn, query_type, weight}
 """
 import random
+import re
 import time
 from typing import Dict, List
 
@@ -272,6 +273,63 @@ def resolve_industry_key(cfg: Dict | None) -> str:
 def transactional_workload_for_cfg(cfg: Dict | None, counts: Dict) -> List[Dict]:
     industry = resolve_industry_key(cfg)
     return INDUSTRY_OLTP_BUILDERS.get(industry, schema_a_workload)(counts)
+
+
+def is_point_get_query(defn: Dict) -> bool:
+    """
+    Best-effort classifier for single-row point lookups.
+    We keep this strict to avoid mixing range/aggregate reads into point-get mode.
+    """
+    if not isinstance(defn, dict):
+        return False
+
+    query_type = str(defn.get("query_type") or "").strip().lower()
+    sql = " ".join(str(defn.get("sql") or "").strip().lower().split())
+    if not sql.startswith("select "):
+        return False
+
+    query_tokens = {t for t in re.split(r"[^a-z0-9]+", query_type) if t}
+    if query_tokens.intersection({"range", "history", "recent", "count", "analytics", "trend", "top"}):
+        return False
+
+    if " where " not in sql:
+        return False
+
+    where_clause = sql.split(" where ", 1)[1]
+    for token in (" order by ", " group by ", " limit ", " for update "):
+        if token in where_clause:
+            where_clause = where_clause.split(token, 1)[0]
+
+    if where_clause.count("%s") != 1:
+        return False
+    if "=" not in where_clause:
+        return False
+    if re.search(r"\b(and|or|between|in|like)\b", where_clause):
+        return False
+    if any(op in where_clause for op in (">", "<", "!=", "<>", " is ")):
+        return False
+
+    return True
+
+
+def point_get_workload_for_cfg(cfg: Dict | None, counts: Dict) -> List[Dict]:
+    """
+    Return a point-get focused workload list for low-latency lookup benchmarking.
+    Falls back to read workload, then full workload, to keep runs resilient.
+    """
+    base = transactional_workload_for_cfg(cfg, counts)
+    if not base:
+        return []
+
+    point_get = [dict(row) for row in base if is_point_get_query(row)]
+    if point_get:
+        return point_get
+
+    reads = [dict(row) for row in base if str(row.get("sql", "")).strip().lower().startswith("select ")]
+    if reads:
+        return reads
+
+    return [dict(row) for row in base]
 
 
 def analytical_workload_for_cfg(cfg: Dict | None, counts: Dict) -> List[Dict]:

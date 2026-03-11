@@ -143,7 +143,7 @@ def collect() -> dict:
 def _get_phases_for_module(mod: str) -> list:
     """Return ordered phase names per module, preferring actual observed phases."""
     phase_map = {
-        "01_baseline_perf": ["c8", "c16", "c32", "c64", "warm_steady"],
+        "01_baseline_perf": ["c8", "c16", "c32", "c64", "warm_steady", "point_get"],
         "02_elastic_scale": ["ramp_up", "sustain", "ramp_down"],
         "03_high_availability": ["warmup", "failure", "recovery"],
         "03b_write_contention": ["sequential", "autorand"],
@@ -224,10 +224,12 @@ def _order_phases(mod: str, observed: list, defaults: list) -> list:
         def baseline_key(phase: str):
             m = re.fullmatch(r"c(\d+)", phase)
             if m:
-                return (0, int(m.group(1)))
+                return (0, int(m.group(1)), "")
             if phase == "warm_steady":
-                return (1, 0)
-            return (2, phase)
+                return (1, 0, "")
+            if phase == "point_get":
+                return (2, 0, "")
+            return (3, 0, phase)
 
         return sorted(ordered, key=baseline_key)
 
@@ -268,6 +270,12 @@ def _build_summary(payload: dict) -> dict:
     warm_p95 = warm_steady.get("p95_ms") if warm_count > 0 else None
     warm_p99 = warm_steady.get("p99_ms") if warm_count > 0 else None
     warm_tps = warm_steady.get("tps") if warm_count > 0 else None
+    point_get = baseline.get("point_get", {}) if isinstance(baseline, dict) else {}
+    point_get_count = int(point_get.get("count", 0)) if isinstance(point_get, dict) else 0
+    point_get_p50 = point_get.get("p50_ms") if point_get_count > 0 else None
+    point_get_p95 = point_get.get("p95_ms") if point_get_count > 0 else None
+    point_get_p99 = point_get.get("p99_ms") if point_get_count > 0 else None
+    point_get_tps = point_get.get("tps") if point_get_count > 0 else None
 
     # QPS rollups used by dashboard + executive summary cards.
     qps_samples = []
@@ -344,6 +352,10 @@ def _build_summary(payload: dict) -> dict:
         "warm_p95_ms":          warm_p95,
         "warm_p99_ms":          warm_p99,
         "warm_tps":             warm_tps,
+        "point_get_p50_ms":     point_get_p50,
+        "point_get_p95_ms":     point_get_p95,
+        "point_get_p99_ms":     point_get_p99,
+        "point_get_tps":        point_get_tps,
         "max_qps":              max_qps,
         "avg_qps":              avg_qps,
         "rto_sec":              rto_sec,
