@@ -1354,6 +1354,10 @@ def build_report_dashboard() -> Dict:
         "ready": False,
         "generated_at": "",
         "summary_cards": [],
+        "summary_values": {
+            "max_qps": "n/a",
+            "avg_qps": "n/a",
+        },
         "status_segments": [],
         "module_rows": [],
         "baseline_tps": [],
@@ -1433,6 +1437,8 @@ def build_report_dashboard() -> Dict:
     best_p99 = parse_float(summary.get("best_p99_ms"), 0.0)
     warm_tps = parse_float(summary.get("warm_tps"), 0.0)
     warm_p99 = parse_float(summary.get("warm_p99_ms"), 0.0)
+    max_qps = parse_float(summary.get("max_qps"), 0.0)
+    avg_qps = parse_float(summary.get("avg_qps"), 0.0)
     run_mode = str(summary.get("run_mode") or "validation")
     schema_mode = str(summary.get("schema_mode") or "tidb_optimized")
     industry = str(summary.get("industry") or "general_auto")
@@ -1447,6 +1453,8 @@ def build_report_dashboard() -> Dict:
         {"label": "Schema Mode", "value": schema_mode, "sub": "Data model profile"},
         {"label": "Industry", "value": industry, "sub": "Workload family"},
         {"label": "Modules Passed", "value": f"{modules_passed}/{modules_run}", "sub": "Execution coverage"},
+        {"label": "Max QPS", "value": f"{max_qps:,.1f}" if max_qps > 0 else "n/a", "sub": "Highest observed rate"},
+        {"label": "Avg QPS", "value": f"{avg_qps:,.1f}" if avg_qps > 0 else "n/a", "sub": "Average observed rate"},
         {"label": "Warm TPS", "value": f"{warm_tps:,.1f}" if warm_tps > 0 else "n/a", "sub": "Steady-state throughput"},
         {"label": "Warm P99 (ms)", "value": f"{warm_p99:,.2f}" if warm_p99 > 0 else "n/a", "sub": "Steady-state latency"},
         {"label": "Best TPS", "value": f"{best_tps:,.1f}", "sub": "Higher is better"},
@@ -1454,6 +1462,10 @@ def build_report_dashboard() -> Dict:
         {"label": "SQL Compatibility", "value": f"{mysql_compat_pct:.1f}%", "sub": "TiDB SQL + source feature checks"},
         {"label": "Best Import GB/min", "value": f"{best_import:.4f}", "sub": "Data import throughput"},
     ]
+    out["summary_values"] = {
+        "max_qps": f"{max_qps:,.1f}" if max_qps > 0 else "n/a",
+        "avg_qps": f"{avg_qps:,.1f}" if avg_qps > 0 else "n/a",
+    }
 
     baseline = modules.get("01_baseline_perf") if isinstance(modules.get("01_baseline_perf"), dict) else {}
     baseline_tidb = baseline.get("tidb") if isinstance(baseline.get("tidb"), dict) else {}

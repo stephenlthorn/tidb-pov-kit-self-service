@@ -969,6 +969,7 @@ def _module_interpretation(metrics: dict, module_key: str) -> tuple[str, str, st
     mod = (metrics.get("modules", {}) or {}).get(module_key, {}) or {}
     status = str(mod.get("status") or "not_run").lower()
     tidb = mod.get("tidb", {}) if isinstance(mod.get("tidb"), dict) else {}
+    summary = metrics.get("summary", {}) if isinstance(metrics.get("summary"), dict) else {}
 
     if status != "passed":
         return (
@@ -981,8 +982,13 @@ def _module_interpretation(metrics: dict, module_key: str) -> tuple[str, str, st
         warm = tidb.get("warm_steady", {}) if isinstance(tidb, dict) else {}
         p99 = warm.get("p99_ms")
         tps = warm.get("tps")
+        max_qps = _maybe_float(summary.get("max_qps"))
+        avg_qps = _maybe_float(summary.get("avg_qps"))
+        qps_line = ""
+        if max_qps is not None and avg_qps is not None:
+            qps_line = f" | max/avg QPS={max_qps:.0f}/{avg_qps:.0f}"
         return (
-            f"Warm p99={p99:.1f}ms, TPS={tps:.0f}" if p99 and tps else "Baseline phases captured",
+            f"Warm p99={p99:.1f}ms, TPS={tps:.0f}{qps_line}" if p99 and tps else "Baseline phases captured",
             _warm_stability_comment(metrics),
             "Defines steady-state user experience and sets SLA-confidence baseline for migration approval.",
         )
@@ -1997,6 +2003,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
 
     display_latency = summary.get("warm_p99_ms")
     display_tps = summary.get("warm_tps")
+    display_max_qps = summary.get("max_qps")
+    display_avg_qps = summary.get("avg_qps")
     latency_label = "Warm p99 Latency"
     tps_label = "Warm Throughput"
     run_mode_key = str(summary.get("run_mode") or "validation").strip().lower()
@@ -2013,6 +2021,10 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
             display_latency = summary.get("workload_p99_ms")
         if display_tps is None:
             display_tps = summary.get("workload_tps")
+        if display_max_qps is None:
+            display_max_qps = summary.get("workload_qps")
+        if display_avg_qps is None:
+            display_avg_qps = summary.get("workload_qps")
         latency_label = "Current Run p99"
         tps_label = "Current Run Throughput"
 
@@ -2022,6 +2034,8 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         ("Industry",            industry_display, "", (120, 120, 160)),
         (latency_label,         _fmt(display_latency, 1), "ms",       BLUE),
         (tps_label,             _fmt(display_tps,    0), "TPS",      GREEN),
+        ("Max QPS",             _fmt(display_max_qps, 0), "QPS",      BLUE),
+        ("Avg QPS",             _fmt(display_avg_qps, 0), "QPS",      BLUE),
         ("Best Observed p99",   _fmt(summary.get("best_observed_p99_ms", summary.get("best_p99_ms")), 1), "ms", BLUE),
         ("Peak Throughput",     _fmt(summary.get("best_tps"),    0), "TPS",      GREEN),
         ("Drill Recovery (sim)", _fmt(summary.get("rto_sec"),    1), "seconds",  ORANGE),
@@ -2156,10 +2170,22 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     )
 
     if _module_ran("01_baseline_perf"):
+        baseline_caption = (
+            "OLTP workload across configured concurrency levels. "
+            "Shows p99 latency and transactions per second."
+        )
+        max_qps = _maybe_float(summary.get("max_qps"))
+        avg_qps = _maybe_float(summary.get("avg_qps"))
+        if max_qps is not None or avg_qps is not None:
+            baseline_caption += (
+                f" Max QPS: {max_qps:.0f}" if max_qps is not None else " Max QPS: n/a"
+            )
+            baseline_caption += (
+                f" | Avg QPS: {avg_qps:.0f}." if avg_qps is not None else " | Avg QPS: n/a."
+            )
         _add_chart_page(pdf, "Baseline OLTP Performance",
                         _safe_chart_render("Baseline OLTP Performance", lambda: _chart_baseline(metrics)),
-                        "OLTP workload across configured concurrency levels. "
-                        "Shows p99 latency and transactions per second.")
+                        baseline_caption)
 
         _add_chart_page(
             pdf,

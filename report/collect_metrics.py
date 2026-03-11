@@ -251,7 +251,9 @@ def _build_summary(payload: dict) -> dict:
     workload_error_rate = _maybe_float(wg.get("error_rate"))
 
     # Best p99 from baseline OLTP
-    baseline = modules.get("01_baseline_perf", {}).get("tidb", {})
+    baseline_mod = modules.get("01_baseline_perf", {}) if isinstance(modules.get("01_baseline_perf"), dict) else {}
+    baseline = baseline_mod.get("tidb", {}) if isinstance(baseline_mod.get("tidb"), dict) else {}
+    baseline_ts = baseline_mod.get("time_series", {}) if isinstance(baseline_mod.get("time_series"), dict) else {}
     best_p99 = min(
         (v.get("p99_ms", 9999) for v in baseline.values() if isinstance(v, dict)),
         default=None
@@ -267,6 +269,26 @@ def _build_summary(payload: dict) -> dict:
     warm_p99 = warm_steady.get("p99_ms") if warm_count > 0 else None
     warm_tps = warm_steady.get("tps") if warm_count > 0 else None
 
+    # QPS rollups used by dashboard + executive summary cards.
+    qps_samples = []
+    if isinstance(baseline_ts, dict):
+        for points in baseline_ts.values():
+            if not isinstance(points, list):
+                continue
+            for row in points:
+                if not isinstance(row, dict):
+                    continue
+                qps = _maybe_float(row.get("tps"))
+                if qps is not None and qps > 0:
+                    qps_samples.append(qps)
+    if not qps_samples and isinstance(baseline, dict):
+        for stats in baseline.values():
+            if not isinstance(stats, dict):
+                continue
+            qps = _maybe_float(stats.get("tps"))
+            if qps is not None and qps > 0:
+                qps_samples.append(qps)
+
     if run_mode == "performance":
         if warm_p95 is None:
             warm_p95 = workload_p95
@@ -279,6 +301,13 @@ def _build_summary(payload: dict) -> dict:
         best_p99 = workload_p99
     if best_tps is None:
         best_tps = workload_tps
+
+    max_qps = max(qps_samples) if qps_samples else None
+    avg_qps = (sum(qps_samples) / len(qps_samples)) if qps_samples else None
+    if max_qps is None:
+        max_qps = workload_qps if workload_qps is not None else best_tps
+    if avg_qps is None:
+        avg_qps = workload_qps if workload_qps is not None else best_tps
 
     # HA RTO
     ha = modules.get("03_high_availability", {})
@@ -315,6 +344,8 @@ def _build_summary(payload: dict) -> dict:
         "warm_p95_ms":          warm_p95,
         "warm_p99_ms":          warm_p99,
         "warm_tps":             warm_tps,
+        "max_qps":              max_qps,
+        "avg_qps":              avg_qps,
         "rto_sec":              rto_sec,
         "hotspot_improvement_pct": hotspot_improvement,
         "mysql_compat_pct":     compat.get("pct"),

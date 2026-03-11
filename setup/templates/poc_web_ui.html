@@ -1404,6 +1404,14 @@
             <span class="status-pill {{ test_status_class }}">{{ test_status }}</span>
           </div>
           <div class="status-row">
+            <span class="label">Max QPS</span>
+            <span class="status-pill muted">{{ report_dashboard.summary_values.max_qps if report_dashboard.summary_values else 'n/a' }}</span>
+          </div>
+          <div class="status-row">
+            <span class="label">Avg QPS</span>
+            <span class="status-pill muted">{{ report_dashboard.summary_values.avg_qps if report_dashboard.summary_values else 'n/a' }}</span>
+          </div>
+          <div class="status-row">
             <span class="label">Run PID</span>
             <span class="status-pill muted">{{ run_status.pid if run_status.pid else 'n/a' }}</span>
           </div>
