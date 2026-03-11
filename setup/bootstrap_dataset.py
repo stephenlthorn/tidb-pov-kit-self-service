@@ -182,6 +182,16 @@ def _run_import(cfg: Dict, table: str, columns: list[str], uris: list[str], labe
                         "falling back to LOAD DATA LOCAL INFILE."
                     )
                     return _run_load_data_local_infile(cfg, table, columns, effective_uris, label, start)
+                if _is_s3_auth_required_error(msg):
+                    try:
+                        conn.close()
+                    except Exception:
+                        pass
+                    print(
+                        f"    [dataset] {label} IMPORT INTO missing S3 auth fields; "
+                        "falling back to runner-side S3 download + LOAD DATA LOCAL INFILE."
+                    )
+                    return _run_load_data_local_infile(cfg, table, columns, effective_uris, label, start)
                 raise
         imported_uris.append(_redact_uri(uri))
     cur.execute(f"SELECT COUNT(*) FROM `{table}`")
@@ -290,6 +300,17 @@ def _derive_cpu_safe_threads(err_text: str, parallel_jobs: int) -> int | None:
 def _is_cpu_guardrail_error(err_text: str) -> bool:
     msg = str(err_text or "")
     return bool(re.search(r"task concurrency\(\d+\)\s+larger than cpu count\(\d+\)", msg, flags=re.IGNORECASE))
+
+
+def _is_s3_auth_required_error(err_text: str) -> bool:
+    msg = str(err_text or "")
+    if re.search(r"access to the data source has been denied", msg, flags=re.IGNORECASE):
+        return True
+    if re.search(r"access\\s*key.*required", msg, flags=re.IGNORECASE):
+        return True
+    if re.search(r"role\\s*arn.*external\\s*id.*required", msg, flags=re.IGNORECASE):
+        return True
+    return False
 
 
 def _build_import_sql(table: str, columns: list[str], uri: str, import_threads: int | None) -> str:

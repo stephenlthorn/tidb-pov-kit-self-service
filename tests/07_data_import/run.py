@@ -143,10 +143,10 @@ def run(cfg: dict):
     if "import_into" in methods:
         print(f"\n  Method A — IMPORT INTO (TiDB native loader)...")
         _drop_and_create(cur, conn, f"import_test_native_{industry_key}")
+        source_uri = import_into_source_uri
+        if not source_uri:
+            source_uri = f"file://{csv_path}"
         try:
-            source_uri = import_into_source_uri
-            if not source_uri:
-                source_uri = f"file://{csv_path}"
             t0 = time.time()
             rows_a = _import_into(
                 cur,
@@ -163,8 +163,25 @@ def run(cfg: dict):
                             import_size_gb / dur_a * 60 if dur_a > 0 else 0)
             _print_result("IMPORT INTO", results["import_into"])
         except Exception as e:
-            print(f"    Skipped (requires TiDB >= 7.2 or accessible file path): {e}")
-            results["import_into"] = {"skipped": True, "reason": str(e)}
+            msg = str(e)
+            if _is_s3_auth_required_error(msg) and source_uri.lower().startswith("s3://"):
+                print("    IMPORT INTO missing S3 auth fields for TiDB; falling back to runner-side S3 download + LOAD DATA LOCAL INFILE.")
+                t0 = time.time()
+                rows_a = _load_data_infile_from_s3_fallback(
+                    cfg,
+                    f"import_test_native_{industry_key}",
+                    source_uri,
+                )
+                dur_a = time.time() - t0
+                import_size_gb = max(file_size_gb, import_source_size_gb)
+                results["import_into"] = _metrics(rows_a, import_size_gb, dur_a)
+                results["import_into"]["note"] = "fallback_load_data_local_infile"
+                log_import_stat(rows_a, import_size_gb, dur_a,
+                                import_size_gb / dur_a * 60 if dur_a > 0 else 0)
+                _print_result("IMPORT INTO (fallback)", results["import_into"])
+            else:
+                print(f"    Skipped (requires TiDB >= 7.2 or accessible file path): {e}")
+                results["import_into"] = {"skipped": True, "reason": msg}
     else:
         print("\n  Method A — IMPORT INTO skipped by config.")
         results["import_into"] = {"skipped": True, "reason": "disabled"}
@@ -345,6 +362,86 @@ def _derive_cpu_safe_threads(err_text: str) -> int | None:
     except (TypeError, ValueError):
         return None
     return max(1, cpu)
+
+
+def _is_s3_auth_required_error(err_text: str) -> bool:
+    msg = str(err_text or "")
+    if re.search(r"access to the data source has been denied", msg, flags=re.IGNORECASE):
+        return True
+    if re.search(r"access\\s*key.*required", msg, flags=re.IGNORECASE):
+        return True
+    if re.search(r"role\\s*arn.*external\\s*id.*required", msg, flags=re.IGNORECASE):
+        return True
+    return False
+
+
+def _load_data_infile_from_s3_fallback(cfg: dict, table: str, source_uri: str) -> int:
+    import boto3
+    from botocore.config import Config as BotoConfig
+
+    region = (
+        str((cfg.get("dataset_bootstrap") or {}).get("aws_region") or "").strip()
+        or str(os.environ.get("POV_S3_REGION", "")).strip()
+        or str(os.environ.get("AWS_REGION", "")).strip()
+    )
+    kwargs = {"config": BotoConfig(signature_version="s3v4")}
+    if region:
+        kwargs["region_name"] = region
+    s3 = boto3.client("s3", **kwargs)
+
+    uris = _expand_s3_source_uris(source_uri, s3)
+    if not uris:
+        raise RuntimeError(f"No S3 CSV objects matched source URI: {source_uri}")
+
+    loaded = 0
+    with tempfile.TemporaryDirectory(prefix="tidb_import_s3_fallback_") as tmp:
+        for idx, uri in enumerate(uris):
+            local_path = _download_s3_uri(uri, tmp, idx, s3)
+            rows = _load_data_infile(cfg["tidb"], table, local_path)
+            if rows and rows > 0:
+                loaded += int(rows)
+
+    if loaded > 0:
+        return loaded
+    conn = get_connection(cfg["tidb"])
+    cur = conn.cursor()
+    cur.execute(f"SELECT COUNT(*) FROM {table}")
+    row = cur.fetchone()
+    conn.close()
+    return int(row[0] if row else 0)
+
+
+def _expand_s3_source_uris(source_uri: str, s3_client) -> list[str]:
+    raw = str(source_uri or "").strip()
+    parts = urlsplit(raw)
+    bucket = str(parts.netloc or "").strip()
+    key = str(parts.path or "").lstrip("/")
+    if not bucket or not key:
+        return []
+    if "*" not in key:
+        return [f"s3://{bucket}/{key}"]
+
+    prefix = key.split("*", 1)[0]
+    paginator = s3_client.get_paginator("list_objects_v2")
+    out = []
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        for item in page.get("Contents", []) or []:
+            obj_key = str(item.get("Key") or "")
+            if not obj_key.lower().endswith(".csv"):
+                continue
+            out.append(f"s3://{bucket}/{obj_key}")
+    return sorted(out)
+
+
+def _download_s3_uri(uri: str, tmp_dir: str, idx: int, s3_client) -> str:
+    parts = urlsplit(str(uri or ""))
+    bucket = str(parts.netloc or "").strip()
+    key = str(parts.path or "").lstrip("/")
+    if not bucket or not key:
+        raise ValueError(f"Invalid S3 URI: {uri}")
+    out = os.path.join(tmp_dir, f"part_{idx:04d}.csv")
+    s3_client.download_file(bucket, key, out)
+    return out
 
 
 def _resolve_auto_import_source(cfg: dict, industry_key: str) -> tuple[str, float, str]:
