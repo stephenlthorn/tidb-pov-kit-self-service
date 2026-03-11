@@ -15,6 +15,7 @@ OPEN_REPORT="${POV_OPEN_REPORT:-false}"
 PUBLISH_GENERAL_DATASET="${POV_PUBLISH_GENERAL_DATASET:-true}"
 DATASET_TARGET_GB="${POV_DATASET_TARGET_GB:-0.05}"
 DATASET_SHARDS="${POV_DATASET_SHARDS:-8}"
+CLEANUP_RAN="false"
 
 is_true() {
   local v
@@ -72,14 +73,42 @@ AWS_REGION_CFG="$(read_region_from_cfg "${CONFIG_PATH}")"
 AWS_REGION="${AWS_REGION:-${POV_S3_REGION:-${AWS_REGION_CFG:-us-east-1}}}"
 export AWS_REGION
 
+profile_uses_sso() {
+  local profile
+  profile="${AWS_PROFILE:-default}"
+  if ! command -v aws >/dev/null 2>&1; then
+    return 1
+  fi
+  [[ -n "$(aws configure get sso_session --profile "${profile}" 2>/dev/null || true)" ]]
+}
+
+aws_reauth_if_sso() {
+  local profile
+  profile="${AWS_PROFILE:-default}"
+  if ! profile_uses_sso; then
+    return 1
+  fi
+  if [[ ! -t 0 ]]; then
+    return 1
+  fi
+  echo "[safe-e2e] attempting AWS SSO re-auth for profile ${profile}..."
+  aws sso login --profile "${profile}" --no-browser
+}
+
 aws_identity_check() {
   if ! command -v aws >/dev/null 2>&1; then
     return 0
   fi
   if ! aws sts get-caller-identity --region "${AWS_REGION}" >/dev/null 2>&1; then
+    if aws_reauth_if_sso; then
+      if aws sts get-caller-identity --region "${AWS_REGION}" >/dev/null 2>&1; then
+        echo "[safe-e2e] AWS identity check recovered after SSO re-auth."
+        return 0
+      fi
+    fi
     if is_true "${STRICT_AWS_CHECK}"; then
       echo "[safe-e2e] AWS identity check failed in region ${AWS_REGION}."
-      echo "           run: aws sso login --profile <profile>  or export credentials"
+      echo "           run: aws sso login --profile ${AWS_PROFILE:-<profile>}  or export credentials"
       exit 2
     else
       echo "[safe-e2e] warning: AWS identity check failed; skipping EC2 cleanup checks."
@@ -111,17 +140,46 @@ terminate_tagged_instances() {
   fi
 }
 
+cleanup_tagged_instances_once() {
+  if [[ "${CLEANUP_RAN}" == "true" ]]; then
+    return 0
+  fi
+  CLEANUP_RAN="true"
+  if ! command -v aws >/dev/null 2>&1; then
+    return 0
+  fi
+  terminate_tagged_instances || true
+}
+
+on_exit_cleanup() {
+  local rc=$?
+  if [[ "${CLEANUP_RAN}" != "true" ]]; then
+    echo "[safe-e2e] ensuring post-run EC2 cleanup..."
+    cleanup_tagged_instances_once
+  fi
+  if [[ ${rc} -ne 0 ]]; then
+    echo "[safe-e2e] failed (exit ${rc}). Cleanup attempted; rerun after fixing above error."
+  fi
+}
+
 reset_tidb_database() {
   python3 - "${CONFIG_PATH}" <<'PY'
 import sys, yaml
 import mysql.connector
+sys.path.insert(0, ".")
+from lib.tidb_cloud import validate_tidb_cloud_username
 
 cfg = yaml.safe_load(open(sys.argv[1])) or {}
 tidb = cfg.get("tidb") or {}
+tier = ((cfg.get("tier") or {}).get("selected"))
 required = ["host", "user", "password"]
 missing = [k for k in required if not str(tidb.get(k, "")).strip()]
 if missing:
     raise SystemExit(f"[safe-e2e] missing tidb fields in config: {', '.join(missing)}")
+
+msg = validate_tidb_cloud_username(tidb, tier=tier)
+if msg:
+    raise SystemExit(f"[safe-e2e] invalid TiDB username format: {msg}")
 
 db = str(tidb.get("database") or "test").strip() or "test"
 conn = mysql.connector.connect(
@@ -138,6 +196,38 @@ cur.execute(f"CREATE DATABASE `{db}`")
 conn.close()
 print(f"[safe-e2e] reset TiDB database: {db}")
 PY
+}
+
+s3_upload_preflight() {
+  local bucket="${POV_S3_BUCKET:-${S3_BUCKET:-${S3_ARTIFACTS_BUCKET:-}}}"
+  local prefix="${POV_S3_PREFIX:-${S3_PREFIX:-tidb-pov}}"
+  local project="${POV_S3_PROJECT:-${S3_ARTIFACTS_PROJECT:-default}}"
+  local region="${POV_S3_REGION:-${S3_REGION:-${AWS_REGION}}}"
+  if [[ -z "${bucket}" ]]; then
+    return 0
+  fi
+  if [[ ! -f "scripts/upload_results_s3.py" ]]; then
+    return 0
+  fi
+  if ! python3 scripts/upload_results_s3.py \
+      --bucket "${bucket}" \
+      --prefix "${prefix}" \
+      --project "${project}" \
+      --region "${region}" \
+      --check-only >/dev/null; then
+    if aws_reauth_if_sso; then
+      python3 scripts/upload_results_s3.py \
+        --bucket "${bucket}" \
+        --prefix "${prefix}" \
+        --project "${project}" \
+        --region "${region}" \
+        --check-only >/dev/null
+      return 0
+    fi
+    echo "[safe-e2e] S3 preflight failed for s3://${bucket}/${prefix}/${project}/"
+    echo "           fix AWS credentials/bucket policy before running."
+    exit 2
+  fi
 }
 
 enforce_small_defaults() {
@@ -293,7 +383,9 @@ ensure_dataset_import_auth() {
 
 echo "[safe-e2e] config: ${CONFIG_PATH}"
 echo "[safe-e2e] region: ${AWS_REGION}"
+trap on_exit_cleanup EXIT
 aws_identity_check
+s3_upload_preflight
 terminate_tagged_instances
 reset_tidb_database
 enforce_small_defaults
@@ -306,7 +398,7 @@ echo "[safe-e2e] starting PoV run..."
 ./run_all.sh "${CONFIG_PATH}" --no-menu --no-wizard
 
 echo "[safe-e2e] post-run EC2 cleanup..."
-terminate_tagged_instances
+cleanup_tagged_instances_once
 
 if is_true "${OPEN_REPORT}"; then
   if command -v open >/dev/null 2>&1; then

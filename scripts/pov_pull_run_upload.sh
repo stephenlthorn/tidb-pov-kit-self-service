@@ -2,16 +2,49 @@
 set -euo pipefail
 
 POV_ENV_FILE="${POV_ENV_FILE:-}"
+
+load_env_file_safe() {
+  local env_path="$1"
+  python3 - "${env_path}" <<'PY'
+import re
+import shlex
+import sys
+
+env_path = sys.argv[1]
+key_re = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+with open(env_path, "r", encoding="utf-8") as fh:
+    for line in fh:
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if raw.startswith("export "):
+            raw = raw[len("export "):].strip()
+        if "=" not in raw:
+            # Ignore non env-assignment lines to avoid shell execution on source.
+            continue
+        key, value = raw.split("=", 1)
+        key = key.strip()
+        if not key_re.match(key):
+            continue
+        value = value.strip()
+        if (value.startswith("'") and value.endswith("'")) or (
+            value.startswith('"') and value.endswith('"')
+        ):
+            value = value[1:-1]
+        print(f"export {key}={shlex.quote(value)}")
+PY
+}
+
 if [[ -n "${POV_ENV_FILE}" ]]; then
   if [[ ! -f "${POV_ENV_FILE}" ]]; then
     echo "[runner] env file not found: ${POV_ENV_FILE}"
     exit 2
   fi
-  # Export everything loaded from env file so child processes (run_all.sh) can read it.
-  set -a
-  # shellcheck disable=SC1090
-  source "${POV_ENV_FILE}"
-  set +a
+  # Load only valid KEY=VALUE assignments from env file.
+  # This prevents accidental command execution from malformed lines.
+  # shellcheck disable=SC2046
+  eval "$(load_env_file_safe "${POV_ENV_FILE}")"
 fi
 
 POV_REPO_URL="${POV_REPO_URL:-https://github.com/stephenlthorn/tidb-pov-kit-self-service.git}"

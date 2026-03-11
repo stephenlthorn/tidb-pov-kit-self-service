@@ -130,6 +130,9 @@ bash scripts/pov_safe_small_e2e.sh config.yaml
 - forces `industry.selected=general_auto`
 - enables `dataset_bootstrap` and publishes the `general_auto` dataset pack to your S3 path
 - enables all standard modules (M0–M8 + vector track), while keeping small-scale defaults
+- validates TiDB Cloud username format before DB reset (prefix requirement check)
+- runs S3 preflight before execution
+- always attempts tagged EC2 cleanup on exit (success or failure)
 
 ### 4) Enforce S3 Upload (recommended)
 
@@ -443,6 +446,11 @@ each module — with descriptions of what to screenshot for customer slides.
 → Double-check `host`, `port`, `user`, `password` in `config.yaml`.
 → Ensure your IP is whitelisted under Security → Network Access.
 → `run_all.sh` will now prompt to update connection values and retry when this check fails in an interactive terminal.
+→ `pov_safe_small_e2e.sh` hard-fails early if TiDB Cloud username prefix format is invalid.
+
+**`Missing user name prefix`**
+→ Use the exact TiDB Cloud username from Connect (example: `<prefix>.root` for Starter/Essential/Premium/Serverless).
+→ Dedicated/BYOC may not require prefix in the same format.
 
 **Checklist returns HOLD before tests start**
 → Open `results/pre_poc_checklist.md` and resolve blocking items.
@@ -471,6 +479,17 @@ each module — with descriptions of what to screenshot for customer slides.
   (`manifest_uri` or `s3_bucket + s3_prefix`), AWS credentials, and TiDB Cloud
   `IMPORT INTO` access to the S3 objects.
   The module falls back to LOAD DATA and INSERT automatically.
+
+**`Token has expired and refresh failed` / SSO token errors**
+→ Re-authenticate AWS SSO before running:
+```bash
+aws sso login --profile <your-profile> --no-browser
+```
+→ `pov_safe_small_e2e.sh` now attempts SSO re-auth automatically when it detects an SSO profile in an interactive terminal.
+
+**`--no-wizard: command not found` when using `POV_ENV_FILE`**
+→ Your env file contains non `KEY=VALUE` lines.
+→ `scripts/pov_pull_run_upload.sh` now safely loads only valid env assignments and ignores other lines.
 
 **Out of memory during large data generation**
 → Reduce `data_scale` to `small` or `medium` in `config.yaml`.
