@@ -62,18 +62,18 @@ def run(cfg: dict):
     runner = LoadRunner(tidb_cfg=cfg["tidb"], counts=counts, module=MODULE)
 
     # Phase 1: Warmup
-    print(f"\n  Phase 1 — Warmup ({WARMUP_SEC}s)")
+    print(f"\n  Phase 1 — Warmup ({warmup_sec}s)")
     runner.run(pool, concurrency=concurrency, duration_sec=warmup_sec, phase="warmup")
 
     # Phase 2: Inject failure (simulate by closing all connections briefly)
-    print(f"\n  Phase 2 — Failure injection (simulated connection drop, {FAILURE_SEC}s)")
+    print(f"\n  Phase 2 — Failure injection (simulated connection drop, {failure_sec}s)")
     failure_ts["start"] = time.time()
     _simulate_failure(cfg["tidb"], duration_sec=failure_sec, module=MODULE)
     failure_ts["end"] = time.time()
     print(f"  Failure window: {failure_ts['end'] - failure_ts['start']:.1f}s")
 
     # Phase 3: Recovery observation
-    print(f"\n  Phase 3 — Recovery observation ({RECOVERY_OBSERVE_SEC}s)")
+    print(f"\n  Phase 3 — Recovery observation ({recovery_observe_sec}s)")
     runner.run(pool, concurrency=concurrency, duration_sec=recovery_observe_sec, phase="recovery")
 
     ts_data = get_time_series(MODULE, bucket_sec=5)
