@@ -498,6 +498,7 @@ def build_tier_modules(
     modules = {
         "customer_queries": True,
         "baseline_perf": True,
+        "user_growth": True,
         "elastic_scale": True,
         "high_availability": False,
         "write_contention": True,
@@ -506,6 +507,7 @@ def build_tier_modules(
         "mysql_compat": True,
         "data_import": True,
         "vector_search": False,
+        "tidb_features": True,
     }
 
     for k, v in (existing or {}).items():

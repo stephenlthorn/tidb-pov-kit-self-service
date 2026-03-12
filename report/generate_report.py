@@ -53,6 +53,7 @@ RESULTS_DIR = os.path.join(os.path.dirname(__file__), "..", "results")
 MODULE_DISPLAY = {
     "00_customer_queries":    "M0 — Customer Query Validation",
     "01_baseline_perf":       "M1 — Baseline OLTP Performance",
+    "01b_user_growth":        "M1b — User Growth Ramp",
     "02_elastic_scale":       "M2 — Elastic Auto-Scaling",
     "03_high_availability":   "M3 — High Availability & RTO",
     "03b_write_contention":   "M3b — Write Contention / Hot Region",
@@ -61,11 +62,17 @@ MODULE_DISPLAY = {
     "06_mysql_compat":        "M6 — SQL Compatibility",
     "07_data_import":         "M7 — Data Import Speed",
     "08_vector_search":       "M8 — Vector Search (AI Track)",
+    "09_tidb_features":       "M9 — TiDB Feature Showcase",
 }
 
 MODULE_SCOPE_SUMMARY = {
     "00_customer_queries": "Runs customer SQL samples with EXPLAIN checks to validate immediate query portability.",
     "01_baseline_perf": "Measures OLTP p99/TPS across concurrency levels plus a dedicated point-get micro-latency phase.",
+    "01b_user_growth": (
+        "Simulates user-base growth by progressively expanding the active user pool. "
+        "Small: 1->100->1,000 users. Medium: 1->1,000->10,000. Large: 1->10,000->50,000. "
+        "Each step issues the same mixed read/write workload scoped to the active pool."
+    ),
     "02_elastic_scale": "Ramps load and records latency/throughput response under demand changes.",
     "03_high_availability": "Runs an application-level failure-window drill to estimate recovery behavior.",
     "03b_write_contention": "Compares sequential keys vs AUTO_RANDOM under write contention.",
@@ -74,6 +81,16 @@ MODULE_SCOPE_SUMMARY = {
     "06_mysql_compat": "Executes SQL compatibility checks and reports failed statements with fix guidance.",
     "07_data_import": "Compares bulk ingest paths and reports best observed import throughput.",
     "08_vector_search": "Measures ANN query behavior for the AI/vector workload track.",
+    "09_tidb_features": (
+        "Eight focused sub-tests: (1) Optimistic vs Pessimistic transaction mode. "
+        "(2) READ COMMITTED vs REPEATABLE READ isolation level. "
+        "(3) TiFlash read-after-write replication lag. "
+        "(4) Range scan size impact (LIMIT 100 to 100,000). "
+        "(5) Stale reads (fresh vs 5s staleness window). "
+        "(6) Resource group multi-tenant isolation. "
+        "(7) Clustered vs non-clustered primary key lookup performance. "
+        "(8) Batch DML large transaction splitting."
+    ),
 }
 
 KPI_THRESHOLDS_BY_TIER = {
@@ -1149,6 +1166,436 @@ def _module_interpretation(metrics: dict, module_key: str) -> tuple[str, str, st
     )
 
 
+def _chart_user_growth(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("01b_user_growth", {})
+    tidb = mod.get("tidb", {})
+
+    # Collect ug_* phases in ascending user-count order
+    import re as _re
+    phase_rows = []
+    for ph, stats in tidb.items():
+        if not isinstance(stats, dict):
+            continue
+        m = _re.fullmatch(r"ug_(\d+)", str(ph))
+        if m:
+            phase_rows.append((int(m.group(1)), ph, stats))
+    phase_rows.sort(key=lambda x: x[0])
+
+    if not phase_rows:
+        reason, actions = _module_missing_reason(metrics, "01b_user_growth",
+                                                 "No user-growth phase data found")
+        return _empty_chart("User Growth Ramp data unavailable", reason=reason, actions=actions)
+
+    user_counts = [r[0] for r in phase_rows]
+    p99s = [r[2].get("p99_ms", 0) for r in phase_rows]
+    tpss = [r[2].get("tps", 0) for r in phase_rows]
+    labels = [f"{r[0]:,}" for r in phase_rows]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    x = np.arange(len(user_counts))
+
+    ax1.plot(x, p99s, "o-", color=_rgb(BLUE), lw=2, markersize=8)
+    for xi, yi in zip(x, p99s):
+        ax1.annotate(f"{yi:.0f}", (xi, yi), textcoords="offset points",
+                     xytext=(0, 7), ha="center", fontsize=8)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels)
+    ax1.set_xlabel("Active Users")
+    ax1.set_ylabel("p99 Latency (ms)")
+    ax1.set_title("p99 Latency vs Active User Count")
+    ax1.grid(alpha=0.3)
+
+    ax2.bar(x, tpss, 0.55, color=_rgb(GREEN))
+    for xi, yi in zip(x, tpss):
+        ax2.annotate(f"{yi:.0f}", (xi, yi), textcoords="offset points",
+                     xytext=(0, 5), ha="center", fontsize=8)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels)
+    ax2.set_xlabel("Active Users")
+    ax2.set_ylabel("Transactions / sec")
+    ax2.set_title("Throughput (TPS) vs Active User Count")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_txn_modes(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+
+    opt = tidb.get("txn_optimistic", {}) or {}
+    pes = tidb.get("txn_pessimistic", {}) or {}
+
+    if not opt and not pes:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No transaction-mode phase data")
+        return _empty_chart("Transaction Mode data unavailable", reason=reason, actions=actions)
+
+    modes = ["Optimistic", "Pessimistic"]
+    p99s  = [opt.get("p99_ms", 0), pes.get("p99_ms", 0)]
+    p50s  = [opt.get("p50_ms", 0), pes.get("p50_ms", 0)]
+    tpss  = [opt.get("tps", 0),    pes.get("tps", 0)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    x = np.arange(2)
+
+    bars1 = ax1.bar(x - 0.2, p50s, 0.35, label="p50", color=_rgb(BLUE))
+    bars2 = ax1.bar(x + 0.2, p99s, 0.35, label="p99", color=_rgb(ORANGE))
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(modes)
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("Latency by Transaction Mode")
+    ax1.legend()
+    ax1.grid(axis="y", alpha=0.3)
+    for bar in list(bars1) + list(bars2):
+        h = bar.get_height()
+        if h > 0:
+            ax1.annotate(f"{h:.1f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    bars3 = ax2.bar(x, tpss, 0.5, color=[_rgb(BLUE), _rgb(GREEN)])
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(modes)
+    ax2.set_ylabel("Transactions / sec")
+    ax2.set_title("Throughput by Transaction Mode")
+    ax2.grid(axis="y", alpha=0.3)
+    for bar in bars3:
+        h = bar.get_height()
+        if h > 0:
+            ax2.annotate(f"{h:.0f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_isolation_levels(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+
+    rc  = tidb.get("iso_read_committed", {}) or {}
+    rr  = tidb.get("iso_repeatable_read", {}) or {}
+
+    if not rc and not rr:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No isolation-level phase data")
+        return _empty_chart("Isolation Level data unavailable", reason=reason, actions=actions)
+
+    levels = ["READ COMMITTED", "REPEATABLE READ"]
+    p50s   = [rc.get("p50_ms", 0), rr.get("p50_ms", 0)]
+    p99s   = [rc.get("p99_ms", 0), rr.get("p99_ms", 0)]
+    tpss   = [rc.get("tps", 0),    rr.get("tps", 0)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    x = np.arange(2)
+
+    bars1 = ax1.bar(x - 0.2, p50s, 0.35, label="p50", color=_rgb(BLUE))
+    bars2 = ax1.bar(x + 0.2, p99s, 0.35, label="p99", color=_rgb(ORANGE))
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(levels, fontsize=8)
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("Latency by Isolation Level")
+    ax1.legend()
+    ax1.grid(axis="y", alpha=0.3)
+    for bar in list(bars1) + list(bars2):
+        h = bar.get_height()
+        if h > 0:
+            ax1.annotate(f"{h:.1f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    bars3 = ax2.bar(x, tpss, 0.5, color=[_rgb(BLUE), _rgb(GREEN)])
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(levels, fontsize=8)
+    ax2.set_ylabel("Transactions / sec")
+    ax2.set_title("Throughput by Isolation Level")
+    ax2.grid(axis="y", alpha=0.3)
+    for bar in bars3:
+        h = bar.get_height()
+        if h > 0:
+            ax2.annotate(f"{h:.0f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_tiflash_raw(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+    writes  = tidb.get("tiflash_raw_write", {}) or {}
+    reads   = tidb.get("tiflash_raw_read", {}) or {}
+
+    if not writes and not reads:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No TiFlash read-after-write phase data")
+        return _empty_chart("TiFlash Read-After-Write data unavailable",
+                            reason=reason, actions=actions)
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.5))
+    ax1, ax2 = axes
+
+    # Left: write vs TiFlash read latency comparison
+    labels = ["TiKV Writes", "TiFlash Reads"]
+    p50s = [writes.get("p50_ms", 0), reads.get("p50_ms", 0)]
+    p99s = [writes.get("p99_ms", 0), reads.get("p99_ms", 0)]
+    x = np.arange(2)
+    bars1 = ax1.bar(x - 0.2, p50s, 0.35, label="p50", color=_rgb(BLUE))
+    bars2 = ax1.bar(x + 0.2, p99s, 0.35, label="p99", color=_rgb(ORANGE))
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels)
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("TiFlash Read-After-Write Latency")
+    ax1.legend()
+    ax1.grid(axis="y", alpha=0.3)
+    for bar in list(bars1) + list(bars2):
+        h = bar.get_height()
+        if h > 0:
+            ax1.annotate(f"{h:.1f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    # Right: throughput
+    tpss = [writes.get("tps", 0), reads.get("tps", 0)]
+    bars3 = ax2.bar(x, tpss, 0.5, color=[_rgb(GREEN), _rgb(PURPLE)])
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels)
+    ax2.set_ylabel("Transactions / sec")
+    ax2.set_title("Write vs TiFlash Read Throughput")
+    ax2.grid(axis="y", alpha=0.3)
+    for bar in bars3:
+        h = bar.get_height()
+        if h > 0:
+            ax2.annotate(f"{h:.0f}", xy=(bar.get_x() + bar.get_width() / 2, h),
+                         xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+
+    # Annotate with replication lag from module notes
+    note = (mod.get("notes") or "")
+    import re as _re
+    m = _re.search(r"lag=(\d+)ms", str(note))
+    if m:
+        lag_ms = int(m.group(1))
+        fig.text(0.5, 0.01,
+                 f"TiFlash replication lag observed: {lag_ms} ms",
+                 ha="center", fontsize=9, color=_rgb(ORANGE))
+
+    fig.tight_layout(rect=[0, 0.04, 1, 1])
+    return fig
+
+
+def _chart_range_scans(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+
+    import re as _re
+    phase_rows = []
+    for ph, stats in tidb.items():
+        if not isinstance(stats, dict):
+            continue
+        m = _re.fullmatch(r"range_(\d+)", str(ph))
+        if m:
+            phase_rows.append((int(m.group(1)), ph, stats))
+    phase_rows.sort(key=lambda x: x[0])
+
+    if not phase_rows:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No range-scan phase data")
+        return _empty_chart("Range Scan data unavailable", reason=reason, actions=actions)
+
+    sizes  = [r[0] for r in phase_rows]
+    p50s   = [r[2].get("p50_ms", 0) for r in phase_rows]
+    p99s   = [r[2].get("p99_ms", 0) for r in phase_rows]
+    tpss   = [r[2].get("tps", 0) for r in phase_rows]
+    labels = [f"{r[0]:,}" for r in phase_rows]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 4.5))
+    x = np.arange(len(sizes))
+
+    ax1.plot(x, p50s, "s-", color=_rgb(BLUE), lw=2, markersize=7, label="p50")
+    ax1.plot(x, p99s, "o-", color=_rgb(ORANGE), lw=2, markersize=7, label="p99")
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(labels, fontsize=8)
+    ax1.set_xlabel("Scan Range (LIMIT rows)")
+    ax1.set_ylabel("Latency (ms)")
+    ax1.set_title("Query Latency vs Scan Range Size")
+    ax1.legend()
+    ax1.grid(alpha=0.3)
+
+    ax2.bar(x, tpss, 0.55, color=_rgb(GREEN))
+    for xi, yi in zip(x, tpss):
+        if yi > 0:
+            ax2.annotate(f"{yi:.0f}", (xi, yi), textcoords="offset points",
+                         xytext=(0, 5), ha="center", fontsize=8)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(labels, fontsize=8)
+    ax2.set_xlabel("Scan Range (LIMIT rows)")
+    ax2.set_ylabel("Queries / sec")
+    ax2.set_title("Throughput vs Scan Range Size")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_stale_reads(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+    fresh = tidb.get("stale_read_fresh", {})
+    stale = tidb.get("stale_read_stale", {})
+
+    if not fresh and not stale:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No stale-read phase data")
+        return _empty_chart("Stale Read data unavailable", reason=reason, actions=actions)
+
+    labels = ["Fresh Read", "Stale Read (-5s)"]
+    p99s = [fresh.get("p99_ms", 0), stale.get("p99_ms", 0)]
+    tpss = [fresh.get("tps", 0), stale.get("tps", 0)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    colors = [_rgb(BLUE), _rgb(ORANGE)]
+
+    bars1 = ax1.bar(labels, p99s, color=colors, width=0.5)
+    for b, v in zip(bars1, p99s):
+        if v > 0:
+            ax1.annotate(f"{v:.1f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax1.set_ylabel("p99 Latency (ms)")
+    ax1.set_title("Stale Read Latency")
+    ax1.grid(axis="y", alpha=0.3)
+
+    bars2 = ax2.bar(labels, tpss, color=colors, width=0.5)
+    for b, v in zip(bars2, tpss):
+        if v > 0:
+            ax2.annotate(f"{v:.0f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax2.set_ylabel("Queries / sec")
+    ax2.set_title("Stale Read Throughput")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_resource_groups(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+    high = tidb.get("rg_high", {})
+    low = tidb.get("rg_low", {})
+
+    if not high and not low:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No resource-group phase data")
+        return _empty_chart("Resource Group data unavailable", reason=reason, actions=actions)
+
+    labels = ["High RU (10,000)", "Low RU (1,000)"]
+    p99s = [high.get("p99_ms", 0), low.get("p99_ms", 0)]
+    tpss = [high.get("tps", 0), low.get("tps", 0)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    colors = [_rgb(GREEN), _rgb(RED)]
+
+    bars1 = ax1.bar(labels, p99s, color=colors, width=0.5)
+    for b, v in zip(bars1, p99s):
+        if v > 0:
+            ax1.annotate(f"{v:.1f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax1.set_ylabel("p99 Latency (ms)")
+    ax1.set_title("Resource Group Latency")
+    ax1.grid(axis="y", alpha=0.3)
+
+    bars2 = ax2.bar(labels, tpss, color=colors, width=0.5)
+    for b, v in zip(bars2, tpss):
+        if v > 0:
+            ax2.annotate(f"{v:.0f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax2.set_ylabel("Queries / sec")
+    ax2.set_title("Resource Group Throughput")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_clustered_index(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+    clustered = tidb.get("idx_clustered", {})
+    nonclustered = tidb.get("idx_nonclustered", {})
+
+    if not clustered and not nonclustered:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No clustered-index phase data")
+        return _empty_chart("Clustered Index data unavailable", reason=reason, actions=actions)
+
+    labels = ["Clustered PK", "Non-Clustered PK"]
+    p99s = [clustered.get("p99_ms", 0), nonclustered.get("p99_ms", 0)]
+    tpss = [clustered.get("tps", 0), nonclustered.get("tps", 0)]
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4.5))
+    colors = [_rgb(BLUE), _rgb(PURPLE)]
+
+    bars1 = ax1.bar(labels, p99s, color=colors, width=0.5)
+    for b, v in zip(bars1, p99s):
+        if v > 0:
+            ax1.annotate(f"{v:.1f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax1.set_ylabel("p99 Latency (ms)")
+    ax1.set_title("Clustered vs Non-Clustered PK Latency")
+    ax1.grid(axis="y", alpha=0.3)
+
+    bars2 = ax2.bar(labels, tpss, color=colors, width=0.5)
+    for b, v in zip(bars2, tpss):
+        if v > 0:
+            ax2.annotate(f"{v:.0f}", (b.get_x() + b.get_width() / 2, v),
+                         textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+    ax2.set_ylabel("Queries / sec")
+    ax2.set_title("Clustered vs Non-Clustered PK Throughput")
+    ax2.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
+def _chart_batch_dml(metrics) -> plt.Figure:
+    mod = metrics["modules"].get("09_tidb_features", {})
+    tidb = mod.get("tidb", {})
+    single = tidb.get("batch_dml_single", {})
+    split = tidb.get("batch_dml_split", {})
+
+    if not single and not split:
+        reason, actions = _module_missing_reason(metrics, "09_tidb_features",
+                                                 "No batch-DML phase data")
+        return _empty_chart("Batch DML data unavailable", reason=reason, actions=actions)
+
+    labels = ["Single Large UPDATE", "Batched (1,000 rows)"]
+    avgs = [single.get("avg_ms", 0), split.get("avg_ms", 0)]
+    p99s = [single.get("p99_ms", 0), split.get("p99_ms", 0)]
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    x = np.arange(len(labels))
+    w = 0.3
+
+    bars1 = ax.bar(x - w / 2, avgs, w, color=_rgb(BLUE), label="Avg (ms)")
+    bars2 = ax.bar(x + w / 2, p99s, w, color=_rgb(ORANGE), label="p99 (ms)")
+
+    for bars in (bars1, bars2):
+        for b in bars:
+            v = b.get_height()
+            if v > 0:
+                ax.annotate(f"{v:.0f}", (b.get_x() + b.get_width() / 2, v),
+                            textcoords="offset points", xytext=(0, 5), ha="center", fontsize=9)
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(labels)
+    ax.set_ylabel("Latency (ms)")
+    ax.set_title("Batch DML: Single vs Split UPDATE")
+    ax.legend()
+    ax.grid(axis="y", alpha=0.3)
+
+    fig.tight_layout()
+    return fig
+
+
 def _empty_chart(title: str, reason: str = "", actions: list[str] | None = None) -> plt.Figure:
     actions = actions or []
     fig, ax = plt.subplots(figsize=(12, 4.5))
@@ -1354,6 +1801,22 @@ def _add_test_scope_page(pdf: PoVReport, metrics: dict, cfg: dict):
     if aws_cfg.get("enabled"):
         env_bits.append(f"AWS runner region: {aws_cfg.get('aws_region', 'n/a')}")
         env_bits.append(f"AWS instance size profile: {aws_cfg.get('instance_size', 'n/a')}")
+    cluster_info = metrics.get("cluster_info", {}) or {}
+    if cluster_info.get("tidb_version"):
+        # Extract short version from full version string
+        ver = str(cluster_info["tidb_version"])
+        if "Release Version:" in ver:
+            import re
+            m = re.search(r"Release Version:\s*(\S+)", ver)
+            if m:
+                ver = m.group(1)
+        env_bits.append(f"TiDB version: {ver[:40]}")
+    for node_type in ("tidb", "tikv", "tiflash", "pd"):
+        key = f"node_count_{node_type}"
+        if cluster_info.get(key):
+            env_bits.append(f"{node_type.upper()} nodes: {cluster_info[key]}")
+    if cluster_info.get("region_count"):
+        env_bits.append(f"Regions: {cluster_info['region_count']:,}")
     pdf.body_text(" | ".join(env_bits), size=8)
 
     col_w = [52, 22, 98]
@@ -2098,7 +2561,11 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         latency_label = "Current Run p99"
         tps_label = "Current Run Throughput"
 
+    readiness_score, _readiness_breakdown = _migration_readiness_score(metrics)
+
     cards = [
+        ("Readiness Score", str(readiness_score), "/100",
+         GREEN if readiness_score >= 75 else (ORANGE if readiness_score >= 50 else RED)),
         ("Run Mode",            run_mode_display, "",       (0, 128, 128)),
         ("Schema Mode",         schema_mode_display, "", (100, 100, 180)),
         ("Industry",            industry_display, "", (120, 120, 160)),
@@ -2242,9 +2709,22 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
     )
 
     if _module_ran("01_baseline_perf"):
+        test_cfg = cfg.get("test", {}) or {}
+        mix = test_cfg.get("workload_mix", "mixed")
+        read_mult = test_cfg.get("read_weight_multiplier", 1.0)
+        write_mult = test_cfg.get("write_weight_multiplier", 1.0)
+        data_scale = manifest.get("scale", "n/a")
+        user_count = (manifest.get("counts") or {}).get("users", "n/a")
+        txn_count = (manifest.get("counts") or {}).get("transactions", "n/a")
+        if isinstance(user_count, (int, float)):
+            user_count = f"{int(user_count):,}"
+        if isinstance(txn_count, (int, float)):
+            txn_count = f"{int(txn_count):,}"
+
         baseline_caption = (
-            "OLTP workload across configured concurrency levels. "
-            "Shows p99 latency and transactions per second. "
+            f"Workload: {mix} mix (read x{read_mult}, write x{write_mult}) | "
+            f"Data scale: {data_scale} ({user_count} users, {txn_count} transactions). "
+            "Shows p99 latency and transactions per second across configured concurrency levels. "
             "Point-get micro-latency is shown on the next page."
         )
         max_qps = _maybe_float(summary.get("max_qps"))
@@ -2259,6 +2739,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
         _add_chart_page(pdf, "Baseline OLTP Performance",
                         _safe_chart_render("Baseline OLTP Performance", lambda: _chart_baseline(metrics)),
                         baseline_caption)
+        _comparison_callout(pdf, metrics, "01_baseline_perf")
 
         _add_chart_page(
             pdf,
@@ -2276,11 +2757,129 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
             "Use this as the cleanest low-latency read signal for customer API/detail endpoints.",
         )
 
+    if _module_ran("01b_user_growth"):
+        scale = manifest.get("scale", "small")
+        _ug_steps = {
+            "small":  "1 → 100 → 1,000",
+            "medium": "1 → 1,000 → 10,000",
+            "large":  "1 → 10,000 → 50,000",
+        }.get(scale, "see steps above")
+        _add_chart_page(
+            pdf,
+            "User Growth Ramp",
+            _safe_chart_render("User Growth Ramp", lambda: _chart_user_growth(metrics)),
+            f"Active-user steps ({scale} scale): {_ug_steps}. "
+            "Each step restricts the random ID window to simulate user-base growth from a cold "
+            "start. TPS and p99 latency are captured per step to show how TiDB absorbs organic "
+            "load growth without requiring manual sharding or pre-provisioning."
+        )
+
+    if _module_ran("09_tidb_features"):
+        m9_test_cfg = cfg.get("test", {}) or {}
+        _add_chart_page(
+            pdf,
+            "Transaction Mode: Optimistic vs Pessimistic",
+            _safe_chart_render("Transaction Mode Comparison", lambda: _chart_txn_modes(metrics)),
+            "TiDB supports both optimistic (MVCC, no row locks until commit) and pessimistic "
+            "(MySQL-compatible, lock-on-write) concurrency control. "
+            "Optimistic mode delivers higher throughput on low-contention workloads; "
+            "pessimistic mode reduces abort rates on hot-row update patterns at the cost of "
+            "slightly higher median latency. Use SET @@tidb_txn_mode to switch per session.",
+        )
+        _add_test_detail_box(pdf, {
+            "Concurrency": str(m9_test_cfg.get("tidb_features_concurrency", m9_test_cfg.get("concurrency_levels", [16])[0])),
+            "Duration": f"{m9_test_cfg.get('tidb_features_duration_seconds', 45)}s",
+            "Workload": "Mixed read/write contention",
+        })
+        _add_chart_page(
+            pdf,
+            "Isolation Level: READ COMMITTED vs REPEATABLE READ",
+            _safe_chart_render("Isolation Level Comparison", lambda: _chart_isolation_levels(metrics)),
+            "READ COMMITTED (RC) acquires a fresh snapshot per statement, reducing lock "
+            "contention and improving throughput for write-heavy workloads. "
+            "REPEATABLE READ (RR) holds a consistent snapshot for the entire transaction, "
+            "preventing non-repeatable reads at the cost of higher conflict rates under "
+            "concurrent writes. Set via SET SESSION TRANSACTION ISOLATION LEVEL.",
+        )
+        _add_test_detail_box(pdf, {
+            "Concurrency": str(m9_test_cfg.get("tidb_features_concurrency", m9_test_cfg.get("concurrency_levels", [16])[0])),
+            "Duration": f"{m9_test_cfg.get('tidb_features_duration_seconds', 45)}s",
+            "Workload": "Write-heavy contention scenario",
+        })
+        _add_chart_page(
+            pdf,
+            "TiFlash Read-After-Write",
+            _safe_chart_render("TiFlash Read-After-Write", lambda: _chart_tiflash_raw(metrics)),
+            "Demonstrates that TiFlash columnar replicas remain consistent with TiKV row-store "
+            "writes. The test writes a batch of rows and measures replication lag before "
+            "TiFlash serves those rows. TiFlash reads use the "
+            "READ_FROM_STORAGE(tiflash[table]) hint. Typical lag is sub-second; "
+            "the right panel shows steady-state TiFlash analytical query throughput.",
+        )
+        _add_test_detail_box(pdf, {
+            "Concurrency": str(m9_test_cfg.get("tidb_features_concurrency", m9_test_cfg.get("concurrency_levels", [16])[0])),
+            "Duration": f"{m9_test_cfg.get('tidb_features_duration_seconds', 45)}s",
+            "Workload": "Batch write then TiFlash read",
+        })
+        _add_chart_page(
+            pdf,
+            "Range Scan Size Impact on Performance",
+            _safe_chart_render("Range Scan Size Impact", lambda: _chart_range_scans(metrics)),
+            "Shows how increasing LIMIT (100 → 1,000 → 10,000 → 100,000 rows) affects "
+            "query latency and server-side throughput. "
+            "Latency grows sub-linearly when TiKV region caches are warm and index scans are "
+            "region-local. Large scans (100,000+) trigger cross-region scatter and should be "
+            "served from TiFlash for analytical queries.",
+        )
+        _add_test_detail_box(pdf, {
+            "Concurrency": str(m9_test_cfg.get("tidb_features_concurrency", m9_test_cfg.get("concurrency_levels", [16])[0])),
+            "Duration": f"{m9_test_cfg.get('tidb_features_duration_seconds', 45)}s",
+            "Workload": "Sequential range scans (LIMIT 100 to 100,000)",
+        })
+        _add_chart_page(
+            pdf,
+            "Stale Reads: Fresh vs 5-Second Staleness Window",
+            _safe_chart_render("Stale Reads", lambda: _chart_stale_reads(metrics)),
+            "Stale reads (SET @@tidb_read_staleness = -5) allow TiDB to serve reads from "
+            "any replica without waiting for Raft consensus, significantly reducing read "
+            "latency for workloads that can tolerate slightly stale data. Common use cases "
+            "include dashboard queries, reporting, and cache refresh.",
+        )
+        _add_chart_page(
+            pdf,
+            "Resource Group Isolation: Multi-Tenant Prioritization",
+            _safe_chart_render("Resource Groups", lambda: _chart_resource_groups(metrics)),
+            "TiDB Resource Control (CREATE RESOURCE GROUP) enables per-tenant throttling "
+            "measured in Request Units (RU/s). The high-priority tenant receives 10x the "
+            "resource quota, demonstrating how TiDB prevents noisy-neighbor issues in "
+            "multi-tenant SaaS deployments without application-level sharding.",
+        )
+        _add_chart_page(
+            pdf,
+            "Clustered vs Non-Clustered Primary Key Lookup",
+            _safe_chart_render("Clustered Index", lambda: _chart_clustered_index(metrics)),
+            "Clustered indexes store row data directly in PK order, eliminating a secondary "
+            "lookup. Non-clustered PKs require an extra index-to-row fetch. For point-get "
+            "heavy workloads (API lookups, session stores), clustered PKs can reduce latency "
+            "by 20-40%. Use CLUSTERED keyword in CREATE TABLE for hot-path tables.",
+        )
+        _add_chart_page(
+            pdf,
+            "Batch DML: Large Transaction Splitting",
+            _safe_chart_render("Batch DML", lambda: _chart_batch_dml(metrics)),
+            "TiDB can automatically split large transactions via tidb_dml_batch_size. "
+            "Without splitting, a large UPDATE locks many rows in a single transaction, "
+            "risking timeout and memory pressure. With batch splitting enabled, the same "
+            "operation completes in smaller chunks, reducing peak memory and lock duration. "
+            "Critical for ETL jobs, data migrations, and bulk cleanup operations.",
+        )
+
     if _module_ran("02_elastic_scale"):
         _add_chart_page(pdf, "Elastic Auto-Scaling",
                         _safe_chart_render("Elastic Auto-Scaling", lambda: _chart_scale(metrics)),
                         "Load ramped from baseline to peak. The bottom panel provides an inferred pay-as-you-grow control signal "
                         "(capacity index and cumulative capacity-hours) derived from measured TPS.")
+        _comparison_callout(pdf, metrics, "02_elastic_scale")
 
     if _module_ran("03_high_availability"):
         _add_chart_page(pdf, "Availability Drill — Simulated Failure Window",
@@ -2294,6 +2893,7 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                         "Sequential (AUTO_INCREMENT) PKs concentrate writes on a single "
                         "region leader (hot region). AUTO_RANDOM distributes writes evenly. "
                         "For a stronger delta, rerun with higher write concurrency and longer phase duration.")
+        _comparison_callout(pdf, metrics, "03b_write_contention")
 
     if _module_ran("04_htap_concurrent"):
         _add_chart_page(pdf, "HTAP — Concurrent Transactional & Analytical Workload",
@@ -2363,6 +2963,10 @@ def generate(cfg: dict = None, out_path: str = None) -> str:
                         "ANN search latency (cosine distance, HNSW index) "
                         "at increasing concurrency levels.")
 
+    # ── Next Steps + Glossary ────────────────────────────────────────────────
+    _add_next_steps_page(pdf, metrics, cfg)
+    _add_glossary_page(pdf)
+
     # ── Appendix: raw latency table ───────────────────────────────────────────
     _add_kpi_appendix_page(pdf, metrics, selected_tier, thresholds_by_tier)
 
@@ -2427,6 +3031,36 @@ def _add_chart_page(pdf, title, fig, caption=""):
         pdf.body_text(caption, size=8)
 
 
+def _add_test_detail_box(pdf: PoVReport, details: dict):
+    """Add a small detail box showing test parameters below chart captions."""
+    if not details:
+        return
+    parts = [f"{k}: {v}" for k, v in details.items() if v is not None]
+    if not parts:
+        return
+    text = " | ".join(parts)
+
+    pdf.set_fill_color(240, 240, 248)
+    pdf.set_draw_color(200, 200, 210)
+    x = pdf.l_margin
+    y = pdf.get_y()
+    w = pdf.w - pdf.l_margin - pdf.r_margin
+
+    pdf.set_font("Helvetica", "", 7)
+    lines = pdf.multi_cell(w - 4, 3.5, text, split_only=True)
+    h = len(lines) * 3.5 + 4
+
+    if y + h > pdf.h - pdf.b_margin:
+        return  # skip if no room
+
+    pdf.rect(x, y, w, h, style="FD")
+    pdf.set_xy(x + 2, y + 2)
+    pdf.set_text_color(100, 100, 120)
+    pdf.multi_cell(w - 4, 3.5, text)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+
 def _write_wrapped_bullet(pdf: PoVReport, text: str, *, size: float = 7.5, line_h: float = 3.8):
     content = f"- {pdf.normalize_text(str(text or ''))}"
     lines = _safe_table_lines(pdf, content, pdf.w - pdf.l_margin - pdf.r_margin - 2, line_h, "", size)
@@ -2438,6 +3072,255 @@ def _write_wrapped_bullet(pdf: PoVReport, text: str, *, size: float = 7.5, line_
     pdf.set_font("Helvetica", "", size)
     pdf.multi_cell(pdf.w - pdf.l_margin - pdf.r_margin - 2, line_h, "\n".join(lines))
     pdf.set_x(pdf.l_margin)
+
+
+def _comparison_callout(pdf: PoVReport, metrics: dict, mod_key: str, phase: str = None):
+    """Generate bold comparison text like 'TiDB Cloud p99 was 2.3x lower than Aurora MySQL'."""
+    if not metrics.get("comparison_enabled"):
+        return
+    comp_label = metrics.get("comparison_label", "Comparison DB")
+    mod = metrics["modules"].get(mod_key, {})
+    tidb_data = mod.get("tidb", {})
+    comp_data = mod.get("comparison", {})
+
+    if phase:
+        tidb_stats = tidb_data.get(phase, {})
+        comp_stats = comp_data.get(phase, {})
+    else:
+        # Use first available phase
+        for ph in tidb_data:
+            if isinstance(tidb_data.get(ph), dict) and tidb_data[ph].get("count", 0) > 0:
+                tidb_stats = tidb_data[ph]
+                comp_stats = comp_data.get(ph, {})
+                break
+        else:
+            return
+
+    if not tidb_stats or not comp_stats:
+        return
+
+    callouts = []
+    tidb_p99 = tidb_stats.get("p99_ms", 0)
+    comp_p99 = comp_stats.get("p99_ms", 0)
+    tidb_tps = tidb_stats.get("tps", 0)
+    comp_tps = comp_stats.get("tps", 0)
+
+    if comp_p99 > 0 and tidb_p99 > 0 and comp_p99 > tidb_p99:
+        ratio = comp_p99 / tidb_p99
+        callouts.append(f"TiDB Cloud p99 latency was {ratio:.1f}x lower than {comp_label}")
+    elif comp_p99 > 0 and tidb_p99 > 0 and tidb_p99 > comp_p99:
+        ratio = tidb_p99 / comp_p99
+        callouts.append(f"TiDB Cloud p99 latency was {ratio:.1f}x higher than {comp_label}")
+
+    if tidb_tps > 0 and comp_tps > 0 and tidb_tps > comp_tps:
+        ratio = tidb_tps / comp_tps
+        callouts.append(f"TiDB Cloud throughput was {ratio:.1f}x higher than {comp_label}")
+
+    if callouts:
+        color = GREEN if (tidb_p99 > 0 and comp_p99 > 0 and tidb_p99 <= comp_p99) else ORANGE
+        pdf.set_font("Helvetica", "B", 9)
+        pdf.set_text_color(*color)
+        for c in callouts:
+            pdf.cell(0, 5, c, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_text_color(0, 0, 0)
+        pdf.ln(2)
+
+
+def _migration_readiness_score(metrics: dict) -> tuple:
+    """Calculate 0-100 migration readiness score and component breakdown."""
+    summary = metrics.get("summary", {})
+    modules = metrics.get("modules", {})
+
+    scores = {}
+
+    # Module pass rate (0-30 points)
+    total = max(1, int(summary.get("modules_run", 1)))
+    passed = int(summary.get("modules_passed", 0))
+    scores["module_pass"] = round((passed / total) * 30)
+
+    # SQL compatibility (0-25 points)
+    compat_pct = summary.get("mysql_compat_pct")
+    if compat_pct is not None:
+        scores["sql_compat"] = round(compat_pct / 100 * 25)
+    else:
+        scores["sql_compat"] = 0
+
+    # Latency health (0-25 points) — based on warm p99 vs tier threshold
+    warm_p99 = summary.get("warm_p99_ms") or summary.get("best_p99_ms")
+    if warm_p99 is not None and warm_p99 > 0:
+        if warm_p99 < 50:
+            scores["latency"] = 25
+        elif warm_p99 < 100:
+            scores["latency"] = 20
+        elif warm_p99 < 200:
+            scores["latency"] = 15
+        elif warm_p99 < 500:
+            scores["latency"] = 10
+        else:
+            scores["latency"] = 5
+    else:
+        scores["latency"] = 0
+
+    # Data import success (0-10 points)
+    import_mod = modules.get("07_data_import", {})
+    if import_mod.get("status") == "passed":
+        scores["import"] = 10
+    elif import_mod.get("status") == "failed":
+        scores["import"] = 3
+    else:
+        scores["import"] = 0
+
+    # HA / availability (0-10 points)
+    ha_mod = modules.get("03_high_availability", {})
+    if ha_mod.get("status") == "passed":
+        scores["availability"] = 10
+    elif ha_mod.get("status") == "not_run":
+        scores["availability"] = 0
+    else:
+        scores["availability"] = 3
+
+    total_score = sum(scores.values())
+    return total_score, scores
+
+
+def _add_glossary_page(pdf: PoVReport):
+    pdf.add_page()
+    pdf.section_title("Glossary")
+
+    terms = [
+        ("p50 / p95 / p99", "Latency percentiles. p99 means 99% of requests completed within this time. Lower is better."),
+        ("TPS", "Transactions Per Second. Higher means more throughput capacity."),
+        ("QPS", "Queries Per Second. Similar to TPS but counts individual SQL statements."),
+        ("TiDB", "The distributed SQL database being evaluated. Compatible with MySQL protocol."),
+        ("TiKV", "TiDB's distributed key-value storage engine. Handles transactional (OLTP) reads and writes."),
+        ("TiFlash", "TiDB's columnar storage engine. Accelerates analytical (OLAP) queries without impacting OLTP performance."),
+        ("OLTP", "Online Transaction Processing. Short, frequent read/write operations (e.g., user signups, payments)."),
+        ("OLAP", "Online Analytical Processing. Complex queries over large datasets (e.g., reports, aggregations)."),
+        ("HTAP", "Hybrid Transactional/Analytical Processing. Running OLTP and OLAP simultaneously on the same data."),
+        ("RTO", "Recovery Time Objective. How quickly the system recovers after a failure."),
+        ("DDL", "Data Definition Language. Schema changes like CREATE TABLE, ADD INDEX, ALTER COLUMN."),
+        ("AUTO_RANDOM", "TiDB feature that randomizes primary key values to prevent write hotspots on a single region."),
+        ("Region", "TiDB's unit of data distribution. Each region holds ~96MB and is replicated across TiKV nodes."),
+        ("Optimistic / Pessimistic", "Transaction concurrency modes. Optimistic defers lock checks to commit time; pessimistic locks rows on write."),
+        ("READ COMMITTED / REPEATABLE READ", "Isolation levels controlling how concurrent transactions see each other's changes."),
+        ("Stale Read", "Reading slightly old data (e.g., 5 seconds stale) to reduce latency by avoiding consensus overhead."),
+        ("Resource Group", "TiDB's multi-tenant isolation feature. Limits CPU/IO per tenant to prevent noisy-neighbor issues."),
+    ]
+
+    col_w = [50, 124]
+    _draw_wrapped_table_header(pdf, col_w, ["Term", "Definition"])
+
+    for term, defn in terms:
+        row_ok = _draw_wrapped_table_row(
+            pdf,
+            col_w,
+            [term, defn],
+            styles=["B", ""],
+            font_sizes=[7.5, 7.5],
+            text_colors=[(0, 0, 0), (0, 0, 0)],
+            aligns=["L", "L"],
+            fill_color=LIGHT_GREY,
+            line_h=3.7,
+        )
+        if not row_ok:
+            pdf.add_page()
+            pdf.section_title("Glossary (Continued)")
+            _draw_wrapped_table_header(pdf, col_w, ["Term", "Definition"])
+            _draw_wrapped_table_row(
+                pdf, col_w, [term, defn],
+                styles=["B", ""],
+                font_sizes=[7.5, 7.5],
+                text_colors=[(0, 0, 0), (0, 0, 0)],
+                aligns=["L", "L"],
+                fill_color=LIGHT_GREY,
+                line_h=3.7,
+            )
+
+
+def _add_next_steps_page(pdf: PoVReport, metrics: dict, cfg: dict):
+    pdf.add_page()
+    pdf.section_title("Recommended Next Steps")
+
+    modules = metrics.get("modules", {})
+    summary = metrics.get("summary", {})
+    passed = int(summary.get("modules_passed", 0))
+    total = int(summary.get("modules_run", 0))
+    compat_pct = summary.get("mysql_compat_pct")
+
+    # Verdict
+    if total > 0 and passed == total:
+        verdict = "All selected modules passed. TiDB Cloud is ready for the next evaluation stage."
+        verdict_color = GREEN
+    elif total > 0 and passed >= total * 0.7:
+        verdict = "Most modules passed. Review failed modules before proceeding to pilot."
+        verdict_color = ORANGE
+    else:
+        verdict = "Several modules need attention. Address failures before advancing."
+        verdict_color = RED
+
+    pdf.set_font("Helvetica", "B", 11)
+    pdf.set_text_color(*verdict_color)
+    pdf.cell(0, 7, verdict, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    # Immediate actions
+    actions = []
+
+    # Check for failed modules
+    for mod_key in MODULE_DISPLAY:
+        mod = modules.get(mod_key, {})
+        if mod.get("status") == "failed":
+            actions.append(f"Investigate {MODULE_DISPLAY[mod_key]} failure: {mod.get('notes', 'see logs')}")
+
+    # Check for skipped modules
+    skipped = [MODULE_DISPLAY[k] for k in MODULE_DISPLAY
+               if modules.get(k, {}).get("status") in ("not_run", "skipped")]
+    if skipped:
+        actions.append(f"Consider enabling skipped modules for broader coverage: {', '.join(skipped[:3])}")
+
+    # Compat gaps
+    if compat_pct is not None and compat_pct < 100:
+        actions.append(f"Address SQL compatibility gaps ({compat_pct:.0f}% compatible). Review fix guidance in the Compatibility section.")
+
+    # Scale recommendation
+    manifest = metrics.get("data_manifest", {})
+    if manifest.get("scale") == "small":
+        actions.append("Re-run at medium or large data scale for production-representative results.")
+
+    # Standard next steps
+    actions.extend([
+        "Share this report with stakeholders and schedule a review call with PingCAP SE.",
+        "Plan a pilot phase with production-representative data and query patterns.",
+        "Evaluate TiDB Cloud tier sizing based on observed TPS and latency requirements.",
+    ])
+
+    pdf.sub_title("Action Items")
+    for i, action in enumerate(actions, 1):
+        pdf.set_font("Helvetica", "", 9)
+        pdf.multi_cell(0, 5, f"{i}. {action}")
+        pdf.ln(1)
+
+    # What we didn't test
+    not_tested = []
+    for mod_key in MODULE_DISPLAY:
+        status = str(modules.get(mod_key, {}).get("status", "not_run")).lower()
+        if status in ("not_run", "skipped"):
+            not_tested.append((MODULE_DISPLAY[mod_key], MODULE_SCOPE_SUMMARY.get(mod_key, "")))
+
+    if not_tested:
+        pdf.ln(4)
+        pdf.sub_title("What Was Not Tested")
+        pdf.body_text(
+            "The following modules were not included in this run. Consider enabling them for a more comprehensive evaluation.",
+            size=8,
+        )
+        for label, scope in not_tested:
+            pdf.set_font("Helvetica", "B", 8)
+            pdf.cell(0, 4, f"  {label}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.set_font("Helvetica", "", 8)
+            pdf.multi_cell(0, 4, f"    {scope}")
+            pdf.ln(1)
 
 
 def _add_sql_compat_page(pdf: PoVReport, metrics: dict):

@@ -833,6 +833,8 @@ DATASET_BOOTSTRAP_STATUS="skipped"
 
 db_has_nonempty_data() {
   "${PYTHON}" - "${CONFIG_EFFECTIVE}" <<'PY'
+import json
+import os
 import sys
 import yaml
 import mysql.connector
@@ -861,9 +863,15 @@ try:
         "WHERE table_schema=%s ORDER BY table_name LIMIT 20",
         (db,),
     )
+    cur.execute(
+        "SELECT table_name FROM information_schema.tables "
+        "WHERE table_schema=%s ORDER BY table_name",
+        (db,),
+    )
     tables = [r[0] for r in cur.fetchall() if r and r[0]]
+    table_set = set(tables)
     has_data = False
-    for table in tables:
+    for table in tables[:50]:
         try:
             cur.execute(f"SELECT 1 FROM `{table}` LIMIT 1")
             if cur.fetchone():
@@ -871,6 +879,30 @@ try:
                 break
         except Exception:
             continue
+
+    # If a data manifest exists, require its table set to be present before
+    # skipping synthetic generation. This avoids false "data ready" positives
+    # when bootstrap-only seed tables exist but core workload schema is missing.
+    manifest_path = os.path.join("results", "data_manifest.json")
+    if has_data and os.path.exists(manifest_path):
+        try:
+            manifest = json.load(open(manifest_path, "r", encoding="utf-8")) or {}
+            counts = manifest.get("counts") or {}
+            if isinstance(counts, dict) and counts:
+                required_tables = [
+                    str(t) for t, v in counts.items()
+                    if isinstance(v, (int, float))
+                    and int(v) > 0
+                    and str(t).strip()
+                    and str(t) not in {"poc_seed_oltp", "poc_seed_olap"}
+                ]
+                if required_tables:
+                    missing = [t for t in required_tables if t not in table_set]
+                    if missing:
+                        has_data = False
+        except Exception:
+            # Keep legacy behavior if manifest is malformed.
+            pass
     conn.close()
     print("true" if has_data else "false")
 except Exception:
@@ -1001,6 +1033,7 @@ mods_cfg = cfg.get("modules") or {}
 module_rows = [
     ("00_customer_queries", ["customer_queries", "customer_query_validation"], "customer_queries"),
     ("01_baseline_perf", ["baseline_perf"], "latency"),
+    ("01b_user_growth", ["user_growth"], "latency"),
     ("02_elastic_scale", ["elastic_scale"], "latency"),
     ("03_high_availability", ["high_availability"], "latency"),
     ("03b_write_contention", ["write_contention"], "latency"),
@@ -1009,6 +1042,7 @@ module_rows = [
     ("06_mysql_compat", ["mysql_compat"], "compat"),
     ("07_data_import", ["data_import"], "import"),
     ("08_vector_search", ["vector_search"], "latency"),
+    ("09_tidb_features", ["tidb_features"], "latency"),
 ]
 
 def enabled(keys):
@@ -1165,6 +1199,7 @@ fi
 if [[ "${RUN_STANDARD_MODULES}" == "true" ]]; then
   run_module "5" "M0 — Customer Query Validation" "tests/00_customer_queries/validate_queries.py" "customer_queries,customer_query_validation"
   run_module "5" "M1 — Baseline OLTP Performance" "tests/01_baseline_perf/run.py" "baseline_perf"
+  run_module "5" "M1b— User Growth Ramp" "tests/01b_user_growth/run.py" "user_growth"
   run_module "6" "M2 — Elastic Auto-Scaling" "tests/02_elastic_scale/run.py" "elastic_scale"
   run_module "6" "M3 — High Availability" "tests/03_high_availability/run.py" "high_availability"
   run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention"
@@ -1173,6 +1208,7 @@ if [[ "${RUN_STANDARD_MODULES}" == "true" ]]; then
   run_module "8" "M6 — SQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
   run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import"
   run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search"
+  run_module "9" "M9 — TiDB Feature Showcase" "tests/09_tidb_features/run.py" "tidb_features"
 else
   step "7/10" "Scenario module suite"
   warn "Skipped M0-M8 module suite; performance mode executed via Workload Generator."

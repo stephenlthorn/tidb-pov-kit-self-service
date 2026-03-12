@@ -194,6 +194,7 @@ DEFAULT_CFG = {
     "modules": {
         "customer_queries": True,
         "baseline_perf": True,
+        "user_growth": True,
         "elastic_scale": True,
         "high_availability": False,
         "write_contention": True,
@@ -202,6 +203,7 @@ DEFAULT_CFG = {
         "mysql_compat": True,
         "data_import": True,
         "vector_search": False,
+        "tidb_features": True,
     },
     "pre_poc": {
         "scenario_template": "oltp_migration",
@@ -258,6 +260,7 @@ DEFAULT_CFG = {
 MODULE_ORDER = [
     "customer_queries",
     "baseline_perf",
+    "user_growth",
     "elastic_scale",
     "high_availability",
     "write_contention",
@@ -266,11 +269,13 @@ MODULE_ORDER = [
     "mysql_compat",
     "data_import",
     "vector_search",
+    "tidb_features",
 ]
 
 MODULE_LABELS = {
     "customer_queries": "M0 - Customer Query Validation",
     "baseline_perf": "M1 - Baseline OLTP Performance",
+    "user_growth": "M1b - User Growth Ramp",
     "elastic_scale": "M2 - Elastic Auto-Scaling",
     "high_availability": "M3 - High Availability",
     "write_contention": "M3b - Write Contention",
@@ -279,6 +284,7 @@ MODULE_LABELS = {
     "mysql_compat": "M6 - SQL Compatibility",
     "data_import": "M7 - Data Import",
     "vector_search": "M8 - Vector Search",
+    "tidb_features": "M9 - TiDB Feature Showcase",
 }
 
 MODULE_INSIGHTS = {
@@ -331,6 +337,29 @@ MODULE_INSIGHTS = {
         "focus": "AI/vector capability",
         "runs": "Creates VECTOR table/index, inserts embeddings, runs ANN and hybrid vector+SQL queries across concurrencies, and captures latency/QPS.",
         "value": "Validates vector workload readiness for AI use cases.",
+    },
+    "user_growth": {
+        "focus": "User-base growth scalability",
+        "runs": (
+            "Progressively expands the active user pool across three steps and runs the same "
+            "mixed OLTP workload at each step. Small: 1->100->1,000 users. "
+            "Medium: 1->1,000->10,000. Large: 1->10,000->50,000."
+        ),
+        "value": "Shows that TiDB absorbs organic user growth without manual sharding or re-provisioning.",
+    },
+    "tidb_features": {
+        "focus": "TiDB-specific feature capabilities",
+        "runs": (
+            "Eight sub-tests: optimistic vs pessimistic transaction mode, "
+            "READ COMMITTED vs REPEATABLE READ isolation, "
+            "TiFlash read-after-write replication lag, "
+            "range scan size impact (LIMIT 100 to 100,000), "
+            "stale reads (fresh vs 5s staleness), "
+            "resource group multi-tenant isolation, "
+            "clustered vs non-clustered index point-get, and "
+            "batch DML large transaction splitting."
+        ),
+        "value": "Demonstrates TiDB differentiators: flexible concurrency control, HTAP consistency guarantees, and scan performance.",
     },
 }
 
@@ -385,6 +414,24 @@ MODULE_DETAIL_NOTES = {
         "pass_signal": "Vector queries execute successfully with acceptable latency/QPS profile.",
         "artifacts": "Vector workload latency/QPS module metrics and status.",
     },
+    "user_growth": {
+        "validates": "Validates that throughput and latency remain stable as the active user pool grows.",
+        "pass_signal": "TPS grows proportionally and p99 remains within tier envelope at each user-count step.",
+        "artifacts": "Per-step TPS/p99 captured in results DB for user-growth ramp chart in PDF report.",
+    },
+    "tidb_features": {
+        "validates": (
+            "Transaction mode, isolation level, TiFlash read-after-write consistency, "
+            "range scan scaling, stale read latency reduction, resource group isolation, "
+            "clustered vs non-clustered index performance, and batch DML splitting."
+        ),
+        "pass_signal": (
+            "All eight sub-tests complete with measurable latency/TPS data. "
+            "TiFlash replication lag is recorded; stale reads show latency improvement; "
+            "resource groups demonstrate isolation; batch DML completes without timeout."
+        ),
+        "artifacts": "Per-phase TPS/p99 for each sub-test captured in results DB and PDF report.",
+    },
 }
 
 MODULE_SUITE_KEYS = {
@@ -393,20 +440,24 @@ MODULE_SUITE_KEYS = {
     "oltp_migration": [
         "customer_queries",
         "baseline_perf",
+        "user_growth",
         "elastic_scale",
         "write_contention",
         "online_ddl",
         "mysql_compat",
         "data_import",
+        "tidb_features",
     ],
     "htap_analytics": [
         "customer_queries",
         "baseline_perf",
+        "user_growth",
         "elastic_scale",
         "htap",
         "online_ddl",
         "mysql_compat",
         "data_import",
+        "tidb_features",
     ],
     "ai_vector": [
         "customer_queries",
@@ -417,6 +468,7 @@ MODULE_SUITE_KEYS = {
         "mysql_compat",
         "data_import",
         "vector_search",
+        "tidb_features",
     ],
     "smoke": [
         "baseline_perf",
@@ -431,7 +483,7 @@ MODULE_SUITES = {
         "description": "Use tier/scenario-aware defaults from the decision logic.",
     },
     "all": {
-        "label": "All Modules (M0-M8)",
+        "label": "All Modules (M0-M9)",
         "description": "Enable every module for full coverage.",
     },
     "oltp_migration": {
@@ -482,6 +534,7 @@ SCENARIO_CHIP_CLASSES = {
 MODULE_REPORT_LABELS = {
     "00_customer_queries": "M0 - Customer Query Validation",
     "01_baseline_perf": "M1 - Baseline OLTP Performance",
+    "01b_user_growth": "M1b - User Growth Ramp",
     "02_elastic_scale": "M2 - Elastic Auto-Scaling",
     "03_high_availability": "M3 - High Availability",
     "03b_write_contention": "M3b - Write Contention",
@@ -490,6 +543,7 @@ MODULE_REPORT_LABELS = {
     "06_mysql_compat": "M6 - SQL Compatibility",
     "07_data_import": "M7 - Data Import",
     "08_vector_search": "M8 - Vector Search",
+    "09_tidb_features": "M9 - TiDB Feature Showcase",
 }
 
 STATUS_LABELS = {

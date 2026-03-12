@@ -19,6 +19,7 @@ from lib.result_store import (
 MODULES = [
     "00_customer_queries",
     "01_baseline_perf",
+    "01b_user_growth",
     "02_elastic_scale",
     "03_high_availability",
     "03b_write_contention",
@@ -27,7 +28,22 @@ MODULES = [
     "06_mysql_compat",
     "07_data_import",
     "08_vector_search",
+    "09_tidb_features",
 ]
+
+
+def _load_cluster_info() -> dict:
+    """Attempt to query TiDB cluster metadata from the results config."""
+    info = {}
+    # Try to load from a cached cluster info file
+    path = os.path.join(os.path.dirname(__file__), "..", "results", "cluster_info.json")
+    if os.path.exists(path):
+        try:
+            with open(path) as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return info
 
 
 def collect() -> dict:
@@ -37,6 +53,7 @@ def collect() -> dict:
         "modules":      {},
         "summary":      {},
         "data_manifest": _load_manifest(),
+        "cluster_info": _load_cluster_info(),
         "source_unsupported_inventory": _load_source_unsupported_inventory(),
         "run_context": _load_run_context(),
         "workload_generator": _load_workload_generator_summary(),
@@ -144,6 +161,9 @@ def _get_phases_for_module(mod: str) -> list:
     """Return ordered phase names per module, preferring actual observed phases."""
     phase_map = {
         "01_baseline_perf": ["c8", "c16", "c32", "c64", "warm_steady", "point_get"],
+        "01b_user_growth": [
+            "ug_1", "ug_100", "ug_1000", "ug_10000", "ug_50000",
+        ],
         "02_elastic_scale": ["ramp_up", "sustain", "ramp_down"],
         "03_high_availability": ["warmup", "failure", "recovery"],
         "03b_write_contention": ["sequential", "autorand"],
@@ -152,6 +172,16 @@ def _get_phases_for_module(mod: str) -> list:
         "06_mysql_compat": [],
         "07_data_import": [],
         "08_vector_search": ["ann_conc1", "ann_conc4", "ann_conc8", "ann_conc16", "hybrid"],
+        "09_tidb_features": [
+            "txn_optimistic", "txn_pessimistic",
+            "iso_read_committed", "iso_repeatable_read",
+            "tiflash_raw_write", "tiflash_raw_read",
+            "range_100", "range_1000", "range_10000", "range_100000",
+            "stale_fresh", "stale_5s",
+            "rg_high", "rg_low",
+            "idx_nonclustered", "idx_clustered",
+            "batch_dml_single", "batch_dml_split",
+        ],
     }
     default_phases = phase_map.get(mod, [])
     observed = _get_observed_phases(mod)

@@ -74,6 +74,12 @@ SCALE_CONFIG = {
     },
 }
 
+DURATION_MULTIPLIER = {
+    "small": 1.0,
+    "medium": 1.5,
+    "large": 2.0,
+}
+
 BATCH = 1000  # rows per INSERT
 
 
@@ -509,7 +515,7 @@ def main():
     print(f"  Run Mode: {run_mode} | Schema Mode: {schema_mode}")
     print(f"{'='*60}\n")
 
-    print("[1/2] Creating database and schemas...")
+    print("[1/3] Creating database and schemas...")
     create_database_if_missing(tidb_cfg)
     conn = get_connection(tidb_cfg, autocommit=True)
     cur = conn.cursor()
@@ -537,6 +543,13 @@ def main():
                 cur.execute(s)
     print("  Schemas created.")
 
+    # Capture cluster metadata for report
+    try:
+        from lib.db_utils import capture_cluster_info
+        capture_cluster_info(tidb_cfg)
+    except Exception:
+        pass
+
     primary_table = "users" if industry_key == INDUSTRY_DEFAULT else industry_primary_table(industry_key)
     if args.skip_if_exists and table_exists(conn, primary_table):
         cur.execute(f"SELECT COUNT(*) FROM {primary_table}")
@@ -553,7 +566,7 @@ def main():
             )
             return
 
-    print("\n[2/2] Inserting data...")
+    print("\n[2/3] Inserting data...")
     t_start = time.time()
 
     user_count = counts["users"]
@@ -625,6 +638,23 @@ def main():
                 ["tenant_id", "data_type", "payload"],
                 gen_tenant_data(counts["tenant_data"], tenant_count),
                 counts["tenant_data"], "tenant_data")
+
+    # Update optimizer statistics for all populated tables
+    print("\n[3/3] Analyzing tables for optimal query plans...")
+    tables_to_analyze = []
+    if industry_key == INDUSTRY_DEFAULT:
+        tables_to_analyze = ["users", "accounts", "transactions", "transaction_items", "audit_log"]
+    else:
+        tables_to_analyze = [spec["table"] for spec in seed_specs] if 'seed_specs' in dir() else []
+    tables_to_analyze += ["sessions", "events", "metrics", "tenants", "tenant_users", "tenant_data"]
+
+    for tbl in tables_to_analyze:
+        try:
+            print(f"  ANALYZE TABLE {tbl}...", end=" ")
+            cur.execute(f"ANALYZE TABLE `{tbl}`")
+            print("done")
+        except Exception as e:
+            print(f"warning: {e}")
 
     conn.close()
     total_time = time.time() - t_start
