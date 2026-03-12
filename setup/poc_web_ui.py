@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Dict, List, Tuple
 
 try:
-    from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+    from flask import Flask, flash, jsonify, redirect, render_template, request, send_file, url_for
 except ModuleNotFoundError:
     print(
         "Missing dependency: flask. Install dependencies first "
@@ -65,9 +65,8 @@ METRICS_JSON = RESULTS_DIR / "metrics_summary.json"
 RUN_LOG = RESULTS_DIR / "web_ui_run.log"
 RUN_PID = RESULTS_DIR / "web_ui_run.pid"
 RUN_META = RESULTS_DIR / "web_ui_run.meta.json"
-AUTH_DB = RESULTS_DIR / "auth.db"
-DEFAULT_INVITE_TTL_DAYS = 14
 MAX_INVITE_TTL_DAYS = 3650
+STATE_DB = RESULTS_DIR / "app_state.db"
 S3_PROJECT_SLUG = str(os.environ.get("S3_ARTIFACTS_PROJECT", "default")).strip() or "default"
 STORAGE_HEALTH_STATE_KEY = "storage_health_state"
 AWS_RUNNER_STATE_KEY = "aws_runner_state"
@@ -101,8 +100,6 @@ from load.tidb_blaster import (  # type: ignore  # noqa: E402
     list_recent_runs,
     normalize_blaster_config,
 )
-from werkzeug.security import check_password_hash, generate_password_hash
-
 try:
     import psycopg
     from psycopg.rows import dict_row
@@ -292,51 +289,71 @@ MODULE_INSIGHTS = {
         "focus": "Customer SQL validity",
         "runs": "Executes EXPLAIN FORMAT='brief' for each query in customer_queries and records pass/fail with planner output.",
         "value": "Validates migration SQL before load/perf testing starts.",
+        "business_value": "De-risks the migration by confirming your existing queries run on TiDB before any data is moved. Avoids costly surprises discovered late in the project.",
+        "technical_value": "Runs EXPLAIN on each customer-provided SQL statement. Catches syntax gaps, unsupported functions, and planner errors early so engineers can remediate before performance testing begins.",
     },
     "baseline_perf": {
         "focus": "OLTP baseline",
         "runs": "Runs OLTP workload at configured concurrency levels, captures warm steady-state metrics, and runs a dedicated point-get phase for low-latency key lookups. Optional side-by-side target comparison is included when supported.",
         "value": "Establishes migration baseline and throughput/latency envelope.",
+        "business_value": "Gives stakeholders concrete evidence that TiDB meets or exceeds current database performance — the core PoV success criteria. Enables direct before/after comparison against your existing Aurora MySQL or RDS environment.",
+        "technical_value": "Measures p50/p95/p99 latency and TPS across configured concurrency levels. Includes a warm steady-state phase and a dedicated point-get micro-latency benchmark for single-row primary-key lookups. Side-by-side comparison supported when a comparison target is configured.",
     },
     "elastic_scale": {
         "focus": "Scale headroom",
         "runs": "Ramps load from baseline to 4x, sustains, then ramps down while collecting time-series TPS and latency.",
         "value": "Shows autoscaling behavior under demand spikes.",
+        "business_value": "Demonstrates that TiDB Cloud scales capacity on-demand to handle traffic spikes without pre-provisioning or manual intervention — directly reducing over-provisioning costs and on-call risk during peak events.",
+        "technical_value": "Ramps concurrent load from baseline to 4x, sustains peak, then ramps down. Captures TPS and p99 latency time-series to show how throughput tracks load changes and whether latency degrades gracefully under pressure.",
     },
     "high_availability": {
         "focus": "Recovery behavior",
         "runs": "Performs warmup, simulated failure window, and recovery observation; estimates recovery timing from workload telemetry.",
         "value": "Demonstrates resilience and recovery expectations.",
+        "business_value": "Validates that TiDB Cloud meets enterprise RTO requirements without manual failover steps. Reduces risk of SLA breaches during infrastructure failures — critical for production sign-off.",
+        "technical_value": "Simulates an application-level connection disruption, measures how quickly the workload recovers to stable throughput, and estimates RTO from telemetry markers. Not a cloud control-plane node kill — pair with backup/restore drill for full RTO evidence.",
     },
     "write_contention": {
         "focus": "Hotspot mitigation",
         "runs": "Compares sequential key UPSERT vs AUTO_RANDOM under high concurrency and reports p99 delta plus contention diagnostics.",
         "value": "Shows write hotspot risk and mitigation approach.",
+        "business_value": "Addresses one of the most common migration failure modes: sequential primary keys creating write hotspots that bottleneck throughput. Shows the path to fix it without application rewrites.",
+        "technical_value": "Runs identical write workloads with sequential (AUTO_INCREMENT) vs distributed (AUTO_RANDOM) primary keys under high concurrency. Reports p99 delta and TPS improvement to quantify the hotspot mitigation benefit.",
     },
     "htap": {
         "focus": "HTAP isolation",
         "runs": "Runs OLTP workload alone, then OLTP + analytical queries routed to TiFlash; compares OLTP degradation and checks TiFlash readiness.",
         "value": "Proves analytics coexist with transactional workload.",
+        "business_value": "Eliminates the need for a separate analytics database or ETL pipeline. Real-time analytics on live transactional data without impacting application performance — reducing infrastructure cost and operational complexity.",
+        "technical_value": "Runs OLTP-only baseline, then concurrently routes analytical queries to TiFlash columnar replicas while OLTP continues on TiKV. Measures OLTP p99 degradation under concurrent analytics to confirm isolation is working.",
     },
     "online_ddl": {
         "focus": "Zero-downtime schema change",
         "runs": "Runs DDL operations (add column/index, modify column) with concurrent OLTP load and tracks DDL duration + p99 impact.",
         "value": "Demonstrates online schema evolution without app downtime.",
+        "business_value": "Removes the maintenance window requirement for schema changes. Teams can deploy schema updates during business hours without scheduling downtime — accelerating development velocity and reducing deployment risk.",
+        "technical_value": "Executes ADD COLUMN, ADD INDEX, and MODIFY COLUMN while the OLTP workload runs concurrently. Records DDL duration and tracks p99 latency impact during each operation to confirm non-blocking behavior.",
     },
     "mysql_compat": {
         "focus": "Migration compatibility",
         "runs": "Executes TiDB SQL checks and source unsupported-feature inventory for MySQL/PostgreSQL/SQL Server when configured.",
         "value": "Quantifies compatibility gaps and remediation scope before migration.",
+        "business_value": "Gives the migration team a concrete compatibility score and a prioritized list of SQL changes needed before cutover. Reduces unknowns that typically cause project delays and cost overruns.",
+        "technical_value": "Runs the full TiDB SQL compatibility check suite and optionally inventories unsupported features on the source engine (MySQL, PostgreSQL, SQL Server). Results are scored as a percentage and exported with per-check fix guidance.",
     },
     "data_import": {
         "focus": "Migration ingest speed",
         "runs": "Generates CSV and benchmarks batched INSERT, LOAD DATA LOCAL INFILE, and IMPORT INTO (if available) with rows/s and GB/min metrics.",
         "value": "Provides ingestion strategy and throughput evidence.",
+        "business_value": "Establishes a realistic migration timeline based on measured ingestion speed. Helps the team choose the right import strategy and set accurate cutover window expectations with stakeholders.",
+        "technical_value": "Benchmarks three import paths — batched INSERT, LOAD DATA LOCAL INFILE, and TiDB's native IMPORT INTO — and reports rows/sec and GB/min for each. IMPORT INTO uses parallel distributed loading and is the recommended path for large datasets.",
     },
     "vector_search": {
         "focus": "AI/vector capability",
         "runs": "Creates VECTOR table/index, inserts embeddings, runs ANN and hybrid vector+SQL queries across concurrencies, and captures latency/QPS.",
         "value": "Validates vector workload readiness for AI use cases.",
+        "business_value": "Enables AI-powered features (semantic search, recommendations, RAG) on the same database as transactional data — eliminating a separate vector store and simplifying architecture for AI product teams.",
+        "technical_value": "Creates a VECTOR column with an HNSW index, inserts embedding vectors, and benchmarks approximate nearest-neighbor (ANN) search and hybrid vector+SQL queries across concurrency levels. Reports latency and QPS for the AI workload profile.",
     },
     "user_growth": {
         "focus": "User-base growth scalability",
@@ -346,6 +363,8 @@ MODULE_INSIGHTS = {
             "Medium: 1->1,000->10,000. Large: 1->10,000->50,000."
         ),
         "value": "Shows that TiDB absorbs organic user growth without manual sharding or re-provisioning.",
+        "business_value": "Proves TiDB can grow with your business from launch to scale without requiring re-architecture, manual sharding, or planned downtime. Critical for SaaS products where user growth is unpredictable.",
+        "technical_value": "Simulates organic user growth by progressively expanding the active user ID window across three steps while running the same mixed OLTP workload. Measures TPS and p99 at each step to show how TiDB absorbs load growth.",
     },
     "tidb_features": {
         "focus": "TiDB-specific feature capabilities",
@@ -360,6 +379,8 @@ MODULE_INSIGHTS = {
             "batch DML large transaction splitting."
         ),
         "value": "Demonstrates TiDB differentiators: flexible concurrency control, HTAP consistency guarantees, and scan performance.",
+        "business_value": "Demonstrates the TiDB-specific capabilities that differentiate it from standard MySQL — enabling use cases like multi-tenant SaaS isolation, real-time analytics, and high-scale write workloads that would require separate infrastructure on traditional databases.",
+        "technical_value": "Eight targeted sub-tests covering: transaction concurrency modes (optimistic/pessimistic), isolation levels (RC/RR), TiFlash replication lag measurement, range scan scaling, stale read latency reduction, resource group RU-based throttling, clustered vs non-clustered PK lookup performance, and batch DML splitting behavior.",
     },
 }
 
@@ -2029,7 +2050,7 @@ def default_storage_health_state() -> Dict:
     db_detail = (
         "Uses Postgres persistence (Supabase/Vercel Postgres)."
         if db_mode == "postgres"
-        else f"Using local SQLite at {AUTH_DB}."
+        else f"Using local SQLite at {STATE_DB}."
     )
     s3_detail = "S3 artifact storage is enabled." if s3_enabled() else "S3 artifact storage is disabled."
     return {
@@ -2072,23 +2093,6 @@ def save_storage_health_state(state: Dict) -> None:
 def run_storage_health_check() -> Dict:
     out = default_storage_health_state()
     out["checked_at"] = dt.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
-
-    # Check auth persistence connectivity.
-    try:
-        if using_postgres():
-            with pg_auth_conn() as conn:
-                row = conn.execute("SELECT 1 AS ok").fetchone()
-            db_ok = bool(row and int(row.get("ok", 0)) == 1)
-            out["database"]["ok"] = db_ok
-            out["database"]["detail"] = "Connected to Postgres auth store."
-        else:
-            with auth_conn() as conn:
-                conn.execute("SELECT 1").fetchone()
-            out["database"]["ok"] = True
-            out["database"]["detail"] = f"Connected to local SQLite auth store at {AUTH_DB}."
-    except Exception as e:
-        out["database"]["ok"] = False
-        out["database"]["detail"] = f"Auth store check failed: {e}"
 
     # Check S3 artifact storage with write/read probe.
     out["s3"]["enabled"] = s3_enabled()
@@ -2653,118 +2657,34 @@ def using_postgres() -> bool:
     return bool(database_url())
 
 
-def pg_auth_conn():
-    if psycopg is None:
-        raise RuntimeError("Postgres URL is set, but psycopg is not installed.")
-    return psycopg.connect(database_url(), row_factory=dict_row)
-
-
-def auth_conn() -> sqlite3.Connection:
+def _state_conn() -> sqlite3.Connection:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(AUTH_DB))
+    conn = sqlite3.connect(str(STATE_DB))
     conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS app_state (
+          key TEXT PRIMARY KEY,
+          value_json TEXT NOT NULL,
+          updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+        )
+        """
+    )
+    conn.commit()
     return conn
-
-
-def init_auth_db() -> None:
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS users (
-                  id BIGSERIAL PRIMARY KEY,
-                  email TEXT NOT NULL UNIQUE,
-                  password_hash TEXT NOT NULL,
-                  role TEXT NOT NULL CHECK (role IN ('admin','user')),
-                  is_active INTEGER NOT NULL DEFAULT 1,
-                  invited_by BIGINT,
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS invites (
-                  id BIGSERIAL PRIMARY KEY,
-                  code TEXT NOT NULL UNIQUE,
-                  email TEXT,
-                  role TEXT NOT NULL CHECK (role IN ('admin','user')) DEFAULT 'user',
-                  is_active INTEGER NOT NULL DEFAULT 1,
-                  max_uses INTEGER NOT NULL DEFAULT 1,
-                  used_count INTEGER NOT NULL DEFAULT 0,
-                  expires_at TEXT NOT NULL,
-                  created_by BIGINT,
-                  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS app_state (
-                  key TEXT PRIMARY KEY,
-                  value_json TEXT NOT NULL,
-                  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-                )
-                """
-            )
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code)")
-            conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-            conn.commit()
-        return
-
-    with auth_conn() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS users (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              email TEXT NOT NULL UNIQUE,
-              password_hash TEXT NOT NULL,
-              role TEXT NOT NULL CHECK(role IN ('admin','user')),
-              is_active INTEGER NOT NULL DEFAULT 1,
-              invited_by INTEGER,
-              created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS invites (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              code TEXT NOT NULL UNIQUE,
-              email TEXT,
-              role TEXT NOT NULL CHECK(role IN ('admin','user')) DEFAULT 'user',
-              is_active INTEGER NOT NULL DEFAULT 1,
-              max_uses INTEGER NOT NULL DEFAULT 1,
-              used_count INTEGER NOT NULL DEFAULT 0,
-              expires_at TEXT NOT NULL,
-              created_by INTEGER,
-              created_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS app_state (
-              key TEXT PRIMARY KEY,
-              value_json TEXT NOT NULL,
-              updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-            )
-            """
-        )
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_invites_code ON invites(code)")
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_users_email ON users(email)")
-        conn.commit()
 
 
 def _app_state_get(key: str) -> str | None:
     try:
         if using_postgres():
-            with pg_auth_conn() as conn:
+            if psycopg is None:
+                return None
+            with psycopg.connect(database_url(), row_factory=dict_row) as conn:
                 row = conn.execute("SELECT value_json FROM app_state WHERE key = %s", (key,)).fetchone()
                 if not row:
                     return None
                 return str(row.get("value_json", ""))
-        with auth_conn() as conn:
+        with _state_conn() as conn:
             row = conn.execute("SELECT value_json FROM app_state WHERE key = ?", (key,)).fetchone()
             if not row:
                 return None
@@ -2775,7 +2695,9 @@ def _app_state_get(key: str) -> str | None:
 
 def _app_state_set(key: str, value_json: str) -> None:
     if using_postgres():
-        with pg_auth_conn() as conn:
+        if psycopg is None:
+            return
+        with psycopg.connect(database_url(), row_factory=dict_row) as conn:
             conn.execute(
                 """
                 INSERT INTO app_state(key, value_json, updated_at)
@@ -2788,7 +2710,7 @@ def _app_state_set(key: str, value_json: str) -> None:
             conn.commit()
         return
 
-    with auth_conn() as conn:
+    with _state_conn() as conn:
         conn.execute(
             """
             INSERT INTO app_state(key, value_json, updated_at)
@@ -2801,459 +2723,15 @@ def _app_state_set(key: str, value_json: str) -> None:
         conn.commit()
 
 
-def normalize_email(raw: str) -> str:
-    return str(raw or "").strip().lower()
-
-
-def users_exist() -> bool:
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
-            return bool(row and int(row.get("c", 0)) > 0)
-    with auth_conn() as conn:
-        row = conn.execute("SELECT COUNT(1) AS c FROM users").fetchone()
-        return bool(row and int(row["c"]) > 0)
-
-
-def get_user_by_id(user_id: int | None) -> Dict | None:
-    if not user_id:
-        return None
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute(
-                "SELECT id, email, role, is_active, created_at FROM users WHERE id = %s",
-                (int(user_id),),
-            ).fetchone()
-        return dict(row) if row else None
-    with auth_conn() as conn:
-        row = conn.execute(
-            "SELECT id, email, role, is_active, created_at FROM users WHERE id = ?",
-            (int(user_id),),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def get_user_by_email(email: str) -> Dict | None:
-    normalized = normalize_email(email)
-    if not normalized:
-        return None
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, email, password_hash, role, is_active, created_at
-                FROM users
-                WHERE email = %s
-                """,
-                (normalized,),
-            ).fetchone()
-        return dict(row) if row else None
-    with auth_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT id, email, password_hash, role, is_active, created_at
-            FROM users
-            WHERE email = ?
-            """,
-            (normalized,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def create_user(email: str, password: str, role: str, invited_by: int | None = None) -> Tuple[bool, str]:
-    normalized = normalize_email(email)
-    if not normalized or "@" not in normalized:
-        return False, "Valid email is required."
-    if len(password or "") < 10:
-        return False, "Password must be at least 10 characters."
-    if role not in {"admin", "user"}:
-        role = "user"
-    pw_hash = generate_password_hash(password)
-    try:
-        if using_postgres():
-            with pg_auth_conn() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO users(email, password_hash, role, is_active, invited_by)
-                    VALUES (%s, %s, %s, 1, %s)
-                    """,
-                    (normalized, pw_hash, role, invited_by),
-                )
-                conn.commit()
-            return True, "User created."
-        with auth_conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO users(email, password_hash, role, is_active, invited_by)
-                VALUES (?, ?, ?, 1, ?)
-                """,
-                (normalized, pw_hash, role, invited_by),
-            )
-            conn.commit()
-        return True, "User created."
-    except Exception as e:
-        msg = str(e).lower()
-        if "unique" in msg or "duplicate" in msg:
-            return False, "Email is already registered."
-        return False, f"Unable to create user: {e}"
-
-
-def auth_user_from_session() -> Dict | None:
-    user_id = session.get("auth_user_id")
-    if not user_id:
-        return None
-    return get_user_by_id(int(user_id))
-
-
-def invite_expired(expires_at: str) -> bool:
-    try:
-        expiry = dt.datetime.fromisoformat(str(expires_at))
-    except Exception:
-        return True
-    return dt.datetime.utcnow() > expiry
-
-
-def create_invite(
-    created_by: int,
-    email: str,
-    role: str,
-    ttl_days: int,
-    max_uses: int,
-) -> Dict:
-    safe_role = role if role in {"admin", "user"} else "user"
-    normalized_email = normalize_email(email) if email else ""
-    ttl = max(1, min(MAX_INVITE_TTL_DAYS, int(ttl_days)))
-    max_uses_safe = max(1, min(100, int(max_uses)))
-    expires_at = (dt.datetime.utcnow() + dt.timedelta(days=ttl)).replace(microsecond=0).isoformat()
-    code = secrets.token_urlsafe(8).replace("-", "").replace("_", "").upper()[:12]
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute(
-                """
-                INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
-                VALUES (%s, %s, %s, 1, %s, 0, %s, %s)
-                RETURNING id
-                """,
-                (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
-            ).fetchone()
-            conn.commit()
-        invite_id = int(row["id"]) if row else 0
-    else:
-        with auth_conn() as conn:
-            conn.execute(
-                """
-                INSERT INTO invites(code, email, role, is_active, max_uses, used_count, expires_at, created_by)
-                VALUES (?, ?, ?, 1, ?, 0, ?, ?)
-                """,
-                (code, normalized_email or None, safe_role, max_uses_safe, expires_at, int(created_by)),
-            )
-            invite_id = int(conn.execute("SELECT last_insert_rowid() AS id").fetchone()["id"])
-            conn.commit()
-    return {
-        "id": invite_id,
-        "code": code,
-        "email": normalized_email,
-        "role": safe_role,
-        "max_uses": max_uses_safe,
-        "used_count": 0,
-        "expires_at": expires_at,
-        "is_active": 1,
-    }
-
-
-def get_invite_for_code(code: str) -> Dict | None:
-    normalized = str(code or "").strip().upper()
-    if not normalized:
-        return None
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute(
-                """
-                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_by, created_at
-                FROM invites
-                WHERE code = %s
-                """,
-                (normalized,),
-            ).fetchone()
-        return dict(row) if row else None
-    with auth_conn() as conn:
-        row = conn.execute(
-            """
-            SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_by, created_at
-            FROM invites
-            WHERE code = ?
-            """,
-            (normalized,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def consume_invite(invite_id: int) -> None:
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            row = conn.execute(
-                "SELECT used_count, max_uses FROM invites WHERE id = %s",
-                (int(invite_id),),
-            ).fetchone()
-            if not row:
-                return
-            used_count = int(row["used_count"]) + 1
-            max_uses = int(row["max_uses"])
-            is_active = 1 if used_count < max_uses else 0
-            conn.execute(
-                "UPDATE invites SET used_count = %s, is_active = %s WHERE id = %s",
-                (used_count, is_active, int(invite_id)),
-            )
-            conn.commit()
-        return
-
-    with auth_conn() as conn:
-        row = conn.execute(
-            "SELECT used_count, max_uses FROM invites WHERE id = ?",
-            (int(invite_id),),
-        ).fetchone()
-        if not row:
-            return
-        used_count = int(row["used_count"]) + 1
-        max_uses = int(row["max_uses"])
-        is_active = 1 if used_count < max_uses else 0
-        conn.execute(
-            "UPDATE invites SET used_count = ?, is_active = ? WHERE id = ?",
-            (used_count, is_active, int(invite_id)),
-        )
-        conn.commit()
-
-
-def list_users(limit: int = 200) -> List[Dict]:
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, email, role, is_active, created_at
-                FROM users
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (int(max(1, limit)),),
-            ).fetchall()
-        return [dict(row) for row in rows]
-    with auth_conn() as conn:
-        rows = conn.execute(
-            """
-            SELECT id, email, role, is_active, created_at
-            FROM users
-            ORDER BY id DESC
-            LIMIT ?
-            """,
-            (int(max(1, limit)),),
-        ).fetchall()
-    return [dict(row) for row in rows]
-
-
-def list_invites(limit: int = 200) -> List[Dict]:
-    if using_postgres():
-        with pg_auth_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
-                FROM invites
-                ORDER BY id DESC
-                LIMIT %s
-                """,
-                (int(max(1, limit)),),
-            ).fetchall()
-        out = [dict(row) for row in rows]
-    else:
-        with auth_conn() as conn:
-            rows = conn.execute(
-                """
-                SELECT id, code, email, role, is_active, max_uses, used_count, expires_at, created_at
-                FROM invites
-                ORDER BY id DESC
-                LIMIT ?
-                """,
-                (int(max(1, limit)),),
-            ).fetchall()
-        out = [dict(row) for row in rows]
-    for item in out:
-        item["expired"] = invite_expired(item.get("expires_at", ""))
-    return out
-
-
 def create_app(config_path: Path) -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
-    app.secret_key = os.environ.get("POV_UI_SECRET", "tidb-pov-local-ui-dev-change-me")
-    app.config["SESSION_COOKIE_HTTPONLY"] = True
-    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-    app.config["SESSION_COOKIE_SECURE"] = IS_VERCEL
-    app.config["PERMANENT_SESSION_LIFETIME"] = dt.timedelta(days=3650)
-    init_auth_db()
-
-    def current_user() -> Dict | None:
-        return auth_user_from_session()
-
-    def require_admin(user: Dict | None) -> bool:
-        return bool(user and user.get("role") == "admin" and int(user.get("is_active", 0)) == 1)
-
-    @app.before_request
-    def require_login() -> None | object:
-        session.permanent = True
-        endpoint = request.endpoint or ""
-        if endpoint == "static":
-            return None
-        public_endpoints = {
-            "login_route",
-            "login_post_route",
-            "signup_route",
-            "signup_post_route",
-            "setup_admin_route",
-            "setup_admin_post_route",
-        }
-        if endpoint in public_endpoints:
-            return None
-        if not users_exist():
-            return redirect(url_for("setup_admin_route"))
-        user = current_user()
-        if user:
-            return None
-        return redirect(url_for("login_route", next=request.full_path if request.query_string else request.path))
-
-    @app.get("/setup-admin")
-    def setup_admin_route():
-        if users_exist():
-            return redirect(url_for("login_route"))
-        return render_template("setup_admin.html")
-
-    @app.post("/setup-admin")
-    def setup_admin_post_route():
-        if users_exist():
-            flash("Admin already initialized. Please sign in.", "warning")
-            return redirect(url_for("login_route"))
-
-        email = normalize_email(request.form.get("email", ""))
-        password = request.form.get("password", "")
-        ok, msg = create_user(email, password, "admin")
-        if not ok:
-            flash(msg, "error")
-            return redirect(url_for("setup_admin_route"))
-
-        row = get_user_by_email(email)
-        if row:
-            session["auth_user_id"] = int(row["id"])
-        flash("Admin account created.", "success")
-        return redirect(url_for("index"))
-
-    @app.get("/login")
-    def login_route():
-        if current_user():
-            return redirect(url_for("index"))
-        if not users_exist():
-            return redirect(url_for("setup_admin_route"))
-        return render_template("login.html", next_url=str(request.args.get("next", "")).strip())
-
-    @app.post("/login")
-    def login_post_route():
-        if not users_exist():
-            return redirect(url_for("setup_admin_route"))
-        email = normalize_email(request.form.get("email", ""))
-        password = request.form.get("password", "")
-        row = get_user_by_email(email)
-        if not row or int(row["is_active"]) != 1:
-            flash("Invalid credentials.", "error")
-            return redirect(url_for("login_route"))
-        if not check_password_hash(str(row["password_hash"]), password):
-            flash("Invalid credentials.", "error")
-            return redirect(url_for("login_route"))
-        session["auth_user_id"] = int(row["id"])
-        next_url = str(request.form.get("next", "") or request.args.get("next", "")).strip()
-        if next_url and next_url.startswith("/"):
-            return redirect(next_url)
-        return redirect(url_for("index"))
-
-    @app.post("/logout")
-    def logout_route():
-        session.pop("auth_user_id", None)
-        flash("Signed out.", "success")
-        return redirect(url_for("login_route"))
-
-    @app.get("/signup")
-    def signup_route():
-        if not users_exist():
-            return redirect(url_for("setup_admin_route"))
-        invite_code = str(request.args.get("code", "")).strip().upper()
-        return render_template("signup.html", invite_code=invite_code)
-
-    @app.post("/signup")
-    def signup_post_route():
-        if not users_exist():
-            return redirect(url_for("setup_admin_route"))
-        email = normalize_email(request.form.get("email", ""))
-        password = request.form.get("password", "")
-        invite_code = str(request.form.get("invite_code", "")).strip().upper()
-
-        invite = get_invite_for_code(invite_code)
-        if not invite:
-            flash("Invite code is invalid.", "error")
-            return redirect(url_for("signup_route", code=invite_code))
-        if int(invite["is_active"]) != 1:
-            flash("Invite code is inactive.", "error")
-            return redirect(url_for("signup_route", code=invite_code))
-        if invite_expired(str(invite["expires_at"])):
-            flash("Invite code is expired.", "error")
-            return redirect(url_for("signup_route", code=invite_code))
-        if int(invite["used_count"]) >= int(invite["max_uses"]):
-            flash("Invite code usage limit reached.", "error")
-            return redirect(url_for("signup_route", code=invite_code))
-        invite_email = normalize_email(str(invite["email"] or ""))
-        if invite_email and invite_email != email:
-            flash("Invite code is restricted to a different email.", "error")
-            return redirect(url_for("signup_route", code=invite_code))
-
-        ok, msg = create_user(email, password, str(invite["role"]), invited_by=invite["created_by"])
-        if not ok:
-            flash(msg, "error")
-            return redirect(url_for("signup_route", code=invite_code))
-
-        consume_invite(int(invite["id"]))
-        row = get_user_by_email(email)
-        if row:
-            session["auth_user_id"] = int(row["id"])
-        flash("Account created.", "success")
-        return redirect(url_for("index"))
-
-    @app.post("/admin/create-invite")
-    def admin_create_invite_route():
-        user = current_user()
-        if not require_admin(user):
-            flash("Admin access required.", "error")
-            return redirect(url_for("index"))
-
-        invite_email = normalize_email(request.form.get("invite_email", ""))
-        invite_role = str(request.form.get("invite_role", "user")).strip().lower()
-        ttl_days = to_int(request.form.get("invite_ttl_days"), DEFAULT_INVITE_TTL_DAYS)
-        max_uses = to_int(request.form.get("invite_max_uses"), 1)
-        invite = create_invite(
-            created_by=int(user["id"]),
-            email=invite_email,
-            role=invite_role,
-            ttl_days=ttl_days,
-            max_uses=max_uses,
-        )
-        signup_url = f"{request.url_root.rstrip('/')}{url_for('signup_route')}?code={invite['code']}"
-        flash(
-            f"Invite created. Code: {invite['code']} | Signup link: {signup_url}",
-            "success",
-        )
-        return redirect(url_for("index") + "#admin")
 
     @app.get("/")
     def index():
-        user = current_user()
-        is_admin = require_admin(user)
         cfg = load_cfg(config_path)
         cfg["comparison_db"] = normalize_comparison_cfg(cfg.get("comparison_db"))
         st = run_status()
-        storage_health = get_storage_health_state() if is_admin else default_storage_health_state()
+        storage_health = get_storage_health_state()
         aws_runner_state = get_aws_runner_state()
         report_ready = report_artifact_ready()
         report_dashboard = build_report_dashboard()
@@ -3264,19 +2742,9 @@ def create_app(config_path: Path) -> Flask:
         selected_scenario = str(cfg.get("pre_poc", {}).get("scenario_template", "oltp_migration"))
         selected_industry = normalize_industry_key((cfg.get("industry") or {}).get("selected"))
         tiers_for_ui = visible_tiers_for_ui(selected_tier)
-        users = list_users(250) if is_admin else []
-        invites = list_invites(250) if is_admin else []
-        signup_base = f"{request.url_root.rstrip('/')}{url_for('signup_route')}"
-        for invite in invites:
-            invite["signup_url"] = f"{signup_base}?code={invite['code']}"
 
         return render_template(
             "poc_web_ui.html",
-            auth_user=user,
-            is_admin=is_admin,
-            admin_users=users,
-            admin_invites=invites,
-            signup_base_url=signup_base,
             cfg=cfg,
             report_ready=report_ready,
             report_dashboard=report_dashboard,
@@ -3326,7 +2794,6 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/save-config")
     def save_config_route():
-        user = current_user()
         cfg = load_cfg(config_path)
 
         tidb = cfg.setdefault("tidb", {})
@@ -3413,7 +2880,7 @@ def create_app(config_path: Path) -> Flask:
         tco["engineer_annual_cost"] = to_int(request.form.get("tco_engineer_annual_cost"), 180000)
         tco["sharding_eng_fraction"] = to_float(request.form.get("tco_sharding_eng_fraction"), 0.25)
 
-        apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
+        apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=True)
         username_warning = tidb_username_format_warning(cfg)
 
         save_cfg(config_path, cfg)
@@ -3768,11 +3235,6 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/check-storage-health")
     def check_storage_health_route():
-        user = current_user()
-        if not require_admin(user):
-            flash("Admin access required.", "error")
-            return redirect(url_for("index") + "#overview")
-
         state = run_storage_health_check()
         save_storage_health_state(state)
         if state.get("overall") == "ok":
@@ -3783,12 +3245,11 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/aws-runner-validate")
     def aws_runner_validate_route():
-        user = current_user() or {}
         cfg = load_cfg(config_path)
         if request.form:
-            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
+            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=True)
             save_cfg(config_path, cfg)
-        state = aws_validate_runner_environment(cfg, user_email=str(user.get("email") or ""))
+        state = aws_validate_runner_environment(cfg, user_email="")
         save_aws_runner_state(state)
         if state.get("validate_ok"):
             resolved = state.get("resolved") or {}
@@ -3809,16 +3270,15 @@ def create_app(config_path: Path) -> Flask:
 
     @app.post("/aws-runner-launch")
     def aws_runner_launch_route():
-        user = current_user() or {}
         cfg = load_cfg(config_path)
         if request.form:
-            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=require_admin(user))
+            apply_aws_runner_from_form(cfg, request.form, allow_locked_edit=True)
             save_cfg(config_path, cfg)
         runner = cfg.get("aws_runner") or {}
         if not runner.get("enabled"):
             flash("AWS runner is disabled in Manual Config. Enable it first.", "warning")
             return redirect(url_for("index") + "#manual-config")
-        state = aws_launch_runner(cfg, user_email=str(user.get("email") or ""))
+        state = aws_launch_runner(cfg, user_email="")
         save_aws_runner_state(state)
         launch = state.get("launch") or {}
         if state.get("last_error"):

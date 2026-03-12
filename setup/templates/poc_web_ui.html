@@ -1310,21 +1310,9 @@
       <button class="tab-btn" data-tab-btn="test-details"><span class="ico">[T]</span>Test Details</button>
       <button class="tab-btn" data-tab-btn="manual-config"><span class="ico">[M]</span>Manual Config</button>
       <button class="tab-btn" data-tab-btn="dashboards"><span class="ico">[D]</span>Dashboards</button>
-      {% if is_admin %}
-        <button class="tab-btn" data-tab-btn="admin"><span class="ico">[A]</span>Admin</button>
-      {% endif %}
       <button class="tab-btn" data-tab-btn="data-reset"><span class="ico">[R]</span>Data Reset</button>
     </nav>
 
-    <div class="sidebar-auth">
-      <div class="who">
-        <strong>{{ auth_user.email }}</strong>
-        role: {{ auth_user.role }}
-      </div>
-      <form method="post" action="/logout">
-        <button class="btn soft small" type="submit">Sign Out</button>
-      </form>
-    </div>
   </aside>
 
   <main class="main">
@@ -1332,12 +1320,6 @@
       <div>
         <h1>TiDB PoV Copilot</h1>
         <p>Structured workflow for fast setup, controlled execution, and report-driven outcomes.</p>
-      </div>
-      <div class="header-user">
-        <div class="who"><strong>{{ auth_user.email }}</strong><br/>{{ auth_user.role }}</div>
-        {% if is_admin %}
-          <a class="btn soft small" href="#admin" data-tab-jump="admin">Open Admin</a>
-        {% endif %}
       </div>
     </div>
 
@@ -1466,40 +1448,13 @@
               <input type="hidden" name="wiz_tests_touched" id="wiz_tests_touched" value="0" />
 
               <div class="pair-grid">
-                <div class="pair review-pair tone-blue">
-                  <div class="pk">Industry Description</div>
-                  <div class="pv" id="wiz_industry_desc">n/a</div>
-                </div>
                 <div class="pair review-pair tone-indigo">
                   <div class="pk">Primary Focus</div>
                   <div class="pv" id="wiz_industry_focus">n/a</div>
                 </div>
-                <div class="pair review-pair tone-violet">
-                  <div class="pk">Recommended Tests</div>
-                  <div class="pv" id="wiz_industry_modules">n/a</div>
-                </div>
               </div>
 
-              <div class="field">
-                <label>Workload Preset</label>
-                <div class="wizard-preset-grid">
-                  {% for key, meta in quickstart_workload_presets.items() %}
-                    {% set suite_key = quickstart_preset_suites.get(key, 'oltp_migration') %}
-                    {% set suite_meta = module_suites.get(suite_key, {}) %}
-                    <label class="wizard-preset-card">
-                      <span class="wizard-preset-top">
-                        <input type="radio" name="wiz_workload_preset" value="{{ key }}" {% if key == 'balanced_poc' %}checked{% endif %} />
-                        <span class="wizard-preset-head">
-                          <span class="wizard-preset-title">{{ meta.label }}</span>
-                          <span class="wizard-preset-suite">{{ suite_meta.get('label', suite_key) }}</span>
-                        </span>
-                      </span>
-                      <span class="wizard-preset-body">{{ meta.description }}</span>
-                    </label>
-                  {% endfor %}
-                </div>
-                <div class="tiny">Preset picks the default module suite. You can tune individual tests below.</div>
-              </div>
+              <input type="hidden" name="wiz_workload_preset" value="balanced_poc" />
 
               <div class="field">
                 <label>Tests to Run</label>
@@ -1525,7 +1480,6 @@
                 </div>
               </div>
               <div class="line"></div>
-              <div class="tiny">Scenario and module suite are inferred from selected tests. Presets are starting points and you can tune each test directly.</div>
             </div>
 
             <div class="wizard-step-pane" data-wizard-step="2">
@@ -1562,7 +1516,7 @@
                         value="{{ key }}"
                         data-default-port="{{ meta.default_port }}"
                         data-family="{{ meta.family }}"
-                        {% if cfg.comparison_db.target == key %}selected{% endif %}
+                        {% if (cfg.comparison_db.target or 'aurora_mysql') == key %}selected{% endif %}
                       >{{ meta.label }}</option>
                     {% endfor %}
                   </select>
@@ -1885,11 +1839,11 @@
             <div class="insight-card">
               <div class="title">{{ module_labels.get(key, key) }}</div>
               <div class="tag">{{ insight.focus if insight.focus else 'Module' }}</div>
-              <div class="kv"><strong>Runs:</strong> {{ insight.runs if insight.runs else 'No details available.' }}</div>
+              <div class="kv"><strong>Business Value:</strong> {{ insight.business_value if insight.business_value else insight.value }}</div>
+              <div class="kv"><strong>Technical Value:</strong> {{ insight.technical_value if insight.technical_value else insight.runs }}</div>
               <div class="kv"><strong>Validates:</strong> {{ detail.validates if detail.validates else 'Validation behavior documented in module run output.' }}</div>
               <div class="kv"><strong>Pass Signal:</strong> {{ detail.pass_signal if detail.pass_signal else 'Reviewed from module status and artifacts.' }}</div>
               <div class="kv"><strong>Artifacts:</strong> {{ detail.artifacts if detail.artifacts else 'Module artifacts in results/ and metrics summary.' }}</div>
-              <div class="kv"><strong>Value:</strong> {{ insight.value if insight.value else 'No value statement available.' }}</div>
             </div>
           {% endfor %}
         </div>
@@ -2319,10 +2273,6 @@
         <h2>Manual Configuration</h2>
         <p class="help">Set TiDB connection, optional comparison target, and exact tests to run. Workload tuning is included below in the Workload Generator section.</p>
 
-        <div class="planner-summary">
-          Configure everything here, then choose <strong>Save Configuration</strong> or <strong>Save and Run Scenario</strong>.
-        </div>
-
         <div class="actions-grid">
           <div><button class="btn soft small" type="button" data-scroll-target="manual-tidb-connection">TiDB Connection</button></div>
           <div><button class="btn soft small" type="button" data-scroll-target="manual-aws-runner">AWS Runner</button></div>
@@ -2382,121 +2332,87 @@
               <div class="field"><label>Auto Shutdown Minutes</label><input type="number" min="0" name="aws_auto_shutdown_minutes" value="{{ cfg.aws_runner.auto_shutdown_minutes }}" /></div>
             </div>
 
-            <div class="line"></div>
-            {% if is_admin %}
-              <h3 class="subhead">Managed By Admin (Locked)</h3>
-              <div class="pair-grid">
-                <div class="pair">
-                  <div class="pk">Account + Region</div>
-                  <div class="pv">{{ cfg.aws_runner.customer_account_id if cfg.aws_runner.customer_account_id else 'n/a' }} / {{ cfg.aws_runner.aws_region }}</div>
-                  <div class="tiny">Launch mode: {{ cfg.aws_runner.launch_mode }}</div>
-                </div>
-                <div class="pair">
-                  <div class="pk">Assume Role + External ID</div>
-                  <div class="pv">{{ cfg.aws_runner.customer_assume_role_arn if cfg.aws_runner.customer_assume_role_arn else 'n/a' }}</div>
-                  <div class="tiny">{{ cfg.aws_runner.external_id if cfg.aws_runner.external_id else 'n/a' }}</div>
-                </div>
-                <div class="pair">
-                  <div class="pk">Network</div>
-                  <div class="pv">{{ cfg.aws_runner.vpc_id if cfg.aws_runner.vpc_id else 'n/a' }}</div>
-                  <div class="tiny">Subnet {{ cfg.aws_runner.subnet_id if cfg.aws_runner.subnet_id else 'n/a' }} | SG {{ cfg.aws_runner.security_group_id if cfg.aws_runner.security_group_id else 'n/a' }}</div>
-                </div>
-                <div class="pair">
-                  <div class="pk">Runner Guardrails</div>
-                  <div class="pv">Max instances: {{ cfg.aws_runner.max_instances_per_run }}</div>
-                  <div class="tiny">Types: {{ cfg.aws_runner.allowed_instance_types | join(', ') }}</div>
-                </div>
-              </div>
-              <div class="tiny">Security-sensitive AWS trust/network fields are locked for non-admin users.</div>
-            {% else %}
-              <div class="tiny">AWS trust, account, and network settings are managed by your admin.</div>
-            {% endif %}
             <div class="tiny">Save configuration before running AWS actions so the launch uses your latest values.</div>
 
-            <div class="pair-grid">
-              <div class="pair">
-                <div class="pk">Last AWS Action</div>
-                <div class="pv">{{ aws_runner_state.last_action if aws_runner_state.last_action else 'none' }}</div>
-                <div class="tiny">Checked: {{ aws_runner_state.checked_at if aws_runner_state.checked_at else 'n/a' }}</div>
-              </div>
-              <div class="pair">
-                <div class="pk">Launch State</div>
-                <div class="pv">{{ aws_runner_state.launch.state if aws_runner_state.launch.state else 'not_launched' }}</div>
-                <div class="tiny">Run ID: {{ aws_runner_state.launch.run_id if aws_runner_state.launch.run_id else 'n/a' }}</div>
-              </div>
-              <div class="pair">
-                <div class="pk">Instances</div>
-                <div class="pv">
-                  {% if aws_runner_state.launch.instance_ids %}
-                    {{ aws_runner_state.launch.instance_ids | join(', ') }}
-                  {% else %}
-                    n/a
-                  {% endif %}
+            <details class="advanced-details">
+              <summary>Runner Status &amp; Network Details</summary>
+              <div class="advanced-content">
+                <div class="pair-grid">
+                  <div class="pair">
+                    <div class="pk">Account + Region</div>
+                    <div class="pv">{{ cfg.aws_runner.customer_account_id if cfg.aws_runner.customer_account_id else 'n/a' }} / {{ cfg.aws_runner.aws_region }}</div>
+                    <div class="tiny">Launch mode: {{ cfg.aws_runner.launch_mode }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Assume Role + External ID</div>
+                    <div class="pv">{{ cfg.aws_runner.customer_assume_role_arn if cfg.aws_runner.customer_assume_role_arn else 'n/a' }}</div>
+                    <div class="tiny">{{ cfg.aws_runner.external_id if cfg.aws_runner.external_id else 'n/a' }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Network</div>
+                    <div class="pv">{{ cfg.aws_runner.vpc_id if cfg.aws_runner.vpc_id else 'n/a' }}</div>
+                    <div class="tiny">Subnet {{ cfg.aws_runner.subnet_id if cfg.aws_runner.subnet_id else 'n/a' }} | SG {{ cfg.aws_runner.security_group_id if cfg.aws_runner.security_group_id else 'n/a' }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Guardrails</div>
+                    <div class="pv">Max instances: {{ cfg.aws_runner.max_instances_per_run }}</div>
+                    <div class="tiny">Types: {{ cfg.aws_runner.allowed_instance_types | join(', ') }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Last Action</div>
+                    <div class="pv">{{ aws_runner_state.last_action if aws_runner_state.last_action else 'none' }}</div>
+                    <div class="tiny">Checked: {{ aws_runner_state.checked_at if aws_runner_state.checked_at else 'n/a' }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Launch State</div>
+                    <div class="pv">{{ aws_runner_state.launch.state if aws_runner_state.launch.state else 'not_launched' }}</div>
+                    <div class="tiny">Run ID: {{ aws_runner_state.launch.run_id if aws_runner_state.launch.run_id else 'n/a' }}</div>
+                  </div>
+                  <div class="pair">
+                    <div class="pk">Resolved AMI</div>
+                    <div class="pv">{{ aws_runner_state.launch.ami_id if aws_runner_state.launch.ami_id else (aws_runner_state.resolved.ami_id if aws_runner_state.resolved else 'n/a') }}</div>
+                    {% if aws_runner_state.last_error %}
+                      <div class="tiny">Last error: {{ aws_runner_state.last_error }}</div>
+                    {% else %}
+                      <div class="tiny">Validation: {% if aws_runner_state.validate_ok %}passed{% else %}not passed{% endif %}</div>
+                    {% endif %}
+                  </div>
                 </div>
-                <div class="tiny">Type: {{ aws_runner_state.launch.instance_type if aws_runner_state.launch.instance_type else 'n/a' }}</div>
-              </div>
-              <div class="pair">
-                <div class="pk">Resolved AMI</div>
-                <div class="pv">{{ aws_runner_state.launch.ami_id if aws_runner_state.launch.ami_id else (aws_runner_state.resolved.ami_id if aws_runner_state.resolved else 'n/a') }}</div>
-                {% if aws_runner_state.last_error %}
-                  <div class="tiny">Last error: {{ aws_runner_state.last_error }}</div>
-                {% else %}
-                  <div class="tiny">Validation: {% if aws_runner_state.validate_ok %}passed{% else %}not passed{% endif %}</div>
+                {% if aws_runner_state.launch.instances %}
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>Instance ID</th><th>State</th><th>Private IP</th><th>Public IP</th></tr></thead>
+                      <tbody>
+                        {% for inst in aws_runner_state.launch.instances %}
+                          <tr>
+                            <td><code>{{ inst.instance_id }}</code></td>
+                            <td>{{ inst.state }}</td>
+                            <td>{{ inst.private_ip if inst.private_ip else 'n/a' }}</td>
+                            <td>{{ inst.public_ip if inst.public_ip else 'n/a' }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
+                {% endif %}
+                {% if aws_runner_state.details %}
+                  <div class="table-wrap">
+                    <table>
+                      <thead><tr><th>Check</th><th>Status</th><th>Detail</th></tr></thead>
+                      <tbody>
+                        {% for item in aws_runner_state.details %}
+                          <tr>
+                            <td>{{ item.name }}</td>
+                            <td>{% if item.ok %}<span class="pill-status pill-pass">ok</span>{% else %}<span class="pill-status pill-fail">fail</span>{% endif %}</td>
+                            <td>{{ item.detail }}</td>
+                          </tr>
+                        {% endfor %}
+                      </tbody>
+                    </table>
+                  </div>
                 {% endif %}
               </div>
-            </div>
-            {% if aws_runner_state.launch.instances %}
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Instance ID</th>
-                      <th>State</th>
-                      <th>Private IP</th>
-                      <th>Public IP</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for inst in aws_runner_state.launch.instances %}
-                      <tr>
-                        <td><code>{{ inst.instance_id }}</code></td>
-                        <td>{{ inst.state }}</td>
-                        <td>{{ inst.private_ip if inst.private_ip else 'n/a' }}</td>
-                        <td>{{ inst.public_ip if inst.public_ip else 'n/a' }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
-            {% if is_admin and aws_runner_state.details %}
-              <div class="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Check</th>
-                      <th>Status</th>
-                      <th>Detail</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {% for item in aws_runner_state.details %}
-                      <tr>
-                        <td>{{ item.name }}</td>
-                        <td>
-                          {% if item.ok %}
-                            <span class="pill-status pill-pass">ok</span>
-                          {% else %}
-                            <span class="pill-status pill-fail">fail</span>
-                          {% endif %}
-                        </td>
-                        <td>{{ item.detail }}</td>
-                      </tr>
-                    {% endfor %}
-                  </tbody>
-                </table>
-              </div>
-            {% endif %}
+            </details>
             <div class="actions-grid">
               <div><button class="btn soft" type="submit" formaction="/aws-runner-validate" formmethod="post">Validate AWS Runner</button></div>
               <div><button class="btn primary" type="submit" formaction="/aws-runner-launch" formmethod="post">Launch AWS Runner</button></div>
@@ -2521,7 +2437,7 @@
                       data-default-port="{{ meta.default_port }}"
                       data-family="{{ meta.family }}"
                       data-supported="{{ 'true' if meta.runner_supported else 'false' }}"
-                      {% if cfg.comparison_db.target == key %}selected{% endif %}
+                      {% if (cfg.comparison_db.target or 'aurora_mysql') == key %}selected{% endif %}
                     >{{ meta.label }}</option>
                   {% endfor %}
                 </select>
@@ -2680,7 +2596,7 @@
           </div>
 
           <div class="config-section">
-            <h3>Scenario and Test Profile</h3>
+            <h3>Test Profile</h3>
             <div class="grid cols-4">
               <div class="field">
                 <label>Scenario Template</label>
@@ -2716,72 +2632,59 @@
               </div>
             </div>
             <div class="grid cols-4">
+              <div class="field"><label>Duration (seconds)</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
+              <div class="field"><label>Concurrency Levels</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
               <div class="field">
                 <label>Run Mode</label>
                 <select name="test_run_mode">
                   <option value="validation" {% if cfg.test.run_mode == 'validation' %}selected{% endif %}>validation</option>
                   <option value="performance" {% if cfg.test.run_mode == 'performance' %}selected{% endif %}>performance</option>
                 </select>
-                <div class="tiny">Validation mode is the default broad PoC flow.</div>
               </div>
               <div class="field">
-                <label>Schema Mode</label>
-                <select name="test_schema_mode">
-                  <option value="tidb_optimized" {% if cfg.test.schema_mode == 'tidb_optimized' %}selected{% endif %}>tidb_optimized</option>
-                  <option value="mysql_compatible" {% if cfg.test.schema_mode == 'mysql_compatible' %}selected{% endif %}>mysql_compatible</option>
-                </select>
-                <div class="tiny">TiDB optimized mode applies TiDB-friendly key options.</div>
-              </div>
-              <div class="field"></div>
-              <div class="field"></div>
-            </div>
-            <div class="grid cols-4">
-              <div class="field"><label>Duration Seconds</label><input type="number" name="test_duration_seconds" value="{{ cfg.test.duration_seconds }}" /></div>
-              <div class="field"><label>Concurrency Levels</label><input type="text" name="test_concurrency_levels" value="{{ cfg.test.concurrency_levels | join(',') }}" /></div>
-              <div class="field"><label>Ramp Duration Seconds</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
-              <div class="field"><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
-            </div>
-            <div class="grid cols-4">
-              <div class="field"><label>Warm Phase Enabled</label>
-                <select name="test_warm_phase_enabled">
-                  <option value="true" {% if cfg.test.warm_phase_enabled %}selected{% endif %}>true</option>
-                  <option value="false" {% if not cfg.test.warm_phase_enabled %}selected{% endif %}>false</option>
-                </select>
-              </div>
-              <div class="field"><label>Warm Phase Duration Seconds</label><input type="number" min="30" name="test_warm_phase_duration_seconds" value="{{ cfg.test.warm_phase_duration_seconds }}" /></div>
-              <div class="field"><label>Warm Phase Concurrency</label><input type="number" min="1" name="test_warm_phase_concurrency" value="{{ cfg.test.warm_phase_concurrency }}" /></div>
-              <div class="field"><label>Point-Get Phase Enabled</label>
-                <select name="test_point_get_phase_enabled">
-                  <option value="true" {% if cfg.test.point_get_phase_enabled %}selected{% endif %}>true</option>
-                  <option value="false" {% if not cfg.test.point_get_phase_enabled %}selected{% endif %}>false</option>
-                </select>
+                <label>Import Methods</label>
+                <div class="check-wrap">
+                  {% for key, label in import_method_labels.items() %}
+                    <label class="check"><input type="checkbox" name="test_import_method_{{ key }}" {% if key in cfg.test.import_methods %}checked{% endif %} /> {{ label }}</label>
+                  {% endfor %}
+                </div>
               </div>
             </div>
-            <div class="grid cols-4">
-              <div class="field"><label>Point-Get Duration Seconds</label><input type="number" min="30" name="test_point_get_duration_seconds" value="{{ cfg.test.point_get_duration_seconds }}" /></div>
-              <div class="field"><label>Point-Get Concurrency</label><input type="number" min="1" name="test_point_get_concurrency" value="{{ cfg.test.point_get_concurrency }}" /></div>
-              <div class="field"></div>
-              <div class="field"></div>
-            </div>
-            <div class="grid cols-3">
-              <div class="field"><label>Read Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_read_weight_multiplier" value="{{ cfg.test.read_weight_multiplier }}" /></div>
-              <div class="field"><label>Write Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_write_weight_multiplier" value="{{ cfg.test.write_weight_multiplier }}" /></div>
-              <div class="field"><label>Import Batch Size</label><input type="number" min="100" name="test_import_batch_size" value="{{ cfg.test.import_batch_size }}" /></div>
-            </div>
-            <div class="grid cols-3">
-              <div class="field"><label>IMPORT INTO Threads (0=auto)</label><input type="number" min="0" name="test_import_into_threads" value="{{ cfg.test.import_into_threads }}" /></div>
-              <div class="field"><label>IMPORT Source Size (GB, optional)</label><input type="number" step="0.01" min="0" name="test_import_source_size_gb" value="{{ cfg.test.import_source_size_gb }}" /></div>
-              <div class="field"><label>IMPORT INTO Source URI</label><input type="text" name="test_import_into_source_uri" value="{{ cfg.test.import_into_source_uri }}" placeholder="s3://bucket/path/*.csv or __AUTO_DATASET_OLTP__" /></div>
-            </div>
-            <div class="field">
-              <label>Import Methods</label>
-              <div class="check-wrap">
-                {% for key, label in import_method_labels.items() %}
-                  <label class="check"><input type="checkbox" name="test_import_method_{{ key }}" {% if key in cfg.test.import_methods %}checked{% endif %} /> {{ label }}</label>
-                {% endfor %}
+
+            <details class="advanced-details">
+              <summary>Advanced Test Settings</summary>
+              <div class="advanced-content">
+                <div class="grid cols-4">
+                  <div class="field">
+                    <label>Schema Mode</label>
+                    <select name="test_schema_mode">
+                      <option value="tidb_optimized" {% if cfg.test.schema_mode == 'tidb_optimized' %}selected{% endif %}>tidb_optimized</option>
+                      <option value="mysql_compatible" {% if cfg.test.schema_mode == 'mysql_compatible' %}selected{% endif %}>mysql_compatible</option>
+                    </select>
+                    <div class="tiny">tidb_optimized applies TiDB-friendly key options.</div>
+                  </div>
+                  <div class="field"><label>Ramp Duration (seconds)</label><input type="number" name="test_ramp_duration_seconds" value="{{ cfg.test.ramp_duration_seconds }}" /></div>
+                  <div class="field"><label>Import Rows</label><input type="number" name="test_import_rows" value="{{ cfg.test.import_rows }}" /></div>
+                  <div class="field"><label>Import Batch Size</label><input type="number" min="100" name="test_import_batch_size" value="{{ cfg.test.import_batch_size }}" /></div>
+                </div>
+                <div class="grid cols-4">
+                  <div class="field"><label>Warm Phase Duration (sec)</label><input type="number" min="30" name="test_warm_phase_duration_seconds" value="{{ cfg.test.warm_phase_duration_seconds }}" /></div>
+                  <div class="field"><label>Point-Get Duration (sec)</label><input type="number" min="30" name="test_point_get_duration_seconds" value="{{ cfg.test.point_get_duration_seconds }}" /></div>
+                  <div class="field"><label>Point-Get Concurrency</label><input type="number" min="1" name="test_point_get_concurrency" value="{{ cfg.test.point_get_concurrency }}" /></div>
+                  <div class="field"><label>Read Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_read_weight_multiplier" value="{{ cfg.test.read_weight_multiplier }}" /></div>
+                </div>
+                <div class="grid cols-3">
+                  <div class="field"><label>Write Weight Multiplier</label><input type="number" step="0.1" min="0.1" name="test_write_weight_multiplier" value="{{ cfg.test.write_weight_multiplier }}" /></div>
+                  <div class="field"><label>IMPORT INTO Threads (0=auto)</label><input type="number" min="0" name="test_import_into_threads" value="{{ cfg.test.import_into_threads }}" /></div>
+                  <div class="field"><label>IMPORT INTO Source URI</label><input type="text" name="test_import_into_source_uri" value="{{ cfg.test.import_into_source_uri }}" placeholder="s3://bucket/path/*.csv or __AUTO_DATASET_OLTP__" /></div>
+                </div>
+
+                <input type="hidden" name="test_warm_phase_enabled" value="true" />
+                <input type="hidden" name="test_point_get_phase_enabled" value="true" />
+                <input type="hidden" name="test_warm_phase_concurrency" value="{{ cfg.test.warm_phase_concurrency }}" />
+                <input type="hidden" name="test_import_source_size_gb" value="{{ cfg.test.import_source_size_gb }}" />
               </div>
-              <div class="tiny">For strongest benchmark signal, use <code>IMPORT INTO</code> with a remote S3 source and keep source URI on <code>__AUTO_DATASET_OLTP__</code>.</div>
-            </div>
+            </details>
           </div>
 
           <div class="config-section">
@@ -2825,170 +2728,11 @@
 
           <div class="actions-grid">
             <div><button class="btn" type="submit" name="save_action" value="save">Save Configuration</button></div>
-            <div>
-              <label class="check"><input type="checkbox" name="manual_allow_blocked" /> Allow blocked run (dry-run only)</label>
-            </div>
             <div><button class="btn primary" type="submit" name="save_action" value="save_and_run">Save and Run Scenario</button></div>
           </div>
         </form>
       </div>
     </section>
-
-    {% if is_admin %}
-    <section class="tab-pane" data-tab-pane="admin">
-      <div class="panel">
-        <h2>Admin Access</h2>
-        <p class="help">Create invite links or invite codes. Users can sign up with email + password + invite code.</p>
-
-        <div class="config-section">
-          <h3>Storage Health</h3>
-          <div class="pair-grid">
-            <div class="pair">
-              <div class="pk">Auth Persistence</div>
-              <div class="pv">
-                {% if storage_health.database.ok %}
-                  <span class="pill-status pill-pass">healthy</span>
-                {% elif storage_health.database.mode == 'postgres' %}
-                  <span class="pill-status pill-fail">unreachable</span>
-                {% else %}
-                  <span class="pill-status pill-na">local sqlite</span>
-                {% endif %}
-              </div>
-              <div class="tiny">{{ storage_health.database.detail }}</div>
-            </div>
-            <div class="pair">
-              <div class="pk">S3 Artifacts</div>
-              <div class="pv">
-                {% if storage_health.s3.enabled and storage_health.s3.ok %}
-                  <span class="pill-status pill-pass">healthy</span>
-                {% elif storage_health.s3.enabled %}
-                  <span class="pill-status pill-fail">check failed</span>
-                {% else %}
-                  <span class="pill-status pill-na">disabled</span>
-                {% endif %}
-              </div>
-              <div class="tiny">{{ storage_health.s3.detail }}</div>
-            </div>
-          </div>
-          <div class="actions-grid">
-            <form method="post" action="/check-storage-health"><button class="btn soft" type="submit">Run Storage Health Check</button></form>
-          </div>
-          <div class="tiny">Last checked: {{ storage_health.checked_at if storage_health.checked_at else 'not checked yet' }}</div>
-        </div>
-
-        <form method="post" action="/admin/create-invite">
-          <div class="grid cols-4">
-            <div class="field">
-              <label>Invite Email (optional)</label>
-              <input type="email" name="invite_email" placeholder="user@company.com" />
-            </div>
-            <div class="field">
-              <label>Role</label>
-              <select name="invite_role">
-                <option value="user" selected>User</option>
-                <option value="admin">Admin</option>
-              </select>
-            </div>
-            <div class="field">
-              <label>Expires In (days)</label>
-              <input type="number" min="1" max="3650" name="invite_ttl_days" value="365" />
-            </div>
-            <div class="field">
-              <label>Max Uses</label>
-              <input type="number" min="1" max="100" name="invite_max_uses" value="1" />
-            </div>
-          </div>
-          <div class="actions-grid">
-            <div><button class="btn primary" type="submit">Create Invite</button></div>
-          </div>
-        </form>
-
-        <div class="line"></div>
-        <h3 class="subhead">Signup Endpoint</h3>
-        <div class="tiny"><code>{{ signup_base_url }}</code></div>
-
-        <div class="line"></div>
-        <h3 class="subhead">Recent Invites</h3>
-        {% if admin_invites %}
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Email Scope</th>
-                  <th>Role</th>
-                  <th>Usage</th>
-                  <th>Expires</th>
-                  <th>Status</th>
-                  <th>Signup Link</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for inv in admin_invites %}
-                  <tr>
-                    <td><code>{{ inv.code }}</code></td>
-                    <td>{{ inv.email if inv.email else 'any email' }}</td>
-                    <td>{{ inv.role }}</td>
-                    <td>{{ inv.used_count }} / {{ inv.max_uses }}</td>
-                    <td>{{ inv.expires_at }}</td>
-                    <td>
-                      {% if inv.is_active and not inv.expired %}
-                        <span class="status-pill success">active</span>
-                      {% elif inv.expired %}
-                        <span class="status-pill danger">expired</span>
-                      {% else %}
-                        <span class="status-pill muted">inactive</span>
-                      {% endif %}
-                    </td>
-                    <td class="sql-cell"><code>{{ inv.signup_url }}</code></td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="empty-state">No invites created yet.</div>
-        {% endif %}
-
-        <div class="line"></div>
-        <h3 class="subhead">Users</h3>
-        {% if admin_users %}
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Email</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for u in admin_users %}
-                  <tr>
-                    <td>{{ u.id }}</td>
-                    <td>{{ u.email }}</td>
-                    <td>{{ u.role }}</td>
-                    <td>
-                      {% if u.is_active %}
-                        <span class="status-pill success">active</span>
-                      {% else %}
-                        <span class="status-pill danger">disabled</span>
-                      {% endif %}
-                    </td>
-                    <td>{{ u.created_at }}</td>
-                  </tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-        {% else %}
-          <div class="empty-state">No users found.</div>
-        {% endif %}
-      </div>
-    </section>
-    {% endif %}
 
     <section class="tab-pane" data-tab-pane="data-reset">
       <div class="panel">
