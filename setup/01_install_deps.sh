@@ -9,7 +9,9 @@ PYTHON="${PYTHON:-python3}"
 PIP="${PIP:-pip3}"
 
 echo "[deps] Installing Python requirements..."
-${PIP} install --quiet --upgrade pip
+# Upgrade pip if possible; ignore failure on rpm-managed pip (RECORD file missing)
+${PIP} install --quiet --upgrade pip --ignore-installed 2>/dev/null || \
+  ${PIP} install --quiet --upgrade pip 2>/dev/null || true
 ${PIP} install --quiet -r requirements.txt
 
 echo "[deps] Verifying key imports..."
