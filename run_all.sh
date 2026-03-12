@@ -138,6 +138,9 @@ S3_BUCKET="${POV_S3_BUCKET:-${S3_BUCKET:-${S3_ARTIFACTS_BUCKET:-}}}"
 S3_PREFIX="${POV_S3_PREFIX:-${S3_PREFIX:-${S3_ARTIFACTS_PREFIX:-tidb-pov}}}"
 S3_PROJECT="${POV_S3_PROJECT:-${S3_ARTIFACTS_PROJECT:-default}}"
 S3_REGION="${POV_S3_REGION:-${S3_REGION:-${AWS_REGION:-}}}"
+# Canonical PingCAP results bucket — used when no env var or config.yaml override is present
+POV_S3_CANONICAL_BUCKET="pingcap-tidb-pov-results-219248915861"
+POV_S3_CANONICAL_REGION="us-east-1"
 S3_RUN_TAG_DEFAULT="$(date -u +%Y%m%d_%H%M%S)_$(hostname | tr '[:upper:]' '[:lower:]' | tr -cs 'a-z0-9_-' '-')"
 S3_RUN_TAG="${POV_RUN_TAG:-${S3_RUN_TAG_DEFAULT}}"
 
@@ -333,7 +336,11 @@ echo "  Started          : $(date)"
 echo "  Log              : ${LOG_FILE}"
 if [[ "${S3_ENFORCED}" == "true" ]]; then
   echo "  S3 archive       : required"
-  echo "  S3 target        : s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/runs/${S3_RUN_TAG}/"
+  if [[ -n "${S3_BUCKET}" ]]; then
+    echo "  S3 target        : s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/runs/${S3_RUN_TAG}/"
+  else
+    echo "  S3 target        : (resolving from config.yaml / canonical default)"
+  fi
 else
   echo "  S3 archive       : optional"
 fi
@@ -366,6 +373,38 @@ if ! "${PYTHON}" -c "import boto3" &>/dev/null; then
   "${PYTHON}" -m pip install -q boto3
 fi
 ok "boto3 available"
+
+# Resolve S3 results settings: env vars > config.yaml pov_results > canonical defaults
+if [[ -f "${CONFIG}" ]]; then
+  _pov_s3="$("${PYTHON}" -c "
+import yaml, sys
+try:
+    cfg = yaml.safe_load(open('${CONFIG}')) or {}
+    pr = cfg.get('pov_results') or {}
+    print('|'.join([
+        str(pr.get('s3_bucket') or ''),
+        str(pr.get('s3_region') or ''),
+        str(pr.get('s3_prefix') or ''),
+        str(pr.get('s3_project') or ''),
+    ]))
+except Exception:
+    print('|||')
+" 2>/dev/null || echo "|||")"
+  _pcfg_bucket="${_pov_s3%%|*}";  _pov_rest="${_pov_s3#*|}"
+  _pcfg_region="${_pov_rest%%|*}"; _pov_rest="${_pov_rest#*|}"
+  _pcfg_prefix="${_pov_rest%%|*}"
+  _pcfg_project="${_pov_rest#*|}"
+  [[ -z "${S3_BUCKET}"  && -n "${_pcfg_bucket}"  ]] && S3_BUCKET="${_pcfg_bucket}"
+  [[ -z "${S3_REGION}"  && -n "${_pcfg_region}"  ]] && S3_REGION="${_pcfg_region}"
+  [[ "${S3_PREFIX}" == "tidb-pov" && -n "${_pcfg_prefix}"  ]] && S3_PREFIX="${_pcfg_prefix}"
+  [[ "${S3_PROJECT}" == "default"  && -n "${_pcfg_project}" ]] && S3_PROJECT="${_pcfg_project}"
+fi
+# Apply canonical defaults so S3 upload always has a destination
+S3_BUCKET="${S3_BUCKET:-${POV_S3_CANONICAL_BUCKET}}"
+S3_REGION="${S3_REGION:-${POV_S3_CANONICAL_REGION}}"
+if [[ "${S3_ENFORCED}" == "true" ]]; then
+  ok "S3 results bucket : s3://${S3_BUCKET}/${S3_PREFIX}/${S3_PROJECT}/"
+fi
 s3_preflight_required
 
 if [[ "${REPORT_ONLY}" == "true" || "${REPORT_JSON_ONLY}" == "true" ]]; then

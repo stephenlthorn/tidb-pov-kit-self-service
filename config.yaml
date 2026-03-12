@@ -1,68 +1,249 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# TiDB Cloud Self-Service PoV Kit — Configuration
-# Fill in your TiDB Cloud connection details below, then run: ./run_all.sh
-# ─────────────────────────────────────────────────────────────────────────────
-
-# TiDB Cloud connection (required)
 tidb:
-  host: "gateway01.us-east-1.prod.aws.tidbcloud.com"
+  host: gateway01.us-east-1.prod.aws.tidbcloud.com
   port: 4000
-  user: "root"
-  password: ""
-  database: "pov_test"
+  user: 38DNQbJgYyFSEVJ.root
+  password: WZ37TOUhg6NgzWEo
+  database: test
   ssl: true
-
-# Existing MySQL / Aurora for head-to-head comparison (optional)
-# Leave host blank to skip the comparison track entirely.
 comparison_db:
-  host: ""
-  port: 3306
-  user: ""
-  password: ""
-  database: ""
-  label: "Aurora MySQL"   # Label shown in report charts
-
-# Tier metadata (wizard can update this automatically)
+  enabled: false
+  target: rds_postgres
+  label: Aurora MySQL
+  host: ''
+  port: 5432
+  database: ''
+  schema: public
+  user: ''
+  password: ''
+  ssl: false
+  ssl_mode: require
+  sqlserver_driver: ODBC Driver 18 for SQL Server
+  sqlserver_encrypt: true
+  sqlserver_trust_server_certificate: false
+  connect_timeout_sec: 30
+  statement_timeout_sec: 60
+  retry_count: 1
+  retry_backoff_ms: 500
+  max_pool_size: 8
+  session_init_sql: ''
+  read_only_mode: true
+  parity_sample_size: 250
+  capture_explain_plans: true
+  include_tables: ''
+  exclude_tables: ''
+  tls_ca_path: ''
+  tls_cert_path: ''
+  tls_key_path: ''
+  mysql_sql_mode: ''
+  mysql_time_zone: UTC
+  mysql_tx_isolation: READ COMMITTED
+  pg_application_name: tidb_pov_comparison
+  pg_search_path: public
+  pg_lock_timeout_ms: 5000
+  sqlserver_command_timeout_sec: 60
+  sqlserver_application_intent: ReadWrite
+  sqlserver_mars: false
+  sqlserver_packet_size: 4096
 tier:
-  selected: "serverless"   # serverless | essential | premium | dedicated | byoc
-
-# ─── Test configuration ───────────────────────────────────────────────────────
+  selected: serverless
+  recommended: serverless
+  decision_tree_version: quickstart-wizard
+  decision_notes:
+  - 'Quickstart wizard profile: balanced_poc'
+  - 'Quickstart preset suite: oltp_migration'
+  - 'Quickstart selected tests: 9/10'
+  - Quickstart tests selected manually from wizard menu.
+aws_runner:
+  enabled: true
+  launch_mode: customer_assume_role
+  connectivity_mode: private_endpoint
+  aws_region: us-east-1
+  customer_account_id: '219248915861'
+  customer_assume_role_arn: arn:aws:iam::219248915861:role/TidbPovCustomerRunnerLaunchRole
+  external_id: tidbpov-56b91434026898ead6ec93666188eae8
+  vpc_id: vpc-0d2122788fc944c5c
+  subnet_id: subnet-08a374994d1a8c902
+  security_group_id: sg-01014111d2efb1ab2
+  runner_instance_profile_name: TidbPovRunnerInstanceRole
+  runner_role_arn: arn:aws:iam::219248915861:role/TidbPovRunnerInstanceRole
+  instance_size: small
+  allowed_instance_types:
+  - c7i.2xlarge
+  - c7i.4xlarge
+  - c7i.8xlarge
+  max_instances_per_run: 8
+  summary_upload_only: true
+  run_timeout_minutes: 180
+  auto_shutdown_minutes: 10
 test:
-  data_scale: "small"             # serverless default: small
+  data_scale: small
   duration_seconds: 120
-  concurrency_levels: [8, 16, 32]
+  concurrency_levels:
+  - 8
+  - 16
+  - 32
   ramp_duration_seconds: 300
-  workload_mix: "mixed"           # read_heavy | write_heavy | mixed
-
-# ─── Customer query injection (optional) ─────────────────────────────────────
-# Paste your top production queries here. Use ? for bind parameters.
-# Leave empty to use synthetic workload only.
+  workload_mix: mixed
+  import_rows: 250000
+  read_weight_multiplier: 1.2
+  write_weight_multiplier: 1.1
+  import_batch_size: 2500
+  import_methods:
+  - batched_insert
+  - load_data_infile
+  - import_into
+  run_mode: validation
+  pre_warm_enabled: true
+  pre_warm_duration_seconds: 60
+  pre_warm_concurrency: 8
+  warm_phase_enabled: true
+  warm_phase_duration_seconds: 120
+  warm_phase_concurrency: 16
+  import_into_threads: 1
 customer_queries: []
-#  - "SELECT * FROM transactions WHERE account_id = ? AND created_at > ?"
-#  - "UPDATE accounts SET balance = balance - ? WHERE id = ?"
-customer_query_ratio: 0.30        # 30% of load will use customer queries
-
-# ─── Modules to run ───────────────────────────────────────────────────────────
-# Wizard applies tier-aware defaults to results/config.resolved.yaml.
+customer_query_ratio: 0.3
 modules:
   customer_queries: true
   baseline_perf: true
   elastic_scale: true
-  high_availability: false   # Set true for Dedicated/BYOC or simulated HA probe
+  high_availability: true
   write_contention: true
-  htap: false                # Set true when TiFlash is provisioned and replicated
+  htap: true
   online_ddl: true
   mysql_compat: true
   data_import: true
-  vector_search: false       # Optional AI track
-
-# ─── Pre-PoC intake state (optional) ──────────────────────────────────────────
+  vector_search: true
 pre_poc:
-  scenario_template: "oltp_migration"  # oltp_migration | htap_analytics | ai_vector
-
-# ─── Report options ───────────────────────────────────────────────────────────
+  scenario_template: ai_vector
+  security:
+    items:
+    - id: shared_responsibility_ack
+      prompt: Has the team reviewed and accepted the shared responsibility model (customer
+        vs PingCAP boundaries)?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: data_residency_boundary
+      prompt: Can this PoC keep production-like data/backups within approved account
+        and region boundaries?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: network_controls
+      prompt: Can your team manage VPC, Security Group, and NACL controls needed for
+        this deployment?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: private_connectivity
+      prompt: Can you enforce private connectivity (Private Endpoint/PrivateLink or
+        VPC peering where required) without public routing?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: cmk_control
+      prompt: Can your security team manage AWS KMS CMKs and key lifecycle controls
+        for data at rest?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: iam_role_hygiene
+      prompt: Can elevated provisioning IAM roles be removed/disabled after bootstrap
+        (least-privilege runtime only)?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: jit_access
+      prompt: Can support access be enforced as customer-controlled Just-in-Time (bastion
+        + VPN enablement + scoped role)?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: auditability
+      prompt: Can CloudTrail and TiDB audit logs be retained in customer-controlled
+        storage/SIEM for auditability?
+      status: pass
+      blocking: true
+      owner: Customer
+    - id: supply_chain_scan
+      prompt: Will your security team scan images/artifacts before deployment where
+        applicable?
+      status: pass
+      blocking: false
+      owner: Customer
+    - id: continuity_expectation
+      prompt: Is the team aligned that data-plane availability can continue even if
+        control-plane automation is temporarily unavailable?
+      status: pass
+      blocking: false
+      owner: Shared
+    blocking_failures: []
+    non_blocking_failures: []
+    recommendation: proceed
+    proceed: true
+  go_no_go: proceed
 report:
-  company_name: "Your Company"
+  company_name: TestCompany
   include_tco_model: true
-  current_db_monthly_cost_usd: 0  # Fill in for TCO comparison (leave 0 to skip)
-  output_dir: "results"
+  current_db_monthly_cost_usd: 0.0
+  output_dir: results
+tco:
+  data_size_gb: 1000
+  annual_growth_pct: 40
+  aurora_shards_year0: 4
+  engineers_managing_shards: 2
+  engineer_annual_cost: 180000
+  sharding_eng_fraction: 0.25
+workload_lab:
+  target: baseline_perf
+  concurrency: 18
+  duration_seconds: 77
+  blaster:
+    mode: rawsql
+    tag: poc
+    cluster:
+      tidb_dsn: ''
+      tidb_hosts: []
+    loadgen:
+      hosts:
+      - localhost
+      ssh_user: ''
+      ssh_key_path: ''
+      max_domains_concurrent: 8
+    rawsql:
+      sql_file: load/sql/rawsql_mix.sql
+      duration_sec: 120
+      warmup_sec: 15
+      cooldown_sec: 10
+      threads_total: 64
+      connections_total: 128
+      qps_target: 0
+      statement_mix: ''
+      txn_mode: autocommit
+    tpcc:
+      warehouses: 100
+      threads_total: 128
+      duration_sec: 180
+    ycsb:
+      workload: A
+      recordcount: 1000000
+      operationcount: 5000000
+      threads_total: 128
+industry:
+  selected: general_auto
+pov_results:
+  s3_bucket: pingcap-tidb-pov-results-219248915861
+  s3_region: us-east-1
+  s3_prefix: tidb-pov
+  s3_project: default
+
+dataset_bootstrap:
+  enabled: true
+  required: true
+  profile_key: general_auto
+  s3_prefix: tidb-pov
+  aws_region: us-east-1
+  skip_synthetic_generation: false
+  s3_bucket: pingcap-tidb-pov-results-219248915861
+  import_threads: 1
+  parallel_import_jobs: 2

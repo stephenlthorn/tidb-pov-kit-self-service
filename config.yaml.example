@@ -134,6 +134,14 @@ modules:
   data_import:       true
   vector_search:     false   # optional AI track
 
+# PoV results archival — all runs upload here automatically.
+# The canonical bucket is pre-configured; override only if using a customer-owned bucket.
+pov_results:
+  s3_bucket: "pingcap-tidb-pov-results-219248915861"  # PingCAP-owned results bucket
+  s3_region: "us-east-1"
+  s3_prefix: "tidb-pov"
+  s3_project: "default"                               # override per engagement, e.g. "acme-2025"
+
 # Pre-PoC intake state (written by setup/pre_poc_intake.py)
 pre_poc:
   scenario_template: "oltp_migration"   # oltp_migration | htap_analytics | ai_vector
