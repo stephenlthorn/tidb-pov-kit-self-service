@@ -6,6 +6,7 @@ data_manifest.json into a single JSON payload used by generate_report.py.
 Run standalone:
     python report/collect_metrics.py > results/metrics_summary.json
 """
+from __future__ import annotations
 import sys, os, json, time, argparse, re
 from pathlib import Path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

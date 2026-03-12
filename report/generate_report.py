@@ -21,6 +21,7 @@ Layout:
 Usage:
     python report/generate_report.py [config.yaml]
 """
+from __future__ import annotations
 import sys, os, json, time, io, re, runpy
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
