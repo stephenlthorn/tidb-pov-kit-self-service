@@ -13,6 +13,7 @@ Note: IMPORT INTO requires TiDB >= 7.2 and S3/GCS or a local file path
 accessible to TiDB server.  The test gracefully falls back to LOAD DATA
 or INSERT-only if IMPORT INTO is unavailable.
 """
+from __future__ import annotations
 import sys, os, time, csv, io, random, tempfile, math, re, json
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))

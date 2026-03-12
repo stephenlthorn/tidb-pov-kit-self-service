@@ -4,6 +4,7 @@ workload_definitions.py — Query templates and selectors for workload families.
 All queries use %s placeholders (mysql-connector style).
 Each definition is a dict: {sql, params_fn, query_type, weight}
 """
+from __future__ import annotations
 import random
 import re
 import time

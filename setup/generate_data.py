@@ -11,6 +11,7 @@ Usage:
     python setup/generate_data.py --config config.yaml [--skip-if-exists]
 """
 
+from __future__ import annotations
 import argparse
 import os
 import sys

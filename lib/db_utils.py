@@ -2,6 +2,7 @@
 db_utils.py — Shared database connection and query utilities.
 Used by all test modules and the load runner.
 """
+from __future__ import annotations
 import os
 import time
 import mysql.connector

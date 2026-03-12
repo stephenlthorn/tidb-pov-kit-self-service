@@ -10,6 +10,7 @@ Part B: when `comparison_db` is enabled, inspects the source engine metadata
 Each check is logged to the compat_checks table in results.db.
 """
 
+from __future__ import annotations
 import json
 import os
 import sys
