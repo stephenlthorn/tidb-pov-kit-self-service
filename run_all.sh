@@ -129,7 +129,7 @@ fi
 PYTHON="${PYTHON:-python3}"
 PIP="${PIP:-pip3}"
 RESULTS_DIR="results"
-LOG_FILE="${RESULTS_DIR}/run_all.log"
+LOG_FILE="${RESULTS_DIR}/web_ui_run.log"
 INTAKE_JSON="${RESULTS_DIR}/pre_poc_intake.json"
 INTAKE_MD="${RESULTS_DIR}/pre_poc_checklist.md"
 RESOLVED_CONFIG="${RESULTS_DIR}/config.resolved.yaml"

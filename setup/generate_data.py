@@ -454,7 +454,7 @@ def gen_tenant_data(n, tenant_count):
 def bulk_insert(conn, table, cols, gen, total, label=""):
     cur = conn.cursor()
     placeholders = ", ".join(["%s"] * len(cols))
-    sql = f"INSERT INTO `{table}` ({', '.join(cols)}) VALUES ({placeholders})"
+    sql = f"INSERT IGNORE INTO `{table}` ({', '.join(cols)}) VALUES ({placeholders})"
     inserted = 0
     batch = []
     t0 = time.time()
