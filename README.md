@@ -70,176 +70,283 @@ A traditional PoC typically requires the customer to provision infrastructure, l
 
 ## Getting Started from CLI
 
-This section is written to be self-sufficient. Follow every step in order — it is designed so that anyone with a TiDB Cloud account and AWS access can run a complete PoV without assistance.
-
-### Step 1 — Get your TiDB Cloud credentials
-
-1. Log in at [tidbcloud.com](https://tidbcloud.com) and create or select a cluster.
-2. In the cluster console, click **Connect** → **General** tab.
-3. Copy the values for **Host**, **Username** (looks like `<prefix>.root`), and **Password**.
-
-> Serverless / Starter tier: use the provided username as-is (e.g. `4FuxFdNpnGxBi9D.root`). Do not shorten it.
-
-### Step 2 — Set up AWS authentication
-
-The kit needs AWS credentials in two places:
-- To upload run artifacts to the PingCAP results S3 bucket (from your local machine or EC2)
-- So TiDB Cloud can run `IMPORT INTO` against the dataset S3 bucket
-
-**Choose one of the following auth options:**
+Follow every step below exactly. Each step tells you which website to visit, what to click, and what to paste. No assumptions.
 
 ---
 
-**Option A — EC2 with IAM Instance Profile (recommended for automated / SE-led runs)**
+### Step 1 — Create a TiDB Cloud account and cluster
 
-Attach the `TidbPovKitEC2Role` IAM instance profile to your EC2 instance. The kit will use it automatically — no credentials to manage.
+**1a. Create your account**
 
-The instance profile needs these permissions:
-```json
-{
-  "s3:PutObject", "s3:GetObject", "s3:ListBucket"  on  arn:aws:s3:::pingcap-tidb-pov-results-219248915861/*
-  "kms:GenerateDataKey", "kms:Decrypt", "kms:DescribeKey"  on the bucket KMS key
-}
-```
+1. Open your browser and go to: **https://tidbcloud.com**
+2. Click **Sign Up** (top right corner).
+3. Fill in your email and create a password, then click **Create Account**.
+4. Check your email for a verification link and click it.
+5. Log in with your new account.
 
-Leave all `s3_*` auth fields blank in `config.yaml`. The instance profile is used automatically.
+**1b. Create a Serverless cluster (free)**
+
+1. After logging in you should see the **Clusters** page. Click **Create Cluster**.
+2. Select **Serverless** (it is free — no credit card required).
+3. Pick any region (e.g. **US East (N. Virginia)**).
+4. Give your cluster any name (e.g. `pov-test`).
+5. Click **Create** at the bottom right. The cluster will be ready in about 30 seconds.
+
+**1c. Get your connection credentials**
+
+1. Once the cluster status shows **Active**, click on the cluster name to open it.
+2. Click **Connect** in the top right area of the cluster page.
+3. A panel opens. Make sure the **General** tab is selected.
+4. You will see three values — copy each one to a text file right now:
+   - **Host** — looks like `gateway01.us-east-1.prod.aws.tidbcloud.com`
+   - **Username** — looks like `AbCdEfGhIj1K2.root` (copy this exactly, including the prefix before the dot)
+   - **Password** — click **Generate Password** if you haven't already, then copy it
+
+> Keep that text file open. You will paste these values in Step 4.
 
 ---
 
-**Option B — AWS SSO / IAM Identity Center (recommended for local laptop runs)**
+### Step 2 — Install prerequisites on your machine
+
+**2a. Check if you have Python 3.10+**
+
+Open your terminal (on Mac: press `Cmd+Space`, type `Terminal`, press Enter) and run:
 
 ```bash
-# Log in (do this once per session — tokens expire after ~8 hours)
-aws sso login --profile <your-profile>
-
-# Verify it works
-aws sts get-caller-identity --profile <your-profile>
-
-# Export so all subprocesses (including TiDB IMPORT INTO) see the credentials
-export AWS_PROFILE=<your-profile>
+python3 --version
 ```
 
-If `aws sso login` returns an error, re-run it with `--no-browser` and paste the code manually.
+You need version 3.10 or higher. If you see `command not found` or a version below 3.10:
+- **Mac:** Go to **https://www.python.org/downloads/**, download the latest 3.x installer, run it, follow the installer steps.
+- **Linux (Ubuntu/Debian):** Run `sudo apt-get update && sudo apt-get install -y python3 python3-pip`
+- **Linux (Amazon Linux / RHEL):** Run `sudo yum install -y python3`
+
+**2b. Check if you have Git**
+
+```bash
+git --version
+```
+
+If you see `command not found`:
+- **Mac:** Run `xcode-select --install` and follow the popup.
+- **Linux:** Run `sudo apt-get install -y git` or `sudo yum install -y git`
+
+**2c. Check if you have the AWS CLI**
+
+```bash
+aws --version
+```
+
+If you see `command not found`, install it:
+- **Mac / Linux (easiest):** Run this single command:
+  ```bash
+  curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && sudo ./aws/install
+  ```
+- **Mac alternative:** Go to **https://aws.amazon.com/cli/**, download the `.pkg` file, run it.
+- After installing, close your terminal, open a new one, and run `aws --version` again to confirm.
 
 ---
 
-**Option C — Static IAM access keys (env vars)**
+### Step 3 — Set up AWS credentials
+
+The kit uploads run results and imports test data from an S3 bucket. You need AWS credentials to do this. **Pick the option that matches your situation:**
+
+---
+
+#### Option A — You have AWS access keys (most common for first-time users)
+
+1. Log in to the AWS console at **https://console.aws.amazon.com**
+2. Click your name in the top-right corner → **Security credentials**
+3. Scroll down to **Access keys** → click **Create access key**
+4. Select **Command Line Interface (CLI)** → check the confirmation box → click **Next** → click **Create access key**
+5. You will see an **Access key ID** and a **Secret access key**. Copy both.
+6. Back in your terminal, paste and run these three lines (replace the placeholder values):
+   ```bash
+   export AWS_ACCESS_KEY_ID=AKIA...your-key-id-here...
+   export AWS_SECRET_ACCESS_KEY=...your-secret-key-here...
+   export AWS_DEFAULT_REGION=us-east-1
+   ```
+7. Verify it works:
+   ```bash
+   aws sts get-caller-identity
+   ```
+   You should see your AWS account ID printed. If you see an error, double-check that you copied the keys correctly.
+
+---
+
+#### Option B — You use AWS SSO / IAM Identity Center (PingCAP employees or enterprise users)
+
+1. In your terminal, run:
+   ```bash
+   aws sso login
+   ```
+2. A browser window will open asking you to approve the login. Click **Allow**.
+3. Back in the terminal, run:
+   ```bash
+   aws sts get-caller-identity
+   ```
+   You should see your account ID. If the command says `Token has expired`, just run `aws sso login` again.
+
+---
+
+#### Option C — You are running on an EC2 instance with an IAM role attached
+
+No action needed. The kit automatically uses the instance's IAM role. Skip to Step 4.
+
+---
+
+#### Verify S3 access before continuing
+
+Run this to confirm your credentials can reach the PoV results bucket:
 
 ```bash
-export AWS_ACCESS_KEY_ID=AKIA...
-export AWS_SECRET_ACCESS_KEY=...
-export AWS_DEFAULT_REGION=us-east-1
-```
-
-For temporary credentials (STS AssumeRole or SSO-generated):
-```bash
-export AWS_ACCESS_KEY_ID=ASIA...
-export AWS_SECRET_ACCESS_KEY=...
-export AWS_SESSION_TOKEN=...
-export AWS_DEFAULT_REGION=us-east-1
-```
-
-Verify before running:
-```bash
-aws sts get-caller-identity
 aws s3 ls s3://pingcap-tidb-pov-results-219248915861/tidb-pov/ --region us-east-1
 ```
 
----
-
-**Option D — Cross-account AssumeRole (for `IMPORT INTO` from a separate account)**
-
-Set in `config.yaml`:
-```yaml
-dataset_bootstrap:
-  s3_role_arn: "arn:aws:iam::<ACCOUNT_ID>:role/YourRole"
-  s3_external_id: "your-external-id"    # if required by the role's trust policy
-```
+You should see a list of folders. If you see `Access Denied`, ask your AWS admin to add S3 write permissions to your user or role.
 
 ---
 
-### Step 3 — Clone and configure
+### Step 4 — Download the kit and configure it
+
+**4a. Clone the repository**
+
+In your terminal, run these commands one at a time:
 
 ```bash
 git clone https://github.com/stephenlthorn/tidb-pov-kit-self-service.git tidb-pov-kit
+```
+```bash
 cd tidb-pov-kit
-bash scripts/bootstrap_cli.sh          # install Python deps
+```
+```bash
+bash scripts/bootstrap_cli.sh
+```
 
+The last command installs Python dependencies. It may take 1–2 minutes. When it finishes you should see no errors.
+
+**4b. Create your config file**
+
+```bash
 cp config.yaml.example config.yaml
 ```
 
-Edit `config.yaml` — fill in the three required fields:
-```yaml
-tidb:
-  host:     "gateway01.us-east-1.prod.aws.tidbcloud.com"   # from Connect dialog
-  user:     "4FuxFdNpnGxBi9D.root"                          # exact username from Connect
-  password: "your-password"
-```
+**4c. Fill in your TiDB credentials**
 
-Everything else has sensible defaults. The S3 dataset bucket is pre-configured.
-
-Optionally set your industry:
-```yaml
-industry:
-  selected: "banking"   # general_auto | banking | healthcare | gaming | retail_ecommerce | saas | iot_telemetry | adtech | logistics
-```
-
-### Step 4 — Run
-
-**Option A — Web UI (recommended for first run, guided wizard)**
+Open `config.yaml` in any text editor. On Mac you can run:
 
 ```bash
-./run_all.sh --web-ui
+open -e config.yaml
 ```
 
-Open `http://localhost:8787` in your browser. Use the **Deployment Wizard** to confirm settings, then click **Run**.
+On Linux:
+```bash
+nano config.yaml
+```
 
-**Option B — CLI (no browser needed)**
+Find the section at the top that looks like this:
+
+```yaml
+tidb:
+  host:     "gateway01.us-west-2.prod.aws.tidbcloud.com"
+  port:     4000
+  user:     "<prefix>.root"
+  password: "YOUR_PASSWORD"
+```
+
+Replace those three values with the ones you copied in Step 1c:
+- Replace the `host` value with your **Host**
+- Replace the `user` value with your **Username** (copy it exactly — include the prefix before the dot)
+- Replace the `password` value with your **Password**
+
+Example of what it should look like after editing (your values will be different):
+
+```yaml
+tidb:
+  host:     "gateway01.us-east-1.prod.aws.tidbcloud.com"
+  user:     "AbCdEfGhIj1K2.root"
+  password: "mySecretPassword123"
+```
+
+Save the file and close the editor.
+
+**4d. (Optional) Set your industry**
+
+If you want the test data to match a specific industry, find this section in `config.yaml`:
+
+```yaml
+industry:
+  selected: "general_auto"
+```
+
+Change `general_auto` to one of: `banking`, `healthcare`, `gaming`, `retail_ecommerce`, `saas`, `iot_telemetry`, `adtech`, `logistics`
+
+If you are not sure, leave it as `general_auto`.
+
+---
+
+### Step 5 — Run the PoV
+
+**Paste this single command and press Enter:**
 
 ```bash
 ./run_all.sh config.yaml --no-menu --no-wizard
 ```
 
-**Option C — Safe small end-to-end (clean slate, validates everything first)**
+The kit will:
+1. Connect to TiDB and verify credentials
+2. Import ~3 GB of test data from S3 into your cluster
+3. Run all test modules one by one (takes 20–40 minutes total)
+4. Generate a PDF report
+
+You will see live progress in the terminal. It is normal for steps to take several minutes each — do not close the terminal.
+
+**If you prefer a browser-based UI instead:**
 
 ```bash
-bash scripts/pov_safe_small_e2e.sh config.yaml
+./run_all.sh --web-ui
 ```
 
-This variant: resets the DB, runs S3 preflight, uploads the `general_auto` dataset pack, runs all modules at small scale, and cleans up on exit.
+Then open **http://localhost:8787** in your browser and click through the wizard.
 
-### Step 5 — Get results
+---
 
-Local output:
-```
-results/tidb_pov_report.pdf       ← customer-ready PDF
-results/metrics_summary.json
-results/run_all.log
-```
+### Step 6 — Get your report
 
-S3 (auto-uploaded when `POV_ENFORCE_S3_UPLOAD=true`):
-```
-s3://pingcap-tidb-pov-results-219248915861/tidb-pov/<project>/runs/<run_tag>/
+When the run finishes, your report is here:
+
+```bash
+open results/tidb_pov_report.pdf
 ```
 
-### Common problems and fixes
+(On Linux, use `xdg-open results/tidb_pov_report.pdf` or just navigate to the `results/` folder in your file manager.)
 
-| Problem | Fix |
-|---------|-----|
-| `Token has expired and refresh failed` | Re-run `aws sso login --profile <profile>` |
-| `Unable to locate credentials` | Set `AWS_ACCESS_KEY_ID` / `AWS_PROFILE`, or attach an instance profile |
-| `AccessDenied: kms:GenerateDataKey` | Add KMS key permissions to your IAM role (see Option A above) |
-| `Run blocked: S3 archival is required` | Set `S3_BUCKET` env var or run with `POV_ENFORCE_S3_UPLOAD=false` |
-| `Missing user name prefix` | Use the full TiDB Cloud username from Connect (e.g. `4FuxFdNpnGxBi9D.root`) |
-| `Connection refused` | Verify host/port; check IP allowlist under Security → Network Access |
-| IMPORT INTO fails on Serverless | Set `dataset_bootstrap.import_threads: 1` in `config.yaml` |
-| Run "stuck" at a module step | Normal — each module has pre-warm + ramp + test phases (~8–10 min total for M1). Let it run. |
+A copy is also automatically uploaded to S3:
+```
+s3://pingcap-tidb-pov-results-219248915861/tidb-pov/default/runs/<run-tag>/
+```
+
+---
+
+### Something went wrong? Check this table first.
+
+| Error message | What to do |
+|--------------|------------|
+| `Connection refused` or `Access denied for user` | Open `config.yaml` and double-check `host`, `user`, and `password`. Make sure there are no extra spaces or quote marks. |
+| `Unable to locate credentials` | Run `aws sts get-caller-identity` — if it fails, re-do Step 3. |
+| `Token has expired and refresh failed` | Run `aws sso login` again (Option B users only). |
+| `AccessDenied: kms:GenerateDataKey` | Your AWS user is missing KMS permissions. Ask your AWS admin to add `kms:GenerateDataKey`, `kms:Decrypt`, `kms:DescribeKey` to your role. |
+| `Run blocked: S3 archival is required` | Your AWS credentials don't have S3 write access. Re-do Step 3 and re-run the S3 verify command. |
+| IMPORT INTO fails with CPU error | Open `config.yaml`, find `dataset_bootstrap:`, and change `import_threads: 0` to `import_threads: 1`. Then re-run. |
+| Run appears stuck at `[5/10] M1` | Normal — M1 has multiple timed phases. Let it run for 10–15 minutes before worrying. |
+| `git: command not found` | Re-do Step 2b. |
+| `python3: command not found` | Re-do Step 2a. |
 
 ### Useful shortcuts
 
 ```bash
-./run_all.sh --menu              # interactive module picker
-./run_all.sh --report-only       # regenerate PDF from existing results
+./run_all.sh --menu              # interactive module picker (choose which tests to run)
+./run_all.sh --report-only       # regenerate PDF from existing results without re-running tests
 ./run_all.sh --report-json-only  # regenerate JSON summary only
 ```
 
