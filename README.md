@@ -42,147 +42,210 @@ omitted from the chart section to keep the report concise.
 
 ---
 
-## Start Here (Easy)
+## How This Kit Works (For Report Readers)
 
-### 1) Provision TiDB Cloud
+If you received a PoV report and want to understand the methodology, here is a plain-English summary:
 
-Start with **Serverless/Starter** unless you already know you need Essential, Premium, Dedicated, or BYOC.
-Provisioning guide: `setup/00_provision.md`.
+**What generates the workload?**
+An EC2 instance (`c7i.2xlarge` by default) in the customer's own AWS account runs a purpose-built OLTP load generator against TiDB Cloud. This is *not* a replay of the customer's production queries — it is a synthetic benchmark calibrated to the chosen industry profile (banking, healthcare, gaming, retail, etc.). The EC2 instance and load generator are spun up automatically by the kit and torn down when the run completes.
 
-### 2) Configure Connection
+**Where does the test data come from?**
+Industry-specific seed datasets (~3 GB each, covering OLTP transactions and OLAP aggregation tables) are pre-staged in a PingCAP S3 bucket. TiDB Cloud's `IMPORT INTO` command pulls the data directly from S3 into the cluster before tests begin. No data leaves TiDB Cloud; the import is a one-way inbound load.
 
-```bash
-cp config.yaml.example config.yaml
-# fill tidb.host, tidb.user, tidb.password, tidb.database
+**Is the kit "pre-tuned" to inflate results?**
+Each test module applies the same TiDB best practices that any production deployment should use: `AUTO_RANDOM` primary keys (eliminating hot-region write bottlenecks), column-store `TiFlash` replicas for analytics, and schema settings matched to the workload pattern. These are not artificial optimizations — they are the recommended production configuration. The goal is to show what TiDB actually achieves when set up correctly.
+
+**How does this compare to a traditional PoC?**
+A traditional PoC typically requires the customer to provision infrastructure, load their own data, write benchmark scripts, and interpret raw results — a process that can take weeks. This kit compresses that to hours: infrastructure is automated, data loads from S3, modules run sequentially, and the report is generated automatically. The output is a decision-ready PDF, not a spreadsheet of raw numbers.
+
+**Report reading order:**
+1. **Prospect Decision Summary** — clear decision + recommended next step
+2. **What Was Tested** — exact executed scope and environment
+3. **Executive Summary** — headline KPIs (warm latency, throughput, SQL compatibility)
+4. **Module charts** — evidence for each executed module
+5. **SQL Compatibility Index** — checks that passed/failed + fix directions
+6. **KPI appendix** — full threshold evaluation table for technical review
+
+---
+
+## Getting Started from CLI
+
+This section is written to be self-sufficient. Follow every step in order — it is designed so that anyone with a TiDB Cloud account and AWS access can run a complete PoV without assistance.
+
+### Step 1 — Get your TiDB Cloud credentials
+
+1. Log in at [tidbcloud.com](https://tidbcloud.com) and create or select a cluster.
+2. In the cluster console, click **Connect** → **General** tab.
+3. Copy the values for **Host**, **Username** (looks like `<prefix>.root`), and **Password**.
+
+> Serverless / Starter tier: use the provided username as-is (e.g. `4FuxFdNpnGxBi9D.root`). Do not shorten it.
+
+### Step 2 — Set up AWS authentication
+
+The kit needs AWS credentials in two places:
+- To upload run artifacts to the PingCAP results S3 bucket (from your local machine or EC2)
+- So TiDB Cloud can run `IMPORT INTO` against the dataset S3 bucket
+
+**Choose one of the following auth options:**
+
+---
+
+**Option A — EC2 with IAM Instance Profile (recommended for automated / SE-led runs)**
+
+Attach the `TidbPovKitEC2Role` IAM instance profile to your EC2 instance. The kit will use it automatically — no credentials to manage.
+
+The instance profile needs these permissions:
+```json
+{
+  "s3:PutObject", "s3:GetObject", "s3:ListBucket"  on  arn:aws:s3:::pingcap-tidb-pov-results-219248915861/*
+  "kms:GenerateDataKey", "kms:Decrypt", "kms:DescribeKey"  on the bucket KMS key
+}
 ```
 
-### 2.5) Optional: Pre-stage S3 Dataset Packs (recommended for demo/showcase runs)
+Leave all `s3_*` auth fields blank in `config.yaml`. The instance profile is used automatically.
 
-This creates pluggable OLTP + OLAP seed packs for all industries and uploads them to S3:
+---
+
+**Option B — AWS SSO / IAM Identity Center (recommended for local laptop runs)**
 
 ```bash
-python3 scripts/publish_dataset_packs_s3.py \
-  --bucket <your-s3-bucket> \
-  --prefix tidb-pov/datasets \
-  --region us-east-1 \
-  --industries all \
-  --target-gb-per-family 0.25 \
-  --shards 8
+# Log in (do this once per session — tokens expire after ~8 hours)
+aws sso login --profile <your-profile>
+
+# Verify it works
+aws sts get-caller-identity --profile <your-profile>
+
+# Export so all subprocesses (including TiDB IMPORT INTO) see the credentials
+export AWS_PROFILE=<your-profile>
 ```
 
-Then enable first-step bootstrap import in `config.yaml`:
+If `aws sso login` returns an error, re-run it with `--no-browser` and paste the code manually.
 
+---
+
+**Option C — Static IAM access keys (env vars)**
+
+```bash
+export AWS_ACCESS_KEY_ID=AKIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+For temporary credentials (STS AssumeRole or SSO-generated):
+```bash
+export AWS_ACCESS_KEY_ID=ASIA...
+export AWS_SECRET_ACCESS_KEY=...
+export AWS_SESSION_TOKEN=...
+export AWS_DEFAULT_REGION=us-east-1
+```
+
+Verify before running:
+```bash
+aws sts get-caller-identity
+aws s3 ls s3://pingcap-tidb-pov-results-219248915861/tidb-pov/ --region us-east-1
+```
+
+---
+
+**Option D — Cross-account AssumeRole (for `IMPORT INTO` from a separate account)**
+
+Set in `config.yaml`:
 ```yaml
 dataset_bootstrap:
-  enabled: true
-  required: true
-  s3_bucket: "<your-s3-bucket>"
-  s3_prefix: "tidb-pov/datasets"
-  aws_region: "us-east-1"
-  # Choose one auth path for TiDB IMPORT INTO:
-  # s3_role_arn + s3_external_id, OR access key fields below.
-  s3_role_arn: ""
-  s3_external_id: ""
-  s3_access_key_id: ""
-  s3_secret_access_key: ""
-  s3_session_token: ""   # required for temporary/session credentials
-  import_threads: 0      # 0=auto; set 1 on very small TiDB tiers if needed
-  parallel_import_jobs: 2
-  skip_synthetic_generation: false
+  s3_role_arn: "arn:aws:iam::<ACCOUNT_ID>:role/YourRole"
+  s3_external_id: "your-external-id"    # if required by the role's trust policy
 ```
 
-`run_all.sh` will execute this bootstrap before synthetic generation and load OLTP + OLAP tables using `IMPORT INTO` from S3. On tiny-tier CPU guardrail errors, it automatically falls back to `LOAD DATA LOCAL INFILE` from the same S3 files.
+---
 
-### 3) Choose How You Run
-
-#### Path A — Web UI (recommended for first run)
+### Step 3 — Clone and configure
 
 ```bash
-bash scripts/bootstrap_cli.sh
+git clone https://github.com/stephenlthorn/tidb-pov-kit-self-service.git tidb-pov-kit
+cd tidb-pov-kit
+bash scripts/bootstrap_cli.sh          # install Python deps
+
+cp config.yaml.example config.yaml
+```
+
+Edit `config.yaml` — fill in the three required fields:
+```yaml
+tidb:
+  host:     "gateway01.us-east-1.prod.aws.tidbcloud.com"   # from Connect dialog
+  user:     "4FuxFdNpnGxBi9D.root"                          # exact username from Connect
+  password: "your-password"
+```
+
+Everything else has sensible defaults. The S3 dataset bucket is pre-configured.
+
+Optionally set your industry:
+```yaml
+industry:
+  selected: "banking"   # general_auto | banking | healthcare | gaming | retail_ecommerce | saas | iot_telemetry | adtech | logistics
+```
+
+### Step 4 — Run
+
+**Option A — Web UI (recommended for first run, guided wizard)**
+
+```bash
 ./run_all.sh --web-ui
 ```
 
-Then:
-1. Use **Deployment Wizard** for guided setup (Industry + tests + tier).
-2. For migration throughput showcase runs, select **Workload Preset = Import Benchmark**.
-   - Forces `IMPORT INTO` benchmark path
-   - Uses `__AUTO_DATASET_OLTP__` source resolution from `dataset_bootstrap` S3 manifest
-   - Enables dataset bootstrap requirement so import evidence is always captured
-3. Save and run.
-4. Open report from `results/tidb_pov_report.pdf` (or S3 if enforced).
+Open `http://localhost:8787` in your browser. Use the **Deployment Wizard** to confirm settings, then click **Run**.
 
-#### Path B — CLI (recommended for repeatable automation)
-
-Local CLI run:
+**Option B — CLI (no browser needed)**
 
 ```bash
-bash scripts/bootstrap_cli.sh
 ./run_all.sh config.yaml --no-menu --no-wizard
 ```
 
-Safe small run (clean DB + EC2 cleanup before/after):
+**Option C — Safe small end-to-end (clean slate, validates everything first)**
 
 ```bash
 bash scripts/pov_safe_small_e2e.sh config.yaml
 ```
 
-`pov_safe_small_e2e.sh` now also:
-- forces `industry.selected=general_auto`
-- enables `dataset_bootstrap` and publishes the `general_auto` dataset pack to your S3 path
-- enables all standard modules (M0–M8 + vector track), while keeping small-scale defaults
-- validates TiDB Cloud username format before DB reset (prefix requirement check)
-- runs S3 preflight before execution
-- always attempts tagged EC2 cleanup on exit (success or failure)
+This variant: resets the DB, runs S3 preflight, uploads the `general_auto` dataset pack, runs all modules at small scale, and cleans up on exit.
 
-### 4) Enforce S3 Upload (recommended)
+### Step 5 — Get results
 
-```bash
-export POV_ENFORCE_S3_UPLOAD=true
-export POV_S3_BUCKET=<bucket>
-export POV_S3_PREFIX=tidb-pov
-export POV_S3_PROJECT=<project-slug>
-export POV_S3_REGION=us-east-1
+Local output:
+```
+results/tidb_pov_report.pdf       ← customer-ready PDF
+results/metrics_summary.json
+results/run_all.log
 ```
 
-With enforcement enabled, the run hard-fails if artifacts cannot be archived to S3.
+S3 (auto-uploaded when `POV_ENFORCE_S3_UPLOAD=true`):
+```
+s3://pingcap-tidb-pov-results-219248915861/tidb-pov/<project>/runs/<run_tag>/
+```
 
-Report completeness is now strict by default: the run fails if selected modules do
-not produce required report data (prevents blank sections/pages in final PDF). If
-you need a one-off relaxed run, set `POV_REQUIRE_COMPLETE_REPORT_DATA=false`.
+### Common problems and fixes
 
-### 5) Output Locations
+| Problem | Fix |
+|---------|-----|
+| `Token has expired and refresh failed` | Re-run `aws sso login --profile <profile>` |
+| `Unable to locate credentials` | Set `AWS_ACCESS_KEY_ID` / `AWS_PROFILE`, or attach an instance profile |
+| `AccessDenied: kms:GenerateDataKey` | Add KMS key permissions to your IAM role (see Option A above) |
+| `Run blocked: S3 archival is required` | Set `S3_BUCKET` env var or run with `POV_ENFORCE_S3_UPLOAD=false` |
+| `Missing user name prefix` | Use the full TiDB Cloud username from Connect (e.g. `4FuxFdNpnGxBi9D.root`) |
+| `Connection refused` | Verify host/port; check IP allowlist under Security → Network Access |
+| IMPORT INTO fails on Serverless | Set `dataset_bootstrap.import_threads: 1` in `config.yaml` |
+| Run "stuck" at a module step | Normal — each module has pre-warm + ramp + test phases (~8–10 min total for M1). Let it run. |
 
-Local:
-- `results/tidb_pov_report.pdf`
-- `results/metrics_summary.json`
-- `results/results.db`
-- `results/run_all.log`
-
-S3:
-- `s3://<bucket>/<prefix>/<project>/runs/<run_tag>/...`
-
-### 6) Read the Report (first-time prospect flow)
-
-Read in this order:
-1. **Prospect Decision Summary** — clear decision + next action
-2. **What Was Tested** — exact executed scope and environment context
-3. **Executive Summary** — headline KPIs (warm latency, throughput, compatibility)
-4. **Module charts** — evidence pages for executed modules only
-5. **SQL Compatibility Index** — failed checks + fix directions
-6. **KPI appendix** — threshold evaluation table for technical review
-
-TCO note:
-- If `tco:` values are not provided in `config.yaml`, the report labels TCO as
-  an **illustrative model**.
-- Provide customer-specific `tco` inputs for customer-specific TCO output.
-
-### Useful Shortcuts
+### Useful shortcuts
 
 ```bash
-./run_all.sh --menu
-./run_all.sh --report-only
-./run_all.sh --report-json-only
+./run_all.sh --menu              # interactive module picker
+./run_all.sh --report-only       # regenerate PDF from existing results
+./run_all.sh --report-json-only  # regenerate JSON summary only
 ```
+
+---
+
+## Advanced Runtime Paths
 
 ---
 
@@ -295,22 +358,24 @@ test:
   import_into_source_uri: ""        # optional s3://bucket/path/file.csv
   import_source_size_gb: 0.0        # optional, for GB/min with remote import
 
-# Optional: first-step S3 dataset bootstrap (industry-pluggable OLTP/OLAP packs)
+# First-step S3 dataset bootstrap — loads industry-specific ~3 GB OLTP+OLAP packs.
+# Pre-staged datasets live in the PingCAP-owned results bucket by default.
+# Auth: leave all s3_* auth fields blank if running on EC2 with an instance profile.
 dataset_bootstrap:
-  enabled: false
-  required: false
-  profile_key: ""                    # optional override, otherwise uses industry.selected
-  manifest_uri: ""                   # optional s3://bucket/prefix/manifest.json
-  s3_bucket: ""
+  enabled: true
+  required: true
+  profile_key: ""                    # optional override; defaults to industry.selected
+  manifest_uri: ""                   # optional override; defaults to PingCAP bucket
+  s3_bucket: "pingcap-tidb-pov-results-219248915861"
   s3_prefix: "tidb-pov/datasets"
   aws_region: "us-east-1"
-  # Auth for TiDB IMPORT INTO from S3 (choose one path)
-  s3_role_arn: ""
+  # Auth for TiDB IMPORT INTO from S3 (choose ONE path, or leave blank for instance profile):
+  s3_role_arn: ""                    # Option B: cross-account AssumeRole ARN
   s3_external_id: ""
-  s3_access_key_id: ""
+  s3_access_key_id: ""              # Option C: static access keys
   s3_secret_access_key: ""
-  s3_session_token: ""
-  import_threads: 0                 # 0=auto; set 1 for tiny tiers
+  s3_session_token: ""              # required for temporary/session credentials
+  import_threads: 0                 # 0=auto; set 1 on tiny tiers if IMPORT INTO hits CPU guardrail
   parallel_import_jobs: 2
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"

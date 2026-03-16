@@ -28,11 +28,7 @@ def run(cfg: dict):
     counts = _get_counts(cfg)
     test_cfg = cfg.get("test") or {}
     concurrency_levels = test_cfg.get("concurrency_levels", [16, 64, 256])
-    duration = test_cfg.get("duration_seconds", 300)
-    from setup.generate_data import DURATION_MULTIPLIER
-    scale = str(test_cfg.get("data_scale", "small")).strip().lower()
-    scale_mult = DURATION_MULTIPLIER.get(scale, 1.0)
-    duration = int(duration * scale_mult)
+    duration = int(test_cfg.get("duration_seconds", 300))
     pre_warm_enabled = bool(test_cfg.get("pre_warm_enabled", True))
     pre_warm_duration = max(30, int(test_cfg.get("pre_warm_duration_seconds", 120)))
     pre_warm_concurrency = max(1, int(test_cfg.get("pre_warm_concurrency", max(concurrency_levels or [16]))))
@@ -203,9 +199,8 @@ def _get_counts(cfg):
     if os.path.exists(manifest):
         with open(manifest) as f:
             return json.load(f).get("counts", {})
-    scale = (cfg.get("test") or {}).get("data_scale", "small")
-    from setup.generate_data import SCALE_CONFIG
-    return SCALE_CONFIG.get(scale, SCALE_CONFIG["small"])
+    from setup.generate_data import DATASET_COUNTS
+    return dict(DATASET_COUNTS)
 
 
 if __name__ == "__main__":

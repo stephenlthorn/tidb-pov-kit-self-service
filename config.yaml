@@ -1,8 +1,8 @@
 tidb:
-  host: gateway01.us-east-1.prod.aws.tidbcloud.com
+  host: ""
   port: 4000
-  user: 38DNQbJgYyFSEVJ.root
-  password: WZ37TOUhg6NgzWEo
+  user: ""
+  password: ""
   database: test
   ssl: true
 comparison_db:
@@ -76,7 +76,7 @@ aws_runner:
   run_timeout_minutes: 180
   auto_shutdown_minutes: 10
 test:
-  data_scale: small
+  load_size: small
   duration_seconds: 120
   concurrency_levels:
   - 8
@@ -240,10 +240,10 @@ pov_results:
 dataset_bootstrap:
   enabled: true
   required: true
-  profile_key: general_auto
-  s3_prefix: tidb-pov
+  profile_key: ''
+  s3_bucket: pingcap-tidb-pov-results-219248915861
+  s3_prefix: tidb-pov/datasets
   aws_region: us-east-1
   skip_synthetic_generation: false
-  s3_bucket: pingcap-tidb-pov-results-219248915861
-  import_threads: 1
+  import_threads: 0
   parallel_import_jobs: 2

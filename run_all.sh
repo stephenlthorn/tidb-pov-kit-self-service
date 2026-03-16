@@ -37,6 +37,7 @@ Options:
   --no-wizard         Skip intake wizard
   --tier <tier>       Force tier (serverless|essential|premium|dedicated|byoc)
   --allow-blocked     Continue even if checklist reports blocking failures
+  --force             Override tier/load-size safety checks (e.g. medium on Starter)
   -h, --help          Show this help message
 EOF
 }
@@ -48,6 +49,7 @@ REPORT_JSON_ONLY=false
 RUN_INTAKE="auto"          # auto | yes | no
 FORCE_TIER=""
 ALLOW_BLOCKED=false
+FORCE_OVERRIDE=false
 SHOW_MENU="auto"           # auto | yes | no
 SHOW_WEB_UI="no"
 HAS_EXEC_FLAGS=false
@@ -103,6 +105,11 @@ while [[ $# -gt 0 ]]; do
       ;;
     --allow-blocked)
       ALLOW_BLOCKED=true
+      HAS_EXEC_FLAGS=true
+      shift
+      ;;
+    --force|--accept-overage)
+      FORCE_OVERRIDE=true
       HAS_EXEC_FLAGS=true
       shift
       ;;
@@ -535,7 +542,10 @@ if run_mode not in {"validation", "performance"}:
 schema_mode = str(test.get("schema_mode", "tidb_optimized")).strip().lower() or "tidb_optimized"
 if schema_mode not in {"tidb_optimized", "mysql_compatible"}:
     schema_mode = "tidb_optimized"
-print(f"{run_mode}|{schema_mode}")
+load_size = str(test.get("load_size", test.get("data_scale", "small"))).strip().lower() or "small"
+if load_size not in {"small", "medium", "large"}:
+    load_size = "small"
+print(f"{run_mode}|{schema_mode}|{load_size}")
 PY
 }
 
@@ -619,8 +629,10 @@ PY
 
 RUN_PROFILE="$(read_run_profile)"
 POV_RUN_MODE="${RUN_PROFILE%%|*}"
-POV_SCHEMA_MODE="${RUN_PROFILE#*|}"
-ok "Run profile: mode=${POV_RUN_MODE}, schema=${POV_SCHEMA_MODE}"
+_rest="${RUN_PROFILE#*|}"
+POV_SCHEMA_MODE="${_rest%%|*}"
+POV_LOAD_SIZE="${_rest#*|}"
+ok "Run profile: mode=${POV_RUN_MODE}, schema=${POV_SCHEMA_MODE}, load_size=${POV_LOAD_SIZE}"
 if [[ "${POV_RUN_MODE}" == "performance" ]]; then
   warn "Performance mode selected."
   warn "For peak-throughput claims, use Workload Generator (tidb_blaster) and multi-loadgen orchestration."
@@ -859,6 +871,63 @@ fi
 ok "Dependencies installed"
 
 # ─────────────────────────────────────────────────────────────────────────────
+# 3b. Tier / load-size validation
+# ─────────────────────────────────────────────────────────────────────────────
+TIER_LOAD_CHECK="$("${PYTHON}" - "${CONFIG_EFFECTIVE}" <<'PY'
+import yaml, sys
+sys.path.insert(0, '.')
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+tier = str((cfg.get("tier") or {}).get("selected", "serverless")).strip().lower()
+test = cfg.get("test") or {}
+load_size = str(test.get("load_size", test.get("data_scale", "small"))).strip().lower()
+from lib.cluster_tuning import validate_tier_load_size
+ok, msg = validate_tier_load_size(tier, load_size)
+if ok:
+    print(f"OK|{tier}|{load_size}")
+else:
+    print(f"WARN|{tier}|{load_size}|{msg}")
+PY
+)"
+
+TIER_LOAD_STATUS="${TIER_LOAD_CHECK%%|*}"
+if [[ "${TIER_LOAD_STATUS}" == "WARN" ]]; then
+  TIER_LOAD_MSG="${TIER_LOAD_CHECK#*|*|*|}"
+  echo ""
+  warn "${TIER_LOAD_MSG}"
+  echo ""
+  if [[ "${FORCE_OVERRIDE}" != "true" ]]; then
+    err "Tier/load-size mismatch detected. Use --force to override."
+    exit 1
+  fi
+  warn "--force flag detected, continuing despite tier/load-size mismatch."
+else
+  # Extract tier and load_size for display
+  _tier_val="$(echo "${TIER_LOAD_CHECK}" | cut -d'|' -f2)"
+  _load_val="$(echo "${TIER_LOAD_CHECK}" | cut -d'|' -f3)"
+  ok "Tier/load-size check passed: tier=${_tier_val}, load_size=${_load_val}"
+fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3c. Apply global cluster tuning
+# ─────────────────────────────────────────────────────────────────────────────
+step "3c/10" "Applying global cluster tuning (PoC Configuration template)"
+
+"${PYTHON}" - "${CONFIG_EFFECTIVE}" <<'PY'
+import yaml, sys
+sys.path.insert(0, '.')
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+tier = str((cfg.get("tier") or {}).get("selected", "serverless")).strip().lower()
+from lib.db_utils import get_connection
+from lib.cluster_tuning import apply_global_tuning, print_tuning_report
+conn = get_connection(cfg.get("tidb", {}))
+results = apply_global_tuning(conn, tier=tier)
+print_tuning_report(results, label="Global cluster tuning")
+conn.close()
+PY
+
+ok "Cluster tuning applied"
+
+# ─────────────────────────────────────────────────────────────────────────────
 # 4. Dataset bootstrap and synthetic data
 # ─────────────────────────────────────────────────────────────────────────────
 step "4/10" "Dataset bootstrap and synthetic data"
@@ -1019,6 +1088,7 @@ run_module() {
   local label="$2"
   local script="$3"
   local enabled_keys="$4"
+  local module_key="${5:-}"
 
   local enabled
   enabled=$(module_enabled "${enabled_keys}" 2>/dev/null || echo "true")
@@ -1030,6 +1100,28 @@ run_module() {
   fi
 
   step "${num}/10" "${label}"
+
+  # Apply per-module session tuning if module_key is provided
+  if [[ -n "${module_key}" ]]; then
+    "${PYTHON}" - "${CONFIG_EFFECTIVE}" "${module_key}" <<'PY' 2>/dev/null || true
+import yaml, sys
+sys.path.insert(0, '.')
+cfg = yaml.safe_load(open(sys.argv[1])) or {}
+module_key = sys.argv[2]
+from lib.db_utils import get_connection
+from lib.cluster_tuning import apply_module_session_vars
+try:
+    conn = get_connection(cfg.get("tidb", {}))
+    results = apply_module_session_vars(conn, module_key)
+    applied = [k for k, v in results.items() if v == "ok"]
+    if applied:
+        print(f"  Module tuning ({module_key}): {', '.join(applied)}")
+    conn.close()
+except Exception:
+    pass
+PY
+  fi
+
   if "${PYTHON}" "${script}" "${CONFIG_EFFECTIVE}"; then
     ok "${label} complete"
     MODULE_PASS=$((MODULE_PASS + 1))
@@ -1236,17 +1328,17 @@ if [[ "${POV_RUN_MODE}" == "performance" ]]; then
 fi
 
 if [[ "${RUN_STANDARD_MODULES}" == "true" ]]; then
-  run_module "5" "M0 — Customer Query Validation" "tests/00_customer_queries/validate_queries.py" "customer_queries,customer_query_validation"
-  run_module "5" "M1 — Baseline OLTP Performance" "tests/01_baseline_perf/run.py" "baseline_perf"
-  run_module "5" "M1b— User Growth Ramp" "tests/01b_user_growth/run.py" "user_growth"
-  run_module "6" "M2 — Elastic Auto-Scaling" "tests/02_elastic_scale/run.py" "elastic_scale"
-  run_module "6" "M3 — High Availability" "tests/03_high_availability/run.py" "high_availability"
-  run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention"
-  run_module "7" "M4 — HTAP Concurrent" "tests/04_htap_concurrent/run.py" "htap"
-  run_module "8" "M5 — Online DDL" "tests/05_online_ddl/run.py" "online_ddl"
-  run_module "8" "M6 — SQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat"
-  run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import"
-  run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search"
+  run_module "5" "M0 — Customer Query Validation" "tests/00_customer_queries/validate_queries.py" "customer_queries,customer_query_validation" ""
+  run_module "5" "M1 — Baseline OLTP Performance" "tests/01_baseline_perf/run.py" "baseline_perf" "01_baseline_perf"
+  run_module "5" "M1b— User Growth Ramp" "tests/01b_user_growth/run.py" "user_growth" "01b_user_growth"
+  run_module "6" "M2 — Elastic Auto-Scaling" "tests/02_elastic_scale/run.py" "elastic_scale" "02_elastic_scale"
+  run_module "6" "M3 — High Availability" "tests/03_high_availability/run.py" "high_availability" "03_high_availability"
+  run_module "7" "M3b— Write Contention" "tests/03b_write_contention/run.py" "write_contention" "03b_write_contention"
+  run_module "7" "M4 — HTAP Concurrent" "tests/04_htap_concurrent/run.py" "htap" "04_htap_concurrent"
+  run_module "8" "M5 — Online DDL" "tests/05_online_ddl/run.py" "online_ddl" "05_online_ddl"
+  run_module "8" "M6 — SQL Compatibility" "tests/06_mysql_compat/run.py" "mysql_compat" ""
+  run_module "9" "M7 — Data Import Speed" "tests/07_data_import/run.py" "data_import" "07_data_import"
+  run_module "9" "M8 — Vector Search (AI Track)" "tests/08_vector_search/run.py" "vector_search" "08_vector_search"
   run_module "9" "M9 — TiDB Feature Showcase" "tests/09_tidb_features/run.py" "tidb_features"
 else
   step "7/10" "Scenario module suite"

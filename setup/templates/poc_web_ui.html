@@ -1488,7 +1488,7 @@
                 <div class="field"><label>Host</label><input id="wiz_tidb_host" type="text" name="wiz_tidb_host" value="{{ cfg.tidb.host }}" placeholder="gateway01.xxxxx.tidbcloud.com" /></div>
                 <div class="field"><label>Port</label><input id="wiz_tidb_port" type="number" name="wiz_tidb_port" value="{{ cfg.tidb.port }}" /></div>
                 <div class="field"><label>User</label><input id="wiz_tidb_user" type="text" name="wiz_tidb_user" value="{{ cfg.tidb.user }}" placeholder="clusterPrefix.root" /></div>
-                <div class="field"><label>Password</label><input type="password" name="wiz_tidb_password" value="" /></div>
+                <div class="field"><label>Password</label><input id="wiz_tidb_password" type="password" name="wiz_tidb_password" value="" /></div>
               </div>
               <div class="grid cols-2">
                 <div class="field"><label>Database</label><input id="wiz_tidb_database" type="text" name="wiz_tidb_database" value="{{ cfg.tidb.database }}" /></div>
@@ -2873,6 +2873,11 @@
   const wizTidbUserEl = document.getElementById('wiz_tidb_user');
   const wizTidbDatabaseEl = document.getElementById('wiz_tidb_database');
   const wizTidbSslEl = document.getElementById('wiz_tidb_ssl');
+  // Clear validation highlight as user types
+  [wizTidbHostEl, wizTidbUserEl, document.getElementById('wiz_tidb_password')].forEach((el) => {
+    if (!el) return;
+    el.addEventListener('input', () => { el.style.outline = ''; el.style.boxShadow = ''; });
+  });
   const wizComparisonEnabledEl = document.getElementById('wiz_comparison_enabled');
   const wizComparisonTargetEl = document.getElementById('wiz_comparison_target');
   const wizComparisonHostEl = document.getElementById('wiz_comparison_host');
@@ -2921,7 +2926,27 @@
       wizardPrevBtn.addEventListener('click', () => setWizardStep(wizardStep - 1));
     }
     if (wizardNextBtn) {
-      wizardNextBtn.addEventListener('click', () => setWizardStep(wizardStep + 1));
+      wizardNextBtn.addEventListener('click', () => {
+        // Step 2: validate required TiDB connection fields before advancing
+        if (wizardStep === 2) {
+          const wizTidbPasswordEl = document.getElementById('wiz_tidb_password');
+          const required = [
+            { el: wizTidbHostEl,     label: 'Host' },
+            { el: wizTidbUserEl,     label: 'User' },
+            { el: wizTidbPasswordEl, label: 'Password' },
+          ];
+          let invalid = false;
+          required.forEach(({ el }) => {
+            if (!el) return;
+            const empty = !el.value.trim();
+            el.style.outline = empty ? '2px solid #e53e3e' : '';
+            el.style.boxShadow = empty ? '0 0 0 3px rgba(229,62,62,0.25)' : '';
+            if (empty) invalid = true;
+          });
+          if (invalid) return;
+        }
+        setWizardStep(wizardStep + 1);
+      });
     }
 
     function getWizardPresetSelection() {

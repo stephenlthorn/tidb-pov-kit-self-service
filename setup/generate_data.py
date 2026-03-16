@@ -32,53 +32,36 @@ from setup.industry_data import industry_primary_table, industry_schema_sql, ind
 fake = Faker()
 random.seed(42)
 
-# ─── Row counts per scale ─────────────────────────────────────────────────────
-SCALE_CONFIG = {
-    "small": {
-        "users": 10_000,
-        "accounts": 15_000,
-        "transactions": 250_000,
-        "transaction_items": 500_000,
-        "audit_log": 100_000,
-        "events": 250_000,
-        "metrics": 100_000,
-        "sessions": 50_000,
-        "tenants": 200,
-        "tenant_users": 10_000,
-        "tenant_data": 100_000,
-    },
-    "medium": {
-        "users": 500_000,
-        "accounts": 750_000,
-        "transactions": 50_000_000,
-        "transaction_items": 100_000_000,
-        "audit_log": 20_000_000,
-        "events": 50_000_000,
-        "metrics": 20_000_000,
-        "sessions": 5_000_000,
-        "tenants": 10_000,
-        "tenant_users": 500_000,
-        "tenant_data": 10_000_000,
-    },
-    "large": {
-        "users": 2_000_000,
-        "accounts": 3_000_000,
-        "transactions": 200_000_000,
-        "transaction_items": 400_000_000,
-        "audit_log": 80_000_000,
-        "events": 200_000_000,
-        "metrics": 80_000_000,
-        "sessions": 20_000_000,
-        "tenants": 50_000,
-        "tenant_users": 2_000_000,
-        "tenant_data": 40_000_000,
-    },
+# ─── Row counts for ~3GB dataset (same for all load sizes) ───────────────────
+# All PoV sizes (small/medium/large) use the same ~3GB dataset loaded from S3.
+# The load_size config key controls concurrency/QPS intensity, NOT data volume.
+# This SCALE_CONFIG is kept for backward compatibility with modules that import it.
+DATASET_COUNTS = {
+    "users": 10_000,
+    "accounts": 15_000,
+    "transactions": 250_000,
+    "transaction_items": 500_000,
+    "audit_log": 100_000,
+    "events": 250_000,
+    "metrics": 100_000,
+    "sessions": 50_000,
+    "tenants": 200,
+    "tenant_users": 10_000,
+    "tenant_data": 100_000,
 }
 
+# Backward compatibility: all sizes map to the same ~3GB dataset
+SCALE_CONFIG = {
+    "small": dict(DATASET_COUNTS),
+    "medium": dict(DATASET_COUNTS),
+    "large": dict(DATASET_COUNTS),
+}
+
+# No longer needed — duration is set per load_size in LOAD_PROFILES
 DURATION_MULTIPLIER = {
     "small": 1.0,
-    "medium": 1.5,
-    "large": 2.0,
+    "medium": 1.0,
+    "large": 1.0,
 }
 
 BATCH = 1000  # rows per INSERT
@@ -498,11 +481,10 @@ def main():
     test_cfg = cfg.get("test") or {}
     run_mode = resolve_run_mode(test_cfg)
     schema_mode = resolve_schema_mode(test_cfg)
-    scale = str(test_cfg.get("data_scale", "small")).strip().lower()
-    if scale not in SCALE_CONFIG:
-        print(f"  Unknown data_scale '{scale}', defaulting to small.")
-        scale = "small"
-    counts = SCALE_CONFIG[scale]
+    # All sizes use the same ~3GB dataset; load_size controls QPS intensity only
+    load_size = str(test_cfg.get("load_size", test_cfg.get("data_scale", "small"))).strip().lower()
+    scale = "small"  # dataset is always the same ~3GB
+    counts = dict(DATASET_COUNTS)
     industry = resolve_industry_from_cfg(cfg)
     industry_key = str(industry.get("key", INDUSTRY_DEFAULT))
     tidb_cfg = cfg.get("tidb") or {}
@@ -511,7 +493,7 @@ def main():
 
     print(f"\n{'='*60}")
     print(f"  TiDB Cloud PoV Kit — Data Generator")
-    print(f"  Scale: {scale.upper()} | DB: {tidb_cfg['database']}")
+    print(f"  Dataset: ~3GB (fixed) | Load size: {load_size.upper()} | DB: {tidb_cfg['database']}")
     print(f"  Industry: {industry.get('label', industry_key)}")
     print(f"  Run Mode: {run_mode} | Schema Mode: {schema_mode}")
     print(f"{'='*60}\n")

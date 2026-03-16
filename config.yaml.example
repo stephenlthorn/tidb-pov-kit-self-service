@@ -35,30 +35,37 @@ tier:
 industry:
   selected: "general_auto"  # general_auto | banking | healthcare | gaming | retail_ecommerce | saas | iot_telemetry | adtech | logistics
 
-# Optional: first-step dataset bootstrap from S3 into TiDB.
-# This is the "showcase fast path" for pre-staged OLTP/OLAP packs.
+# First-step S3 dataset bootstrap — loads industry-specific ~3 GB OLTP+OLAP packs
+# into TiDB before synthetic data generation runs.
+# Pre-staged datasets live in the PingCAP-owned results bucket; no S3 bucket of
+# your own is required. TiDB IMPORT INTO pulls data directly from S3.
+#
+# Auth for TiDB IMPORT INTO from S3 (choose ONE path):
+#   Option A — IAM role (recommended for EC2 with instance profile):
+#              leave s3_role_arn blank; TiDB will use the runner's attached role.
+#   Option B — Cross-account AssumeRole:
+#              set s3_role_arn + s3_external_id.
+#   Option C — Static access keys:
+#              set s3_access_key_id + s3_secret_access_key (+ s3_session_token for temp creds).
 dataset_bootstrap:
-  enabled: false
-  required: false
+  enabled: true
+  required: true
   profile_key: ""                            # optional override; defaults to industry.selected
-  manifest_uri: ""                           # optional s3://bucket/prefix/manifest.json
-  s3_bucket: ""                              # if manifest_uri omitted, uses s3://<bucket>/<s3_prefix>/manifest.json
+  manifest_uri: ""                           # optional override; defaults to PingCAP bucket below
+  s3_bucket: "pingcap-tidb-pov-results-219248915861"
   s3_prefix: "tidb-pov/datasets"
   aws_region: "us-east-1"
-  # Auth for TiDB IMPORT INTO from S3 (choose one path):
-  # 1) role_arn + external_id, OR
-  # 2) access_key_id + secret_access_key (+ session_token for temp creds)
   s3_role_arn: ""
   s3_external_id: ""
   s3_access_key_id: ""
   s3_secret_access_key: ""
   s3_session_token: ""
-  import_threads: 0                         # 0=auto; override IMPORT INTO WITH thread=N
+  import_threads: 0                         # 0=auto; set 1 on tiny tiers if IMPORT INTO hits CPU guardrail
   parallel_import_jobs: 2                   # OLTP + OLAP imports run in parallel by default
   oltp_table: "poc_seed_oltp"
   olap_table: "poc_seed_olap"
   enable_tiflash_for_olap: true
-  skip_synthetic_generation: false           # true to run only S3 bootstrap data path
+  skip_synthetic_generation: false           # true to skip synthetic generation and use only S3 data
 
 # Optional: run load generation in customer AWS account (cross-account AssumeRole).
 # This keeps EC2/network run costs in customer account while summary artifacts
@@ -85,7 +92,13 @@ aws_runner:
 test:
   run_mode:             "validation" # validation | performance
   schema_mode:          "tidb_optimized"  # tidb_optimized | mysql_compatible
-  data_scale:            "small"      # serverless default: small
+  # load_size controls QPS intensity (concurrency, duration), NOT data volume.
+  # All sizes use the same ~3GB dataset from S3.
+  #   small  — fits Starter/free tier (low RU consumption)
+  #   medium — sized for Essential tier
+  #   large  — sized for Essential/Premium/Dedicated tiers
+  # Running medium/large on Starter will exceed free limits (use --force to override).
+  load_size:             "small"      # small | medium | large
   duration_seconds:      120
   concurrency_levels:    [8, 16, 32]
   pre_warm_enabled:      true

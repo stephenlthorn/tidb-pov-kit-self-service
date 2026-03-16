@@ -762,10 +762,12 @@ def normalize_cfg(cfg: Dict) -> Dict:
     if not isinstance(cl, list):
         cfg["test"]["concurrency_levels"] = [8, 16, 32]
 
-    scale = str(cfg.get("test", {}).get("data_scale", "small")).strip().lower()
-    if scale not in {"small", "medium", "large"}:
-        scale = "small"
-    cfg["test"]["data_scale"] = scale
+    # Normalize load_size (preferred) with data_scale fallback for backward compat
+    load_size = str(cfg.get("test", {}).get("load_size", cfg.get("test", {}).get("data_scale", "small"))).strip().lower()
+    if load_size not in {"small", "medium", "large"}:
+        load_size = "small"
+    cfg["test"]["load_size"] = load_size
+    cfg["test"]["data_scale"] = load_size  # backward compat
 
     run_mode = str(cfg.get("test", {}).get("run_mode", "validation")).strip().lower()
     if run_mode not in {"validation", "performance"}:
@@ -2725,6 +2727,7 @@ def _app_state_set(key: str, value_json: str) -> None:
 
 def create_app(config_path: Path) -> Flask:
     app = Flask(__name__, template_folder=str(TEMPLATES_DIR))
+    app.secret_key = os.environ.get("POC_SECRET_KEY", os.urandom(32))
 
     @app.get("/")
     def index():

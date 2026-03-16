@@ -384,6 +384,18 @@ ensure_dataset_import_auth() {
   exit 2
 }
 
+reset_local_run_artifacts() {
+  mkdir -p results
+  rm -f \
+    results/results.db \
+    results/metrics_summary.json \
+    results/tidb_pov_report.pdf \
+    results/run_all.log \
+    results/data_manifest.json \
+    results/dataset_bootstrap.json
+  echo "[safe-e2e] reset local run artifacts for a clean E2E signal."
+}
+
 echo "[safe-e2e] config: ${CONFIG_PATH}"
 echo "[safe-e2e] region: ${AWS_REGION}"
 trap on_exit_cleanup EXIT
@@ -391,6 +403,7 @@ aws_identity_check
 s3_upload_preflight
 terminate_tagged_instances
 reset_tidb_database
+reset_local_run_artifacts
 enforce_small_defaults
 publish_general_dataset_pack
 ensure_dataset_import_auth
