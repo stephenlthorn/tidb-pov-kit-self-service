@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Module 5 — Online DDL (Zero-Downtime Schema Change)
+Module 5 - Online DDL (Zero-Downtime Schema Change)
 Demonstrates that TiDB can perform schema changes (ADD COLUMN, ADD INDEX,
 MODIFY COLUMN, DROP COLUMN) with zero application downtime.
 
@@ -14,6 +14,13 @@ import sys, os, time, threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.comparison_targets import (
+    comparison_can_run,
+    family_skips_module,
+    normalize_comparison_cfg,
+    target_family,
+    target_label,
+)
 from lib.industry_profiles import resolve_industry_from_cfg
 from lib.result_store import init_db, start_module, end_module, get_latency_stats
 from lib.db_utils import get_connection
@@ -23,6 +30,7 @@ from load.workload_definitions import (
     build_weighted_pool,
     transactional_workload_for_cfg,
 )
+from load.postgres_workload_definitions import translate_pool
 
 MODULE    = "05_online_ddl"
 OLTP_CONC = 24
@@ -36,21 +44,33 @@ def build_ddl_steps(table: str, ref_col: str) -> list[dict]:
             "name": "ADD COLUMN (nullable)",
             "sql": f"ALTER TABLE `{table}` ADD COLUMN extra_meta VARCHAR(255) DEFAULT NULL",
             "revert": f"ALTER TABLE `{table}` DROP COLUMN extra_meta",
+            "pg_sql": f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS extra_meta VARCHAR(255) DEFAULT NULL',
+            "pg_revert": f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS extra_meta',
         },
         {
             "name": "ADD INDEX",
             "sql": f"ALTER TABLE `{table}` ADD INDEX idx_ddl_test (`{ref_col}`, status)",
             "revert": f"ALTER TABLE `{table}` DROP INDEX idx_ddl_test",
+            # Use plain CREATE INDEX (blocking) for an apples-to-apples
+            # demonstration of the differentiator: TiDB's online add-index is
+            # non-blocking by default; PG requires CONCURRENTLY to avoid
+            # blocking writes. The contrast is the point of M5 on PG.
+            "pg_sql": f'CREATE INDEX idx_ddl_test ON "{table}" ("{ref_col}", status)',
+            "pg_revert": "DROP INDEX IF EXISTS idx_ddl_test",
         },
         {
             "name": "MODIFY COLUMN (widen)",
             "sql": f"ALTER TABLE `{table}` MODIFY COLUMN `{ref_col}` VARCHAR(128)",
             "revert": f"ALTER TABLE `{table}` MODIFY COLUMN `{ref_col}` VARCHAR(64)",
+            "pg_sql": f'ALTER TABLE "{table}" ALTER COLUMN "{ref_col}" TYPE VARCHAR(128)',
+            "pg_revert": f'ALTER TABLE "{table}" ALTER COLUMN "{ref_col}" TYPE VARCHAR(64)',
         },
         {
             "name": "ADD COLUMN + DEFAULT",
             "sql": f"ALTER TABLE `{table}` ADD COLUMN pov_flag TINYINT NOT NULL DEFAULT 0",
             "revert": f"ALTER TABLE `{table}` DROP COLUMN pov_flag",
+            "pg_sql": f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS pov_flag SMALLINT NOT NULL DEFAULT 0',
+            "pg_revert": f'ALTER TABLE "{table}" DROP COLUMN IF EXISTS pov_flag',
         },
     ]
 
@@ -65,7 +85,7 @@ def run(cfg: dict):
     ddl_steps = build_ddl_steps(ddl_table, ddl_ref_col)
 
     print(f"\n{'='*60}")
-    print(f"  Module 5: Online DDL — Zero-Downtime Schema Changes")
+    print(f"  Module 5: Online DDL - Zero-Downtime Schema Changes")
     print(f"  OLTP concurrency: {OLTP_CONC} | DDL steps: {len(ddl_steps)}")
     print(f"  Industry table: {ddl_table} ({ddl_ref_col})")
     print(f"{'='*60}")
@@ -115,6 +135,36 @@ def run(cfg: dict):
         # Revert DDL before next step
         _revert_ddl(cfg["tidb"], step)
 
+    # ── Optional Postgres comparison pass ────────────────────────────────────
+    comparison_results = []
+    comparison_cfg = normalize_comparison_cfg(cfg.get("comparison_db") or {})
+    if (
+        comparison_can_run(comparison_cfg)
+        and target_family(comparison_cfg.get("target", "")) == "postgres"
+        and not family_skips_module("postgres", MODULE)
+    ):
+        comparison_label = comparison_cfg.get("label") or target_label(comparison_cfg["target"])
+        print(f"\n  Postgres comparison pass on {comparison_label}...")
+        pg_pool = build_weighted_pool(translate_pool(oltp_pool))
+        pg_runner = LoadRunner(
+            tidb_cfg=None,
+            counts=counts,
+            module=MODULE,
+            comparison_cfg=comparison_cfg,
+            comparison_label=comparison_label,
+        )
+        for step in ddl_steps:
+            if not step.get("pg_sql"):
+                continue
+            pg_phase = f"pg_{step['name'].lower().replace(' ', '_').replace('(', '').replace(')', '')}"
+            print(f"    PG DDL: {step['name']}...")
+            pg_result = _run_pg_ddl_with_load(
+                comparison_cfg, pg_runner, pg_pool, OLTP_CONC, step, pg_phase, counts,
+                comparison_label,
+            )
+            comparison_results.append(pg_result)
+            _revert_pg_ddl(comparison_cfg, step)
+
     # ── Summary ──────────────────────────────────────────────────────────────
     all_passed = all(r["error"] is None for r in results)
     end_module(
@@ -132,7 +182,19 @@ def run(cfg: dict):
               f"{r.get('p99_during', 0):>10.1f}ms "
               f"{'✓' if r['error'] is None else '✗':>8}")
 
-    return {"baseline": baseline, "ddl_steps": results}
+    if comparison_results:
+        print(f"\n  Postgres DDL comparison:")
+        print(f"  {'DDL Operation':<40} {'DDL Time':>10} {'p99 During':>12} {'Errors':>8}")
+        print(f"  {'-'*74}")
+        for r in comparison_results:
+            print(f"  {r['name']:<40} {r['ddl_sec']:>9.1f}s "
+                  f"{r.get('p99_during', 0):>10.1f}ms "
+                  f"{'OK' if r['error'] is None else 'ERR':>8}")
+    return {
+        "baseline": baseline,
+        "ddl_steps": results,
+        "ddl_steps_postgres": comparison_results,
+    }
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -187,6 +249,48 @@ def _revert_ddl(tidb_cfg, step):
         conn.close()
     except Exception as e:
         print(f"    (revert warning: {e})")
+
+
+def _run_pg_ddl_with_load(pg_cfg, runner, pool, concurrency, step, phase_name, counts,
+                          comparison_label):
+    """Postgres-side counterpart to _run_ddl_with_load. Drives load against PG
+    through the comparison_cfg path and times the PG dialect DDL alongside."""
+    ddl_conn = get_connection(pg_cfg)
+    ddl_cur = ddl_conn.cursor()
+
+    runner.run(pool, concurrency=concurrency, duration_sec=10, phase=f"{phase_name}_pre")
+
+    t0 = time.perf_counter()
+    err = None
+    try:
+        ddl_cur.execute(step["pg_sql"])
+    except Exception as exc:
+        err = str(exc)
+    ddl_sec = time.perf_counter() - t0
+
+    runner.run(pool, concurrency=concurrency,
+               duration_sec=POST_DDL_SEC, phase=f"{phase_name}_post")
+    ddl_conn.close()
+
+    stats_during = get_latency_stats(MODULE, phase=f"{phase_name}_post", db_label=comparison_label)
+    return {
+        "name":       step["name"],
+        "ddl_sec":    round(ddl_sec, 2),
+        "p99_during": stats_during.get("p99_ms", 0),
+        "error":      err,
+    }
+
+
+def _revert_pg_ddl(pg_cfg, step):
+    if not step.get("pg_revert"):
+        return
+    try:
+        conn = get_connection(pg_cfg)
+        cur = conn.cursor()
+        cur.execute(step["pg_revert"])
+        conn.close()
+    except Exception as exc:
+        print(f"    (PG revert warning: {exc})")
 
 
 def _get_counts(cfg):

@@ -1,0 +1,24 @@
+# Sibling config used only to seed the MySQL container via seed_comparison.py.
+# The comparison_db block points at the local MySQL container so the seeder
+# (which dispatches on comparison_db.target family) creates the MySQL-dialect
+# schema and data on that side as well.
+
+tidb:
+  host:     "127.0.0.1"
+  port:     15432
+  user:     "pov"
+  password: "povpass"
+  database: "pov_test"
+  ssl:      false
+
+comparison_db:
+  enabled:  true
+  target:   "mysql"
+  label:    "MySQL 8.4 (local)"
+  host:     "127.0.0.1"
+  port:     23306
+  user:     "pov"
+  password: "povpass"
+  database: "pov_test"
+  schema:   "public"
+  ssl:      false

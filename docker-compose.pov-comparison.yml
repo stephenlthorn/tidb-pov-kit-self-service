@@ -1,0 +1,56 @@
+# Local MySQL 8.4 + PostgreSQL 16 for parallel POV comparison runs.
+# Non-default host ports to avoid clashing with local installs and other
+# Docker stacks (e.g., the dm-mysql84-validation stack uses 13306):
+#   MySQL    -> host 23306
+#   Postgres -> host 15432
+#
+# Usage:
+#   docker compose -f docker-compose.pov-comparison.yml up -d
+#   docker compose -f docker-compose.pov-comparison.yml down -v
+#
+# Credentials are local-only (DB is not exposed beyond loopback).
+
+services:
+  mysql84:
+    image: mysql:8.4
+    container_name: pov_mysql84
+    restart: unless-stopped
+    command:
+      - --max_connections=500
+      - --local_infile=ON
+    environment:
+      MYSQL_ROOT_PASSWORD: povroot
+      MYSQL_DATABASE: pov_test
+      MYSQL_USER: pov
+      MYSQL_PASSWORD: povpass
+    ports:
+      - "127.0.0.1:23306:3306"
+    volumes:
+      - pov_mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-ppovroot"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+  postgres16:
+    image: postgres:16
+    container_name: pov_postgres16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pov_test
+      POSTGRES_USER: pov
+      POSTGRES_PASSWORD: povpass
+    ports:
+      - "127.0.0.1:15432:5432"
+    volumes:
+      - pov_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pov -d pov_test"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+
+volumes:
+  pov_mysql_data:
+  pov_postgres_data:

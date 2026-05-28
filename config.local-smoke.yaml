@@ -1,0 +1,66 @@
+# Local smoke-test config for the parallel-comparison runner.
+# Points TiDB cfg at MySQL (since user is "skip TiDB, validate comparison_db
+# side") so the runner has a working primary endpoint, and uses Postgres as
+# the comparison_db. The MySQL container is treated as a stand-in for TiDB
+# from the runner's perspective; the goal is to validate that BOTH the
+# mysql-family driver path AND the postgres-family driver path produce live
+# parallel traffic against real databases.
+
+# "TiDB" side - actually local MySQL 8.4 for this smoke test.
+tidb:
+  host:     "127.0.0.1"
+  port:     23306
+  user:     "pov"
+  password: "povpass"
+  database: "pov_test"
+  ssl:      false
+
+# Postgres comparison side
+comparison_db:
+  enabled:  true
+  target:   "postgres"
+  label:    "PostgreSQL 16 (local)"
+  host:     "127.0.0.1"
+  port:     15432
+  user:     "pov"
+  password: "povpass"
+  database: "pov_test"
+  schema:   "public"
+  ssl:      false
+  ssl_mode: "disable"
+
+tier:
+  selected: "serverless"
+
+industry:
+  selected: "general_auto"
+
+test:
+  run_mode:             "validation"
+  schema_mode:          "mysql_compatible"
+  data_scale:            "small"
+  duration_seconds:      30
+  concurrency_levels:    [4]
+  pre_warm_enabled:      false
+  warm_phase_enabled:    false
+  workload_mix:          "mixed"
+  read_weight_multiplier: 1.0
+  write_weight_multiplier: 1.0
+
+customer_queries: []
+
+modules:
+  customer_queries:  false
+  baseline_perf:     true
+  elastic_scale:     false
+  high_availability: false
+  write_contention:  false
+  htap:              false
+  online_ddl:        false
+  mysql_compat:      false
+  data_import:       false
+  vector_search:     false
+
+report:
+  customer_name: "Local Smoke"
+  se_name:       "stephen.thorn@pingcap.com"

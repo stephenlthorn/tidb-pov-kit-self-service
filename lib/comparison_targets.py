@@ -1,5 +1,5 @@
 """
-comparison_targets.py — Comparison database target definitions + helpers.
+comparison_targets.py - Comparison database target definitions + helpers.
 
 The current benchmark workload generator and SQL templates are MySQL dialect.
 Targets in non-MySQL families can be configured in the UI/config, but are
@@ -39,19 +39,19 @@ TARGET_DEFINITIONS: Dict[str, Dict] = {
         "label": "PostgreSQL",
         "family": "postgres",
         "default_port": 5432,
-        "runner_supported": False,
+        "runner_supported": True,
     },
     "rds_postgres": {
         "label": "RDS PostgreSQL",
         "family": "postgres",
         "default_port": 5432,
-        "runner_supported": False,
+        "runner_supported": True,
     },
     "aurora_postgres": {
         "label": "Aurora PostgreSQL",
         "family": "postgres",
         "default_port": 5432,
-        "runner_supported": False,
+        "runner_supported": True,
     },
     "microsoft_sql_server": {
         "label": "Microsoft SQL Server",
@@ -60,6 +60,30 @@ TARGET_DEFINITIONS: Dict[str, Dict] = {
         "runner_supported": False,
     },
 }
+
+# Modules that should be skipped per target family. These modules are either
+# MySQL-dialect by design (M6), MySQL bulk-loader specific (M7), or use a
+# TiDB-only storage feature (M8 vector). M4 (HTAP) and M5 (Online DDL) are
+# included for postgres because the goal there is to show TiDB's advantage by
+# direct comparison, not to skip the comparison.
+SKIP_MODULES_BY_FAMILY: Dict[str, set] = {
+    "postgres": {"06_mysql_compat", "07_data_import", "08_vector_search"},
+    "mssql": {
+        "06_mysql_compat",
+        "07_data_import",
+        "08_vector_search",
+        "04_htap_concurrent",
+        "05_online_ddl",
+    },
+}
+
+
+def family_skips_module(family: str, module: str) -> bool:
+    return module in SKIP_MODULES_BY_FAMILY.get(family or "", set())
+
+
+def target_family(target: str) -> str:
+    return str(target_definition(target).get("family", "mysql"))
 
 DEFAULT_TARGET = "aurora_mysql"
 

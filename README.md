@@ -1,7 +1,7 @@
 # TiDB Cloud Self-Service PoV Kit
 
 A fully automated Proof of Value toolkit for TiDB Cloud. Spin up a cluster,
-edit one config file, and run a single command — the kit handles the rest and
+edit one config file, and run a single command - the kit handles the rest and
 produces a professional PDF report with:
 - a buyer-facing decision summary
 - exact test scope and environment context
@@ -15,16 +15,16 @@ produces a professional PDF report with:
 
 | Module | What it proves |
 |--------|---------------|
-| M0 — Customer Query Validation | Your SQL queries run on TiDB without changes |
-| M1 — Baseline OLTP Performance | Raw throughput and latency under concurrent load, including pre-warm, warm steady-state, and dedicated point-get lookup phase |
-| M2 — Elastic Auto-Scaling | TiDB Cloud adds capacity automatically; p99 stays flat |
-| M3 — High Availability | Sub-30s RTO after a node failure with zero manual intervention |
-| M3b — Write Contention | AUTO_RANDOM eliminates hot-region bottlenecks vs AUTO_INCREMENT |
-| M4 — HTAP Concurrent | Analytics run on TiFlash without degrading OLTP on TiKV |
-| M5 — Online DDL | Schema changes complete with zero application downtime |
-| M6 — SQL Compatibility | TiDB SQL compatibility checks + source unsupported-feature inventory (MySQL/PostgreSQL/SQL Server) |
-| M7 — Data Import | Bulk load throughput: IMPORT INTO vs LOAD DATA vs INSERT |
-| M8 — Vector Search *(optional)* | ANN search with HNSW index (TiDB AI track) |
+| M0 - Customer Query Validation | Your SQL queries run on TiDB without changes |
+| M1 - Baseline OLTP Performance | Raw throughput and latency under concurrent load, including pre-warm, warm steady-state, and dedicated point-get lookup phase |
+| M2 - Elastic Auto-Scaling | TiDB Cloud adds capacity automatically; p99 stays flat |
+| M3 - High Availability | Sub-30s RTO after a node failure with zero manual intervention |
+| M3b - Write Contention | AUTO_RANDOM eliminates hot-region bottlenecks vs AUTO_INCREMENT |
+| M4 - HTAP Concurrent | Analytics run on TiFlash without degrading OLTP on TiKV |
+| M5 - Online DDL | Schema changes complete with zero application downtime |
+| M6 - SQL Compatibility | TiDB SQL compatibility checks + source unsupported-feature inventory (MySQL/PostgreSQL/SQL Server) |
+| M7 - Data Import | Bulk load throughput: IMPORT INTO vs LOAD DATA vs INSERT |
+| M8 - Vector Search *(optional)* | ANN search with HNSW index (TiDB AI track) |
 
 M6 also writes source feature inventory output to:
 - `results/compat_source_unsupported_summary.json`
@@ -47,24 +47,24 @@ omitted from the chart section to keep the report concise.
 If you received a PoV report and want to understand the methodology, here is a plain-English summary:
 
 **What generates the workload?**
-An EC2 instance (`c7i.2xlarge` by default) in the customer's own AWS account runs a purpose-built OLTP load generator against TiDB Cloud. This is *not* a replay of the customer's production queries — it is a synthetic benchmark calibrated to the chosen industry profile (banking, healthcare, gaming, retail, etc.). The EC2 instance and load generator are spun up automatically by the kit and torn down when the run completes.
+An EC2 instance (`c7i.2xlarge` by default) in the customer's own AWS account runs a purpose-built OLTP load generator against TiDB Cloud. This is *not* a replay of the customer's production queries - it is a synthetic benchmark calibrated to the chosen industry profile (banking, healthcare, gaming, retail, etc.). The EC2 instance and load generator are spun up automatically by the kit and torn down when the run completes.
 
 **Where does the test data come from?**
 Industry-specific seed datasets (~3 GB each, covering OLTP transactions and OLAP aggregation tables) are pre-staged in a PingCAP S3 bucket. TiDB Cloud's `IMPORT INTO` command pulls the data directly from S3 into the cluster before tests begin. No data leaves TiDB Cloud; the import is a one-way inbound load.
 
 **Is the kit "pre-tuned" to inflate results?**
-Each test module applies the same TiDB best practices that any production deployment should use: `AUTO_RANDOM` primary keys (eliminating hot-region write bottlenecks), column-store `TiFlash` replicas for analytics, and schema settings matched to the workload pattern. These are not artificial optimizations — they are the recommended production configuration. The goal is to show what TiDB actually achieves when set up correctly.
+Each test module applies the same TiDB best practices that any production deployment should use: `AUTO_RANDOM` primary keys (eliminating hot-region write bottlenecks), column-store `TiFlash` replicas for analytics, and schema settings matched to the workload pattern. These are not artificial optimizations - they are the recommended production configuration. The goal is to show what TiDB actually achieves when set up correctly.
 
 **How does this compare to a traditional PoC?**
-A traditional PoC typically requires the customer to provision infrastructure, load their own data, write benchmark scripts, and interpret raw results — a process that can take weeks. This kit compresses that to hours: infrastructure is automated, data loads from S3, modules run sequentially, and the report is generated automatically. The output is a decision-ready PDF, not a spreadsheet of raw numbers.
+A traditional PoC typically requires the customer to provision infrastructure, load their own data, write benchmark scripts, and interpret raw results - a process that can take weeks. This kit compresses that to hours: infrastructure is automated, data loads from S3, modules run sequentially, and the report is generated automatically. The output is a decision-ready PDF, not a spreadsheet of raw numbers.
 
 **Report reading order:**
-1. **Prospect Decision Summary** — clear decision + recommended next step
-2. **What Was Tested** — exact executed scope and environment
-3. **Executive Summary** — headline KPIs (warm latency, throughput, SQL compatibility)
-4. **Module charts** — evidence for each executed module
-5. **SQL Compatibility Index** — checks that passed/failed + fix directions
-6. **KPI appendix** — full threshold evaluation table for technical review
+1. **Prospect Decision Summary** - clear decision + recommended next step
+2. **What Was Tested** - exact executed scope and environment
+3. **Executive Summary** - headline KPIs (warm latency, throughput, SQL compatibility)
+4. **Module charts** - evidence for each executed module
+5. **SQL Compatibility Index** - checks that passed/failed + fix directions
+6. **KPI appendix** - full threshold evaluation table for technical review
 
 ---
 
@@ -74,7 +74,7 @@ Follow every step below exactly. Each step tells you which website to visit, wha
 
 ---
 
-### Step 1 — Create a TiDB Cloud account and cluster
+### Step 1 - Create a TiDB Cloud account and cluster
 
 **1a. Create your account**
 
@@ -87,7 +87,7 @@ Follow every step below exactly. Each step tells you which website to visit, wha
 **1b. Create a Serverless cluster (free)**
 
 1. After logging in you should see the **Clusters** page. Click **Create Cluster**.
-2. Select **Serverless** (it is free — no credit card required).
+2. Select **Serverless** (it is free - no credit card required).
 3. Pick any region (e.g. **US East (N. Virginia)**).
 4. Give your cluster any name (e.g. `pov-test`).
 5. Click **Create** at the bottom right. The cluster will be ready in about 30 seconds.
@@ -97,16 +97,16 @@ Follow every step below exactly. Each step tells you which website to visit, wha
 1. Once the cluster status shows **Active**, click on the cluster name to open it.
 2. Click **Connect** in the top right area of the cluster page.
 3. A panel opens. Make sure the **General** tab is selected.
-4. You will see three values — copy each one to a text file right now:
-   - **Host** — looks like `gateway01.us-east-1.prod.aws.tidbcloud.com`
-   - **Username** — looks like `AbCdEfGhIj1K2.root` (copy this exactly, including the prefix before the dot)
-   - **Password** — click **Generate Password** if you haven't already, then copy it
+4. You will see three values - copy each one to a text file right now:
+   - **Host** - looks like `gateway01.us-east-1.prod.aws.tidbcloud.com`
+   - **Username** - looks like `AbCdEfGhIj1K2.root` (copy this exactly, including the prefix before the dot)
+   - **Password** - click **Generate Password** if you haven't already, then copy it
 
 > Keep that text file open. You will paste these values in Step 4.
 
 ---
 
-### Step 2 — Install prerequisites on your machine
+### Step 2 - Install prerequisites on your machine
 
 **2a. Check if you have Python 3.10+**
 
@@ -147,13 +147,13 @@ If you see `command not found`, install it:
 
 ---
 
-### Step 3 — Set up AWS credentials
+### Step 3 - Set up AWS credentials
 
 The kit uploads run results and imports test data from an S3 bucket. You need AWS credentials to do this. **Pick the option that matches your situation:**
 
 ---
 
-#### Option A — You have AWS access keys (most common for first-time users)
+#### Option A - You have AWS access keys (most common for first-time users)
 
 1. Log in to the AWS console at **https://console.aws.amazon.com**
 2. Click your name in the top-right corner → **Security credentials**
@@ -174,7 +174,7 @@ The kit uploads run results and imports test data from an S3 bucket. You need AW
 
 ---
 
-#### Option B — You use AWS SSO / IAM Identity Center (PingCAP employees or enterprise users)
+#### Option B - You use AWS SSO / IAM Identity Center (PingCAP employees or enterprise users)
 
 1. In your terminal, run:
    ```bash
@@ -189,7 +189,7 @@ The kit uploads run results and imports test data from an S3 bucket. You need AW
 
 ---
 
-#### Option C — You are running on an EC2 instance with an IAM role attached
+#### Option C - You are running on an EC2 instance with an IAM role attached
 
 No action needed. The kit automatically uses the instance's IAM role. Skip to Step 4.
 
@@ -207,7 +207,7 @@ You should see a list of folders. If you see `Access Denied`, ask your AWS admin
 
 ---
 
-### Step 4 — Download the kit and configure it
+### Step 4 - Download the kit and configure it
 
 **4a. Clone the repository**
 
@@ -223,7 +223,7 @@ cd tidb-pov-kit
 bash scripts/bootstrap_cli.sh
 ```
 
-The last command installs Python dependencies. It may take 1–2 minutes. When it finishes you should see no errors.
+The last command installs Python dependencies. It may take 1-2 minutes. When it finishes you should see no errors.
 
 **4b. Create your config file**
 
@@ -256,7 +256,7 @@ tidb:
 
 Replace those three values with the ones you copied in Step 1c:
 - Replace the `host` value with your **Host**
-- Replace the `user` value with your **Username** (copy it exactly — include the prefix before the dot)
+- Replace the `user` value with your **Username** (copy it exactly - include the prefix before the dot)
 - Replace the `password` value with your **Password**
 
 Example of what it should look like after editing (your values will be different):
@@ -285,7 +285,7 @@ If you are not sure, leave it as `general_auto`.
 
 ---
 
-### Step 5 — Run the PoV
+### Step 5 - Run the PoV
 
 **Paste this single command and press Enter:**
 
@@ -296,10 +296,10 @@ If you are not sure, leave it as `general_auto`.
 The kit will:
 1. Connect to TiDB and verify credentials
 2. Import ~3 GB of test data from S3 into your cluster
-3. Run all test modules one by one (takes 20–40 minutes total)
+3. Run all test modules one by one (takes 20-40 minutes total)
 4. Generate a PDF report
 
-You will see live progress in the terminal. It is normal for steps to take several minutes each — do not close the terminal.
+You will see live progress in the terminal. It is normal for steps to take several minutes each - do not close the terminal.
 
 **If you prefer a browser-based UI instead:**
 
@@ -311,7 +311,7 @@ Then open **http://localhost:8787** in your browser and click through the wizard
 
 ---
 
-### Step 6 — Get your report
+### Step 6 - Get your report
 
 When the run finishes, your report is here:
 
@@ -333,12 +333,12 @@ s3://pingcap-tidb-pov-results-219248915861/tidb-pov/default/runs/<run-tag>/
 | Error message | What to do |
 |--------------|------------|
 | `Connection refused` or `Access denied for user` | Open `config.yaml` and double-check `host`, `user`, and `password`. Make sure there are no extra spaces or quote marks. |
-| `Unable to locate credentials` | Run `aws sts get-caller-identity` — if it fails, re-do Step 3. |
+| `Unable to locate credentials` | Run `aws sts get-caller-identity` - if it fails, re-do Step 3. |
 | `Token has expired and refresh failed` | Run `aws sso login` again (Option B users only). |
 | `AccessDenied: kms:GenerateDataKey` | Your AWS user is missing KMS permissions. Ask your AWS admin to add `kms:GenerateDataKey`, `kms:Decrypt`, `kms:DescribeKey` to your role. |
 | `Run blocked: S3 archival is required` | Your AWS credentials don't have S3 write access. Re-do Step 3 and re-run the S3 verify command. |
 | IMPORT INTO fails with CPU error | Open `config.yaml`, find `dataset_bootstrap:`, and change `import_threads: 0` to `import_threads: 1`. Then re-run. |
-| Run appears stuck at `[5/10] M1` | Normal — M1 has multiple timed phases. Let it run for 10–15 minutes before worrying. |
+| Run appears stuck at `[5/10] M1` | Normal - M1 has multiple timed phases. Let it run for 10-15 minutes before worrying. |
 | `git: command not found` | Re-do Step 2b. |
 | `python3: command not found` | Re-do Step 2a. |
 
@@ -401,10 +401,12 @@ tidb:
 # Current automated runner support: Aurora MySQL, MySQL, RDS MySQL, SingleStore.
 comparison_db:
   enabled:  false
-  target:   "aurora_mysql"  # aurora_mysql | mysql | rds_mysql | postgres | rds_postgres | aurora_postgres | microsoft_sql_server | singlestore
+  target:   "aurora_mysql"  # MySQL family: aurora_mysql | mysql | rds_mysql | singlestore
+                            # Postgres family: postgres | rds_postgres | aurora_postgres
+                            # Configurable only: microsoft_sql_server
   label:    "Aurora MySQL"
   host:     "aurora-cluster.us-west-2.rds.amazonaws.com"
-  port:     3306
+  port:     3306            # 3306 for MySQL family, 5432 for Postgres family
   user:     "admin"
   password: "your-password"
   database: "pov_test"
@@ -465,7 +467,7 @@ test:
   import_into_source_uri: ""        # optional s3://bucket/path/file.csv
   import_source_size_gb: 0.0        # optional, for GB/min with remote import
 
-# First-step S3 dataset bootstrap — loads industry-specific ~3 GB OLTP+OLAP packs.
+# First-step S3 dataset bootstrap - loads industry-specific ~3 GB OLTP+OLAP packs.
 # Pre-staged datasets live in the PingCAP-owned results bucket by default.
 # Auth: leave all s3_* auth fields blank if running on EC2 with an instance profile.
 dataset_bootstrap:
@@ -494,7 +496,7 @@ dataset_bootstrap:
 # - performance mode is intended for high-throughput benchmarking workflows.
 # - tidb_optimized schema mode applies TiDB-friendly key/table options for write-heavy paths.
 
-# Your production queries (optional — validated and replayed in M0/M1)
+# Your production queries (optional - validated and replayed in M0/M1)
 customer_queries:
   - name: "example_query"
     sql:  "SELECT * FROM users WHERE id = ?"
@@ -515,7 +517,7 @@ modules:
 
 report:
   customer_name: "Acme Corp"
-  se_name:       "Jane Smith — PingCAP"
+  se_name:       "Jane Smith - PingCAP"
   # Optional: override KPI threshold guidance used in PDF appendix.
   # Supported tier keys: all_tiers, serverless|starter, essential, premium, dedicated, byoc
   # kpi_threshold_overrides:
@@ -602,9 +604,57 @@ Set `comparison_db.target` to one of:
 - `singlestore`
 
 Automated side-by-side execution is currently supported for:
-- `aurora_mysql`, `mysql`, `rds_mysql`, `singlestore`
+- **MySQL family** (`aurora_mysql`, `mysql`, `rds_mysql`, `singlestore`): every module
+- **PostgreSQL family** (`postgres`, `rds_postgres`, `aurora_postgres`): M0-M5 (see matrix below)
 
-PostgreSQL and Microsoft SQL Server targets are fully configurable in the UI and config, and are retained in project configuration for comparison planning. The current workload runner remains MySQL-dialect, so these targets are not yet executed automatically.
+Microsoft SQL Server is configurable but not yet executed by the runner.
+
+### Per-module compatibility matrix
+
+| Module | TiDB | MySQL family | Postgres family | Notes |
+|---|:-:|:-:|:-:|---|
+| M0 Customer queries | ✅ | ✅ | ✅ | Customer SQL replayed verbatim; may fail if it uses MySQL-only syntax. |
+| M1 Baseline perf | ✅ | ✅ | ✅ | Dialect-translated workload. |
+| M2 Elastic scale | ✅ | ✅ | ✅ | Same workload as M1. |
+| M3 HA | ✅ | ✅ | ✅ | Connection resilience. |
+| M3b Write contention | ✅ | ✅ | ✅ | AUTO_RANDOM is the differentiator; PG result is the contrast. |
+| **M4 HTAP** | ✅ | - | ✅ row store | PG runs the analytic workload on its row store - no TiFlash equivalent, used to show degradation. |
+| **M5 Online DDL** | ✅ | ✅ | ✅ | PG uses blocking CREATE INDEX (TiDB online add-index is the differentiator). |
+| M6 MySQL compat | ✅ | ✅ | **skipped** | Module purpose is MySQL syntax compatibility. |
+| M7 Data import | ✅ | ✅ | **skipped** | LOAD DATA / IMPORT INTO are MySQL/TiDB; PG uses COPY (different test). |
+| M8 Vector search | ✅ | - | **skipped** | Requires pgvector extension; deferred. |
+
+### Driver requirements
+
+- MySQL/Aurora MySQL/RDS MySQL/SingleStore: `mysql-connector-python>=8.0.0`
+- PostgreSQL/RDS PostgreSQL/Aurora PostgreSQL: `psycopg[binary]>=3.2.0`
+
+Both drivers are listed in `requirements.txt`.
+
+### Seeding the comparison database
+
+The comparison DB needs the same schemas as TiDB. For RDS/Aurora targets you
+will normally point at a pre-populated customer database. For local
+validation, the kit ships `setup/seed_comparison.py`, which dispatches on
+`comparison_db.target` family and creates schemas + a small synthetic data
+set with `INSERT IGNORE` / `ON CONFLICT DO NOTHING` so it's idempotent:
+
+```bash
+python setup/seed_comparison.py --config config.yaml \
+    --users 50000 --accounts 75000 --transactions 5000000
+```
+
+### Local two-engine smoke test
+
+A `docker-compose.pov-comparison.yml` is included for local validation:
+
+```bash
+docker compose -f docker-compose.pov-comparison.yml up -d
+# Edit config.local-smoke.yaml if needed (MySQL on 23306, Postgres on 15432)
+python setup/seed_comparison.py --config config.local-smoke.yaml --users 2000
+python setup/seed_comparison.py --config config.local-smoke-mysql.yaml --users 2000
+python tests/01_baseline_perf/run.py config.local-smoke.yaml
+```
 
 ---
 
@@ -612,7 +662,7 @@ PostgreSQL and Microsoft SQL Server targets are fully configurable in the UI and
 
 Open **TiDB Dashboard** and **Grafana** in your browser while the kit runs.
 See **`setup/02_observability_guide.md`** for the exact panels to watch for
-each module — with descriptions of what to screenshot for customer slides.
+each module - with descriptions of what to screenshot for customer slides.
 
 ---
 

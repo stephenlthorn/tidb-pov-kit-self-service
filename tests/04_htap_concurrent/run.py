@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
 """
-Module 4 — HTAP Concurrent Workload
+Module 4 - HTAP Concurrent Workload
 Runs OLTP writes (TiKV) and analytical queries (TiFlash) simultaneously.
 Demonstrates that analytics do not degrade transactional latency (isolation
 via the TiFlash columnar replica).
 
 Phases:
-  baseline  — OLTP-only for PHASE_SEC seconds (no analytics)
-  htap      — OLTP + analytics concurrently for PHASE_SEC seconds
+  baseline  - OLTP-only for PHASE_SEC seconds (no analytics)
+  htap      - OLTP + analytics concurrently for PHASE_SEC seconds
 Compares p99 OLTP latency between the two phases.
 """
 import sys, os, time, threading
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
 
 import yaml
+from lib.comparison_targets import (
+    comparison_can_run,
+    family_skips_module,
+    normalize_comparison_cfg,
+    target_family,
+    target_label,
+)
 from lib.industry_profiles import resolve_industry_from_cfg
 from lib.result_store import init_db, start_module, end_module, get_latency_stats, log_result
-from lib.db_utils import get_connection, execute_timed
+from lib.db_utils import family_of, get_connection, execute_timed
 from load.load_runner import LoadRunner
 from load.workload_definitions import (
     analytical_workload_for_cfg,
@@ -24,6 +31,7 @@ from load.workload_definitions import (
     build_weighted_pool,
     transactional_workload_for_cfg,
 )
+from load.postgres_workload_definitions import translate_pool
 
 MODULE = "04_htap_concurrent"
 DEFAULT_OLTP_CONC = 32
@@ -55,7 +63,7 @@ def run(cfg: dict):
     cur  = conn.cursor()
     industry = resolve_industry_from_cfg(cfg)
 
-    # Ensure TiFlash replica exists (best-effort — may need a few minutes to replicate)
+    # Ensure TiFlash replica exists (best-effort - may need a few minutes to replicate)
     _ensure_tiflash_replicas(cur, industry.get("htap_tables") or [])
     conn.close()
 
@@ -71,14 +79,14 @@ def run(cfg: dict):
     runner    = LoadRunner(tidb_cfg=cfg["tidb"], counts=counts, module=MODULE)
 
     # ── Phase 1: OLTP-only baseline ──────────────────────────────────────────
-    print("\n  Phase 1 — OLTP-only baseline (no analytics)...")
+    print("\n  Phase 1 - OLTP-only baseline (no analytics)...")
     runner.run(oltp_pool, concurrency=oltp_conc,
                duration_sec=phase_sec, phase="oltp_only")
     stats_baseline = get_latency_stats(MODULE, phase="oltp_only")
     _print_stats("OLTP-only", stats_baseline)
 
     # ── Phase 2: OLTP + Analytics concurrently ───────────────────────────────
-    print("\n  Phase 2 — HTAP: OLTP + Analytics concurrently...")
+    print("\n  Phase 2 - HTAP: OLTP + Analytics concurrently...")
     stop_event = threading.Event()
     anal_thread = threading.Thread(
         target=_run_analytics_continuously,
@@ -97,7 +105,7 @@ def run(cfg: dict):
 
     # ── Analytical query standalone timing ───────────────────────────────────
     anal_stats  = get_latency_stats(MODULE, phase="analytics")
-    print("\n  Phase 3 — OLAP engine benchmark: TiFlash...")
+    print("\n  Phase 3 - OLAP engine benchmark: TiFlash...")
     tiflash_stats = _benchmark_analytics_engine(
         cfg["tidb"], anal_pool, counts,
         phase="analytics_tiflash", read_engines="tiflash,tikv",
@@ -105,13 +113,34 @@ def run(cfg: dict):
     )
     _print_stats("Analytics on TiFlash", tiflash_stats)
 
-    print("\n  Phase 4 — OLAP engine benchmark: TiKV...")
+    print("\n  Phase 4 - OLAP engine benchmark: TiKV...")
     tikv_stats = _benchmark_analytics_engine(
         cfg["tidb"], anal_pool, counts,
         phase="analytics_tikv", read_engines="tikv",
         duration_sec=engine_bench_sec, concurrency=max(1, anal_conc // 2),
     )
     _print_stats("Analytics on TiKV", tikv_stats)
+
+    # Phase 5: Postgres row-store analytics comparison (no TiFlash equivalent).
+    # The point isn't to make PG win - it's to show analytics on a row store.
+    comparison_cfg = normalize_comparison_cfg(cfg.get("comparison_db") or {})
+    comparison_stats = None
+    if (
+        comparison_can_run(comparison_cfg)
+        and target_family(comparison_cfg.get("target", "")) == "postgres"
+        and not family_skips_module("postgres", MODULE)
+    ):
+        comparison_label = comparison_cfg.get("label") or target_label(comparison_cfg["target"])
+        print(f"\n  Phase 5 - OLAP comparison on row store: {comparison_label}...")
+        pg_anal_pool = build_weighted_pool(translate_pool(analytical_workload_for_cfg(cfg, counts)))
+        comparison_stats = _benchmark_comparison_analytics(
+            comparison_cfg, pg_anal_pool, counts,
+            phase="analytics_comparison",
+            duration_sec=engine_bench_sec,
+            concurrency=max(1, anal_conc // 2),
+            db_label=comparison_label,
+        )
+        _print_stats(f"Analytics on {comparison_label}", comparison_stats)
     htap_conn   = get_connection(cfg["tidb"])
     htap_cur    = htap_conn.cursor()
     tiflash_ok  = _check_tiflash_replication(htap_cur)
@@ -130,6 +159,7 @@ def run(cfg: dict):
         "analytics":    anal_stats,
         "analytics_tiflash": tiflash_stats,
         "analytics_tikv": tikv_stats,
+        "analytics_comparison": comparison_stats,
         "p99_degradation_pct": round(degradation, 1),
         "tiflash_replicated": tiflash_ok,
     }
@@ -246,6 +276,55 @@ def _benchmark_analytics_engine(
     stop_event.set()
     thread.join(timeout=10)
     return get_latency_stats(MODULE, phase=phase)
+
+
+def _run_comparison_analytics_continuously(cfg, pool, concurrency, stop_event,
+                                           counts, phase, db_label):
+    """Mirror of _run_analytics_continuously for an arbitrary comparison DB.
+    No tidb_isolation_read_engines pragma - the comparison DB always reads
+    from its single (row) store."""
+    import concurrent.futures
+    from load.workload_definitions import sample_query
+
+    def worker(_):
+        conn = get_connection(cfg)
+        cur = conn.cursor()
+        while not stop_event.is_set():
+            sql, params_fn, qtype = sample_query(pool)
+            params = params_fn(counts) if params_fn else ()
+            res = execute_timed(cur, sql, params)
+            log_result(
+                module=MODULE,
+                latency_ms=res["latency_ms"],
+                success=res["success"],
+                phase=phase,
+                query_type=qtype,
+                db_label=db_label,
+            )
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
+        futures = [ex.submit(worker, i) for i in range(concurrency)]
+        for f in concurrent.futures.as_completed(futures):
+            pass
+
+
+def _benchmark_comparison_analytics(cfg, pool, counts, phase, duration_sec,
+                                     concurrency, db_label):
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_run_comparison_analytics_continuously,
+        args=(cfg, pool, concurrency, stop_event, counts, phase, db_label),
+        daemon=True,
+    )
+    thread.start()
+    time.sleep(max(5, duration_sec))
+    stop_event.set()
+    thread.join(timeout=10)
+    return get_latency_stats(MODULE, phase=phase, db_label=db_label)
 
 
 def _print_stats(label, s):

@@ -1,5 +1,5 @@
 """
-load_runner.py — Core load generator for the TiDB Cloud PoV Kit.
+load_runner.py - Core load generator for the TiDB Cloud PoV Kit.
 
 Runs a timed concurrent workload against TiDB (and optionally a comparison DB),
 logging every transaction result to results/results.db.
@@ -17,7 +17,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from lib.db_utils import get_connection
+from lib.db_utils import family_of, get_connection
 from lib.result_store import log_results_batch
 
 FLUSH_EVERY = 500   # rows buffered before batch insert to SQLite
@@ -77,6 +77,14 @@ class LoadRunner:
             with flush_lock:
                 log_results_batch(rows)
 
+        # Pre-build a per-family pool. TiDB and MySQL-family comparisons use
+        # the original MySQL-dialect pool; postgres-family comparisons use the
+        # translated pool produced by load.postgres_workload_definitions.
+        pools_by_family = {"mysql": workload_pool}
+        if self.comparison_cfg and family_of(self.comparison_cfg) == "postgres":
+            from load.postgres_workload_definitions import translate_pool
+            pools_by_family["postgres"] = translate_pool(workload_pool)
+
         def worker(db_label: str, cfg: dict):
             import random
             from load.workload_definitions import sample_query
@@ -85,9 +93,10 @@ class LoadRunner:
             conn = get_connection(cfg)
             cur = conn.cursor()
             local_buf = []
+            pool = pools_by_family.get(family_of(cfg), workload_pool)
 
             while not self._stop_event.is_set() and time.time() < end_ts:
-                sql, params_fn, qt = sample_query(workload_pool)
+                sql, params_fn, qt = sample_query(pool)
                 try:
                     params = params_fn(self.counts)
                 except Exception:
@@ -119,10 +128,14 @@ class LoadRunner:
                 pass
 
         # Launch workers
+        tidb_active = bool(self.tidb_cfg)
         futures = []
-        with ThreadPoolExecutor(max_workers=concurrency * (2 if self.comparison_cfg else 1)) as ex:
-            for _ in range(concurrency):
-                futures.append(ex.submit(worker, "tidb", self.tidb_cfg))
+        active_sides = (1 if tidb_active else 0) + (1 if self.comparison_cfg else 0)
+        active_sides = max(active_sides, 1)
+        with ThreadPoolExecutor(max_workers=concurrency * active_sides) as ex:
+            if tidb_active:
+                for _ in range(concurrency):
+                    futures.append(ex.submit(worker, "tidb", self.tidb_cfg))
             if self.comparison_cfg:
                 for _ in range(concurrency):
                     futures.append(ex.submit(worker, self.comparison_label, self.comparison_cfg))
