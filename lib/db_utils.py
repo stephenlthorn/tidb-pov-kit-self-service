@@ -164,7 +164,8 @@ def execute_timed(cursor, sql: str, params=None) -> dict:
 def ping(cfg: dict) -> tuple[bool, str]:
     """Test connectivity. Returns (ok, message)."""
     try:
-        conn = get_connection(cfg)
+        ping_cfg = {k: v for k, v in cfg.items() if k != "database"}
+        conn = get_connection(ping_cfg)
         cur = conn.cursor()
         cur.execute("SELECT version()")
         version = cur.fetchone()[0]
